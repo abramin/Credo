@@ -1,6 +1,5 @@
 package service
 
-// generate testify test scaffold for Service use gomock for store
 //go:generate mockgen -source=service.go -destination=mocks/mocks.go -package=mocks UserStore,SessionStoreimport
 import (
 	"context"
@@ -8,8 +7,8 @@ import (
 	"id-gateway/internal/auth/service/mocks"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 )
 
 func TestService_Authorize(t *testing.T) {
@@ -19,8 +18,7 @@ func TestService_Authorize(t *testing.T) {
 	mockUserStore := mocks.NewMockUserStore(ctrl)
 	mockSessionStore := mocks.NewMockSessionStore(ctrl)
 
-	flow := NewOIDCFlow()
-	service := NewService(flow, mockUserStore, mockSessionStore)
+	service := NewService(mockUserStore, mockSessionStore)
 
 	req := models.AuthorizationRequest{
 		ClientID:    "client-123",
@@ -29,7 +27,7 @@ func TestService_Authorize(t *testing.T) {
 		State:       "xyz",
 	}
 
-	result, err := service.Authorize(context.Background(), req)
+	result, err := service.Authorize(context.Background(), &req)
 	assert.NoError(t, err)
 	assert.Equal(t, "todo-session-id", result.SessionID)
 	assert.Equal(t, req.RedirectURI, result.RedirectURI)

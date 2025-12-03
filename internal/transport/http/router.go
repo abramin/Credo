@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	pkgerrors "id-gateway/pkg/errors"
+	httpErrors "id-gateway/pkg/http-errors"
 )
 
 // Handler is the thin HTTP layer. It should delegate to domain services without
@@ -21,10 +21,6 @@ func NewHandler(regulatedMode bool) *Handler {
 // returns a JSON stub until real handlers are implemented.
 func NewRouter(h *Handler) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/authorize", method(http.MethodPost, h.handleAuthorize))
-	mux.HandleFunc("/auth/consent", method(http.MethodPost, h.handleConsent))
-	mux.HandleFunc("/auth/token", method(http.MethodPost, h.handleToken))
-	mux.HandleFunc("/auth/userinfo", method(http.MethodGet, h.handleUserInfo))
 
 	mux.HandleFunc("/vc/issue", method(http.MethodPost, h.handleVCIssue))
 	mux.HandleFunc("/vc/verify", method(http.MethodPost, h.handleVCVerify))
@@ -60,11 +56,11 @@ func (h *Handler) notImplemented(w http.ResponseWriter, endpoint string) {
 // writeError centralizes domain error translation to HTTP responses for future
 // handlers. Keeping it here ensures consistent JSON error envelopes.
 func writeError(w http.ResponseWriter, err error) {
-	gw, ok := err.(pkgerrors.GatewayError)
+	gw, ok := err.(httpErrors.GatewayError)
 	status := http.StatusInternalServerError
-	code := string(pkgerrors.CodeInternal)
+	code := string(httpErrors.CodeInternal)
 	if ok {
-		status = pkgerrors.ToHTTPStatus(gw.Code)
+		status = httpErrors.ToHTTPStatus(gw.Code)
 		code = string(gw.Code)
 	}
 	w.Header().Set("Content-Type", "application/json")

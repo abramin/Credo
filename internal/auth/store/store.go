@@ -16,6 +16,7 @@ var (
 type UserStore interface {
 	Save(ctx context.Context, user models.User) error
 	FindByID(ctx context.Context, id string) (models.User, error)
+	FindUserByEmail(ctx context.Context, email string) (models.User, error)
 }
 
 type SessionStore interface {
