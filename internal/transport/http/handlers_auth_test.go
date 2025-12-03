@@ -21,7 +21,7 @@ type AuthHandlerSuite struct {
 	suite.Suite
 	handler     *AuthHandler
 	ctx         context.Context
-	router      http.ServeMux
+	router      *http.ServeMux
 	mockService *mocks.MockAuthService
 	ctrl        *gomock.Controller
 }
@@ -33,7 +33,7 @@ func (s *AuthHandlerSuite) SetupSuite() {
 	s.handler = NewAuthHandler(s.mockService)
 	mux := http.NewServeMux()
 	s.handler.Register(mux)
-	s.router = *mux
+	s.router = mux
 }
 func (s *AuthHandlerSuite) TearDownTest() {
 	s.ctrl.Finish()
@@ -65,6 +65,14 @@ func (s *AuthHandlerSuite) TestService_Authorize() {
 		s.Require().NoError(json.NewDecoder(rr.Body).Decode(&got))
 		s.Equal(expectedResp.SessionID, got["session_id"])
 		s.Equal(expectedResp.RedirectURI, got["redirect_uri"])
+	})
+
+	s.T().Run("returns 400 when request is invalid", func(t *testing.T) {
+		// TODO: implement invalid email / bad payload scenario
+	})
+
+	s.T().Run("returns 500 when service fails", func(t *testing.T) {
+		// TODO: implement auth service/store failure scenario
 	})
 }
 
