@@ -3,7 +3,7 @@ package decision
 import (
 	"time"
 
-	"id-gateway/internal/auth"
+	authModel "id-gateway/internal/auth/models"
 	"id-gateway/internal/evidence/registry"
 	"id-gateway/internal/evidence/vc"
 )
@@ -35,7 +35,7 @@ type DecisionInput struct {
 
 // DerivedIdentityFromCitizen strips PII while producing attributes required for
 // decisions in regulated mode.
-func DerivedIdentityFromCitizen(user auth.User, citizen registry.CitizenRecord) DerivedIdentity {
+func DerivedIdentityFromCitizen(user authModel.User, citizen registry.CitizenRecord) DerivedIdentity {
 	isOver18 := deriveIsOver18(citizen.DateOfBirth)
 	return DerivedIdentity{
 		PseudonymousID: user.ID, // treat as pseudonymous identifier; avoid emails/names.

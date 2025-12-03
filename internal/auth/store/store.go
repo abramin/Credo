@@ -1,8 +1,9 @@
-package auth
+package store
 
 import (
 	"context"
 
+	"id-gateway/internal/auth/models"
 	pkgerrors "id-gateway/pkg/errors"
 )
 
@@ -13,11 +14,11 @@ var (
 )
 
 type UserStore interface {
-	Save(ctx context.Context, user User) error
-	FindByID(ctx context.Context, id string) (User, error)
+	Save(ctx context.Context, user models.User) error
+	FindByID(ctx context.Context, id string) (models.User, error)
 }
 
 type SessionStore interface {
-	Save(ctx context.Context, session Session) error
-	FindByID(ctx context.Context, id string) (Session, error)
+	Save(ctx context.Context, session models.Session) error
+	FindByID(ctx context.Context, id string) (models.Session, error)
 }

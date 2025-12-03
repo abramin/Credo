@@ -1,4 +1,4 @@
-package auth
+package models
 
 // User captures the primary identity tracked by the gateway. Storage of the
 // actual user record lives behind the UserStore interface.
