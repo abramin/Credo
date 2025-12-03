@@ -2,29 +2,28 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-	httpapi "id-gateway/internal/http"
+	"id-gateway/internal/platform/config"
+	"id-gateway/internal/platform/httpserver"
+	"id-gateway/internal/platform/logger"
+	httptransport "id-gateway/internal/transport/http"
 )
 
 // main wires high-level dependencies, exposes the HTTP router, and keeps the
-// server lifecycle small. Business logic lives in internal/domain and friends.
+// server lifecycle small. Business logic lives in internal services packages.
 func main() {
-	cfg := loadConfig()
+	cfg := config.FromEnv()
+	log := logger.New()
 
 	// TODO: introduce real services when domain logic is implemented.
-	handler := httpapi.NewHandler(cfg.RegulatedMode)
-	router := httpapi.NewRouter(handler)
+	handler := httptransport.NewHandler(cfg.RegulatedMode)
+	router := httptransport.NewRouter(handler)
 
-	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           router,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := httpserver.New(cfg.Addr, router)
 
 	log.Printf("starting id-gateway on %s", cfg.Addr)
 
@@ -43,23 +42,5 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("graceful shutdown failed: %v", err)
-	}
-}
-
-type Config struct {
-	Addr          string
-	RegulatedMode bool
-}
-
-// loadConfig keeps configuration concerns out of main for readability.
-func loadConfig() Config {
-	addr := os.Getenv("ID_GATEWAY_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
-	regulated := os.Getenv("REGULATED_MODE") == "true"
-	return Config{
-		Addr:          addr,
-		RegulatedMode: regulated,
 	}
 }

@@ -1,175 +1,60 @@
-Got it. Here’s the **updated Cursor backend scaffold prompt** with the privacy, consent, audit, and regulated-mode features baked in. It stays concise but complete enough for Cursor to generate a proper first scaffold.
+AGENTS.md
+Dev environment tips
 
-If you want, next step can be the fully generated folder structure and the initial code.
+Use go mod tidy after adding or removing imports to keep modules clean.
 
----
+Run go work use ./... if you're working with a multi-module workspace.
 
-# Cursor Prompt (Backend Scaffold with Regulated-Mode Features)
+Use make dev (or whatever wrapper you add) to start the server with live reload via air or fresh.
 
-**SYSTEM PURPOSE**
-Generate the backend for a small identity-verification gateway.
-The service handles OIDC-style login, purpose-based consent, registry checks, verifiable credential issuance, and a decision engine.
-It must include built-in demonstrations of regulated-domain concerns: privacy, consent, minimal data exposure, retention, and auditability.
+To navigate quickly, use grep -R "<symbol>" ./internal or go to definition in your editor.
 
----
+Keep tools updated: go install golang.org/x/tools/...@latest, go install github.com/cosmtrek/air@latest.
 
-# Core Architecture
+Code style tips
 
-Build a Go backend with these layers:
+Handlers should stay thin: decode input → call service → encode output.
 
-### 1. `/cmd/server`
+Services contain business logic; do not put logic in HTTP handlers.
 
-• Main entry, config loading, DI setup.
-• Support `REGULATED_MODE=true` environment variable.
-• When regulated mode is on: stricter logging, forced consent, data minimisation, retention TTL enforcement.
+Stores use small interfaces and return typed errors.
 
-### 2. `/internal/http`
+Prefer returning structs, not pointers, unless mutation or nil has meaning.
 
-• Handlers only, no logic.
-• Routes:
+One package per responsibility: http, domain, storage, registry, vc, audit.
 
-* POST `/auth/authorize`
-* POST `/auth/consent`
-* POST `/auth/token`
-* GET `/auth/userinfo`
-* POST `/vc/issue`
-* POST `/vc/verify`
-* POST `/registry/citizen`
-* POST `/registry/sanctions`
-* POST `/decision/evaluate`
-* GET `/me/data-export`
-* DELETE `/me`
-  • Automatic mapping of domain errors to HTTP responses.
-  • JSON only.
+Testing instructions
 
-### 3. `/internal/domain`
+Run go test ./... from the repo root before every commit.
 
-Pure business logic.
-Include:
-• OIDC mock flows
-• Consent model: purpose-based, timestamped, revocable, required before registry or VC operations
-• Data minimisation transformations (e.g. full DOB → derived `isOver18`)
-• VC lifecycle logic
-• Registry-check orchestration
-• Decision engine (pass, pass_with_conditions, fail)
-• Data retention policies
-• Audit events emitted here, not at HTTP layer.
+To run only one package: go test ./internal/<package>.
 
-### 4. `/internal/consent`
+To run a single test: go test -run "<TestName>" ./internal/<package>.
 
-Explicit consent objects and services:
-• `ConsentRecord` with purpose, granted_at, expires_at, revoked_at.
-• Enforce purpose binding.
-• Evaluate whether a given operation requires consent.
+Use table tests for variants; use BDD-style naming for behaviours.
 
-### 5. `/internal/audit`
+Add tests whenever you touch a service or data structure.
 
-• Append-only audit service.
-• Structured entries: userID, action, purpose, timestamp, requesting client, data subject, decision+reason.
-• In-memory sink first, interface-based.
+Avoid sleeps in tests; use fake clocks or deterministic inputs.
 
-### 6. `/internal/storage`
+Use t.Helper() in shared test functions.
 
-Interface-driven stores:
-• UserStore
-• SessionStore
-• ConsentStore
-• VCStore
-• RegistryCacheStore
-• AuditStore
-Each with a basic in-memory implementation.
+Linting & formatting
 
-### 7. `/internal/registry`
+Always run go fmt ./... before committing.
 
-Mocked registries:
-• `CitizenRegistryClient` returns deterministic record containing PII.
-• `SanctionsRegistryClient` returns PEP/sanctions flags.
-Include artificial latency.
-Include optional “restricted data fields” removed when regulated mode is on.
+Use golangci-lint run if you add a linter config (recommended).
 
-### 8. `/internal/oidc`
+Fix import ordering with goimports -w . if needed.
 
-Minimal OIDC mock:
-• authorize
-• consent
-• token
-• userinfo
-Keep this simple and clear.
+PR instructions
 
-### 9. `/internal/vc`
+Title format: [go] <summary>
 
-Simple JSON-LD style VC objects.
-Include mock signature + mock verification.
-Support revocation.
+Must pass: go fmt, go vet, go test ./....
 
-### 10. `/internal/decision`
+Keep diffs small and scoped to one logical change.
 
-Combine identity + registry outputs + VC claims.
-Return: `pass` | `pass_with_conditions` | `fail`.
+Include tests for new behaviour; update tests if behaviour changes.
 
-### 11. `/internal/policy`
-
-Retention windows (e.g. delete registry data after X minutes).
-Data classification comments or tags on structs.
-
-### 12. `/pkg/errors`
-
-Typed errors (InvalidConsent, MissingConsent, PolicyViolation, RegistryTimeout, etc).
-
-### 13. `/pkg/testutil`
-
-BDD helpers.
-
-### 14. `/test`
-
-Include clear Given-When-Then tests such as:
-• Given a user logs in, When they approve consent for future verification, Then consent is recorded.
-• Given regulated mode is on, When calling citizen registry, Then only minimal fields are stored.
-• Given user is verified, When requesting VC issuance, Then a VC is issued and an audit log entry created.
-• etc.
-
----
-
-# Regulated-Mode Features to Implement
-
-1. **Purpose-Based Consent Enforcement**
-   Operations (registry, VC issue, decision) require explicit consent with matching purpose.
-
-2. **Data Minimisation**
-   When `REGULATED_MODE=true`:
-   • citizen registry returns only needed fields
-   • domain layer strips identifiers before decision engine
-   • VC issuance uses derived attributes instead of raw PII
-
-3. **Audit Logging**
-   Emit structured audit logs for:
-   • login
-   • consent granted/revoked
-   • registry queries
-   • VC issuance/verification
-   • decisions
-   • data export/deletion
-
-4. **Data Retention**
-   In-memory TTL deletion for sensitive registry data.
-   Document retention windows in code comments.
-
-5. **User Rights**
-   • GET `/me/data-export` returns all data tied to the subject
-   • DELETE `/me` deletes user records, sessions, consent, VCs
-
-6. **Clear Struct Classification**
-   Add comments or struct tags to highlight PII and derived fields.
-
----
-
-# Clean Code Expectations
-
-• Functions should do one thing and have names that reflect intent.
-• Domain logic must be pure and testable.
-• No business rules in HTTP handlers.
-• No circular dependencies.
-• Small, explicit interfaces.
-• BDD-style test naming everywhere.
-* Use gomock for test mocks
-* Use sqlc for any sql 
+Avoid mixing refactors with feature changes.

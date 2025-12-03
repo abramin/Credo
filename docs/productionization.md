@@ -54,7 +54,7 @@ Authenticity and tamper-proofing of credentials is mandatory in real digital ID 
 
 ---
 
-## 4. Security Hardening (Required in Identity Systems)
+## 4. Security Hardening 
 
 **Must-have improvements:**
 
@@ -172,7 +172,7 @@ Regulated environments require high availability and predictable behaviour durin
 
 ---
 
-## 11. Compliance Alignment (Optional but impressive)
+## 11. Compliance Alignment
 
 To signal deep alignment with identity systems:
 

@@ -5,14 +5,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	httpapi "id-gateway/internal/http"
+	httptransport "id-gateway/internal/transport/http"
 	"id-gateway/pkg/testutil"
 )
 
 func TestRouterScaffold(t *testing.T) {
 	testutil.Given(t, "the HTTP router", func(t *testing.T) {
-		handler := httpapi.NewHandler(false)
-		router := httpapi.NewRouter(handler)
+		handler := httptransport.NewHandler(false)
+		router := httptransport.NewRouter(handler)
 
 		testutil.When(t, "calling POST /auth/authorize", func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/auth/authorize", nil)

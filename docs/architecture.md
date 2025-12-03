@@ -1,20 +1,33 @@
 # Identity Verification Gateway - Architecture Documentation
 
-This document describes the architecture of the Identity Verification Gateway: a small Go service that simulates regulated identity verification flows, consent, registry checks, and verifiable credentials.
+This document describes the architecture of the Identity Verification Gateway: a Go service that simulates regulated identity verification flows, consent, registry checks, and verifiable credentials.
+
+The runtime is a single process (modular monolith), but internal packages are structured along clear service boundaries so that it could be split into microservices later.
 
 ## Table of Contents
 
 * [High Level Architecture](#high-level-architecture)
+* [Service Boundaries inside the Monolith](#service-boundaries-inside-the-monolith)
+* [Package Layout](#package-layout)
 * [User Scenarios](#user-scenarios)
 * [Component Breakdown](#component-breakdown)
+
+  * [Auth](#auth)
+  * [Consent](#consent)
+  * [Evidence](#evidence)
+  * [Decision](#decision)
+  * [Audit](#audit)
+  * [Transport HTTP](#transport-http)
+  * [Platform](#platform)
 * [Core Flows](#core-flows)
 
-  * [Login And Consent Flow](#login-and-consent-flow)
-  * [Verification And VC Issuance](#verification-and-vc-issuance)
-  * [Decision Evaluation Flow](#decision-evaluation-flow)
-  * [Data Export And Deletion](#data-export-and-deletion)
-* [Data Model](#data-model)
+  * [Login and Consent](#login-and-consent)
+  * [Verification and VC Issuance](#verification-and-vc-issuance)
+  * [Decision Evaluation](#decision-evaluation)
+  * [Data Export and Deletion](#data-export-and-deletion)
+* [Data Model Overview](#data-model-overview)
 * [Regulated Mode Behaviour](#regulated-mode-behaviour)
+* [Productionisation Considerations](#productionisation-considerations)
 * [Design Rationale](#design-rationale)
 
 ---
@@ -23,496 +36,603 @@ This document describes the architecture of the Identity Verification Gateway: a
 
 ```text
                  ┌────────────────────────────┐
-                 │        Web Client          │
-                 │  (Demo UI or partner app)  │
+                 │       Client Apps          │
+                 │  Demo UI or partner apps   │
                  └─────────────┬──────────────┘
-                               │ HTTPS
+                               │ HTTP
                                ▼
                  ┌────────────────────────────┐
-                 │        HTTP API Layer      │
-                 │  routing, DTOs, handlers   │
+                 │      transport/http        │
+                 │    routing and handlers    │
                  └─────────────┬──────────────┘
-                               │ calls
+                               │ calls into services
                                ▼
-                 ┌────────────────────────────┐
-                 │       Domain Services      │
-                 │  auth, consent, registry   │
-                 │  vc, decision, policy      │
-                 └─────────────┬──────────────┘
-                               │ interfaces
-                               ▼
-       ┌────────────────────────┴───────────────┐
-       │                                        │
-┌──────────────┐                        ┌────────────────┐
-│ Storage      │                        │ External Mocks │
-│ in memory    │                        │ (Registries)   │
-│ Users,       │◄─────────────┐         │ Citizen,       │
-│ Sessions,    │              │         │ Sanctions      │
-│ Consent, VCs │              │         └────────────────┘
-│ Audit, Cache │              │ HTTP
-└──────────────┘              │
-                              │ audit events
-                              ▼
-                    ┌────────────────────┐
-                    │   Audit Sink       │
-                    │  structured logs   │
-                    └────────────────────┘
+      ┌─────────────── internal (same process) ─────────────────┐
+      │                                                         │
+      │  ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌────────┐ │
+      │  │  auth   │  │  consent  │  │ evidence  │  │decision│ │
+      │  │ users   │  │ purposes  │  │ registry  │  │ engine │ │
+      │  │ sessions│  │ lifecycle │  │ vc        │  │ rules  │ │
+      │  └────┬────┘  └─────┬─────┘  └─────┬─────┘  └────┬───┘ │
+      │       │             │               │             │     │
+      │       └──────────┬──┴───────────────┴─────────────┘     │
+      │                  ▼                                      │
+      │               ┌───────┐                                 │
+      │               │ audit │                                 │
+      │               │ queue │                                 │
+      │               └──┬────┘                                 │
+      │                  ▼                                      │
+      │              storage layer                              │
+      └─────────────────────────────────────────────────────────┘
+
+                       ▼
+                Observability, logs
 ```
 
-Key principles:
+Everything runs in one binary, but each internal package has a clear responsibility and limited dependencies.
 
-1. Clear separation between HTTP, domain logic, storage, and external systems.
-2. Domain layer owns consent, privacy, and policy rules.
-3. All sensitive operations emit structured audit events.
-4. Regulated mode can tighten behaviour without changing high level design.
+---
+
+## Service Boundaries inside the Monolith
+
+If this system were split into microservices, reasonable boundaries would be:
+
+1. **Auth Service**
+   Users and sessions, OIDC lite login, tokens, userinfo.
+
+2. **Consent and Policy Service**
+   Purpose based consent, consent lifecycle, policy rules.
+
+3. **Evidence Service**
+   Registry checks (citizen, PEP sanctions), verifiable credential issuance and verification.
+
+4. **Decision Service**
+   Decision engine that combines evidence, purpose, and context.
+
+5. **Audit Service**
+   Append only audit log, queue consumer, durable audit storage.
+
+In the monolith, each of these is a package with a narrow API. The process is single, the boundaries are logical.
+
+---
+
+## Package Layout
+
+Suggested layout aligned with those boundaries:
+
+```text
+internal/
+  platform/
+    config/         # configuration loading
+    logger/         # logging abstraction
+    httpserver/     # shared HTTP server setup
+  auth/
+    service.go      # Users, sessions, tokens
+    store.go        # UserStore, SessionStore
+    models.go
+  consent/
+    service.go      # Grant, revoke, RequireConsent
+    store.go
+    models.go
+  evidence/
+    registry/
+      client_citizen.go    # citizen registry mock
+      client_sanctions.go  # sanctions registry mock
+      service.go           # RegistryService, caching, minimisation
+      store.go             # RegistryCacheStore
+      models.go
+    vc/
+      service.go           # VCService
+      store.go             # VCStore
+      models.go
+  decision/
+    service.go      # Evaluate decisions
+    store.go        # DecisionStore
+    models.go
+  audit/
+    publisher.go    # queue or channel publisher
+    worker.go       # background consumer
+    store.go        # AuditStore
+    models.go
+  transport/
+    http/
+      router.go
+      handlers_auth.go
+      handlers_consent.go
+      handlers_evidence.go
+      handlers_decision.go
+      handlers_me.go
+cmd/
+  server/
+    main.go         # wires everything together
+```
+
+Rules of thumb:
+
+* `transport/http` depends on services only, not on storage details.
+* Services depend on their own stores and on other services through interfaces, not on handlers.
+* `audit` is a shared dependency all services can call to emit events.
+* `platform` provides cross cutting plumbing such as config and logging.
 
 ---
 
 ## User Scenarios
 
-### Scenario 1 - Age Verification For A Fintech Onboarding
+The main user scenarios are unchanged, but thinking in terms of the new boundaries helps.
 
-1. A user initiates onboarding in a fintech app that uses this gateway.
-2. The app redirects to the gateway's login and consent screen.
-3. User authenticates and grants consent for purpose `age_verification`.
-4. Gateway calls the citizen registry mock, obtains full record including DOB.
-5. Domain logic computes `is_over_18` and discards the raw date in regulated mode.
-6. A verifiable credential "AgeOver18" is issued to the user.
-7. A decision evaluation returns `pass` for the onboarding request.
-8. All steps are logged as audit events.
+### Scenario 1 - Fintech age verification for onboarding
 
-Demonstrates: regulated identity flow, consent, data minimisation, VC, decision.
+* Auth service logs the user in and issues tokens.
+* Consent service records consent for `age_verification`.
+* Evidence service calls citizen registry, derives `is_over_18`, issues an `AgeOver18` VC.
+* Decision service uses registry evidence and VC to return `pass`.
+* Audit service records login, consent, registry query, VC issuance, and decision.
 
----
+### Scenario 2 - Sanctions check for high risk operation
 
-### Scenario 2 - Sanctions Check Fails For High Risk Operation
+* Auth service identifies current user via access token.
+* Consent service verifies consent for `sanctions_screening`.
+* Evidence service calls sanctions registry and returns `IsPep`, `IsSanctioned`.
+* Decision service returns `fail` or `pass_with_conditions` based on policy.
+* Audit service records the decision with reason.
 
-1. A logged in user attempts a "high value transfer" in the client app.
-2. The client calls `/decision/evaluate` with a purpose `sanctions_screening`.
-3. Gateway verifies that consent for this purpose exists and is not expired.
-4. Sanctions registry mock returns `pep_match=true`.
-5. Decision engine returns `fail` with reason "sanctions_screening_failed".
-6. Audit log includes user, purpose, decision, and justification.
+### Scenario 3 - Data export and deletion for user rights
 
-Demonstrates: regulated domain risk control, purpose based consent, decision reasoning.
-
----
-
-### Scenario 3 - Data Export And Right To Be Forgotten
-
-1. User visits the settings section in the demo UI.
-2. They request a data export via `/me/data-export`.
-3. Gateway aggregates data for that user from user, consent, VC, registry cache, and decisions.
-4. User inspects the JSON export.
-5. User requests deletion via `/me`.
-6. Gateway deletes or anonymises all records and emits an `user_data_deleted` audit event.
-
-Demonstrates: GDPR style rights, lifecycle control, auditability.
+* Auth service identifies user.
+* Consent, evidence, decision, and audit services expose read methods via their stores to gather all data for the user.
+* Transport layer exposes `/me/data-export` and `/me` on top of these services.
+* Audit service records `data_exported` and `user_data_deleted` events.
 
 ---
 
 ## Component Breakdown
 
-### 1. HTTP API Layer (`internal/http`)
+### Auth
 
-Responsibilities:
+**Responsibilities**
 
-* Define routes and DTOs.
-* Parse and validate requests.
-* Map domain errors to HTTP responses.
-* Never contain business rules about consent or decisions.
+* Manage `User` and `Session` objects.
+* Implement minimal OIDC like behaviour: authorize, token, userinfo.
+* Provide a helper to resolve the current user from an access token for other services.
 
-Key routes:
+**Key types**
 
-* Auth and userinfo
+```go
+type User struct {
+    ID          string
+    Email       string
+    DisplayName string
+}
 
-  * `POST /auth/authorize`
-  * `POST /auth/consent`
-  * `POST /auth/token`
-  * `GET /auth/userinfo`
+type Session struct {
+    ID        string
+    UserID    string
+    ClientID  string
+    ExpiresAt time.Time
+}
+```
 
-* Verification and registry
+**Clients**
 
-  * `POST /registry/citizen`
-  * `POST /registry/sanctions`
-
-* VC lifecycle
-
-  * `POST /vc/issue`
-  * `POST /vc/verify`
-
-* Decision and user rights
-
-  * `POST /decision/evaluate`
-  * `GET /me/data-export`
-  * `DELETE /me`
-
-Error behaviour:
-
-* 400 for validation failures.
-* 403 for missing or invalid consent.
-* 422 for business rule violations that the client can fix.
-* 500 for internal failures.
+* Called by `transport/http` for login and token endpoints.
+* Called by `transport/http` to resolve current user for any authenticated endpoints.
 
 ---
 
-### 2. Domain Services (`internal/domain` and subpackages)
+### Consent
 
-Subcomponents:
+**Responsibilities**
 
-* `auth`
+* Model purpose based consent as first class data.
+* Enforce consent requirements before sensitive operations.
+* Provide a stable enforcement API used by other services.
 
-  * Manages mock OIDC sessions, tokens, and user identity attributes.
-  * Provides `GetCurrentUser(ctx)` that the rest of the domain uses.
+**Key types**
 
-* `consent`
+```go
+type ConsentRecord struct {
+    ID        string
+    UserID    string
+    Purpose   string
+    GrantedAt time.Time
+    ExpiresAt *time.Time
+    RevokedAt *time.Time
+}
+```
 
-  * Models `ConsentRecord` with purpose, granted_at, expires_at, revoked_at.
-  * Provides `RequireConsent(userID, purpose)` that returns typed errors if consent is missing.
+**Services**
 
-* `registry`
+* `GrantPurposes(userID, purposes)`
+* `RequireConsent(userID, purpose)` returns typed errors `ErrMissingConsent`, `ErrConsentExpired`.
 
-  * Orchestrates calls to citizen and sanctions clients.
-  * Applies regulated mode rules on returned data (minimisation).
-  * Uses a cache store with TTL.
+**Clients**
 
-* `vc`
-
-  * Manages VC issuance and verification for simple credential types such as `AgeOver18`.
-  * Stores and revokes credentials via VCStore.
-
-* `decision`
-
-  * Combines identity attributes, registry outputs, and VCs to return `DecisionResult`.
-  * Examples: `pass`, `pass_with_conditions`, `fail`.
-  * Returns `reason` and optional `conditions[]`.
-
-* `policy`
-
-  * Holds retention rules and mapping from purposes to required checks.
-  * Example: `age_verification` requires citizen registry, `sanctions_screening` requires sanctions registry.
-
-Each service:
-
-* Depends only on interfaces of storage and external clients.
-* Emits domain level audit events, not raw logs.
+* Called by `transport/http` on `/auth/consent`.
+* Called by `evidence` and `decision` services to enforce requirements.
 
 ---
 
-### 3. Storage Layer (`internal/storage`)
+### Evidence
 
-In memory implementations initially, with clear interfaces.
+Evidence is split into `registry` and `vc`.
 
-Stores:
+#### Registry
 
-* `UserStore` - Users and basic profile.
-* `SessionStore` - OIDC sessions, tokens, expiry.
-* `ConsentStore` - Consent records keyed by user and purpose.
-* `VCStore` - Stored verifiable credentials and revocation status.
-* `RegistryCacheStore` - Cached registry snapshots with TTL.
-* `DecisionStore` - Optional, store previous decisions for audit.
-* `AuditStore` - In memory append only list or log writer.
+**Responsibilities**
 
-Each store interface is intentionally small and speaks in domain types. This keeps it trivial to swap to Postgres if you want later.
+* Integrate with citizen and sanctions registry mocks.
+* Cache results with TTL.
+* Apply minimisation when regulated mode is active.
+
+**Key types**
+
+```go
+type CitizenRecord struct {
+    FullName  string
+    DOB       time.Time
+    IsOver18  bool
+}
+
+type SanctionsRecord struct {
+    IsPep        bool
+    IsSanctioned bool
+    RiskScore    int
+}
+```
+
+**Service**
+
+* `GetCitizenRecord(user)`
+* `GetSanctionsRecord(user)`
+
+This service is the only place that knows about external registry details.
+
+#### VC
+
+**Responsibilities**
+
+* Issue and verify simple verifiable credentials such as `AgeOver18`.
+* Store and revoke credentials.
+
+**Key types**
+
+```go
+type VerifiableCredential struct {
+    ID       string
+    UserID   string
+    Type     string
+    Issuer   string
+    IssuedAt time.Time
+    Claims   map[string]any
+    Revoked  bool
+}
+```
+
+**Service**
+
+* `IssueAgeOver18VC(user, citizenRecord)`
+* `Verify(vcID)`
 
 ---
 
-### 4. External Registry Clients (`internal/registry/client`)
+### Decision
 
-Two mocked external systems:
+**Responsibilities**
 
-* `CitizenRegistryClient`
+* Combine purpose, user, evidence, and context into a decision.
+* Encapsulate business rules for `age_verification`, `sanctions_screening`, and any other purposes.
 
-  * Returns records that include PII such as full name and date of birth.
-  * Introduces configurable artificial latency and occasional failure codes.
+**Key types**
 
-* `SanctionsRegistryClient`
+```go
+type DecisionStatus string
 
-  * Returns flags such as `pep_match`, `sanctions_listed`.
-  * Also simulates latency and errors.
+const (
+    DecisionPass              DecisionStatus = "pass"
+    DecisionPassWithConditions               = "pass_with_conditions"
+    DecisionFail                             = "fail"
+)
 
-These clients never leak directly into handlers. The domain layer wraps them to apply purpose based and regulated mode rules.
+type Decision struct {
+    ID         string
+    UserID     string
+    Purpose    string
+    Status     DecisionStatus
+    Reason     string
+    Conditions []string
+    CreatedAt  time.Time
+}
+```
+
+**Service**
+
+* `Evaluate(EvaluateInput) (*Decision, error)`
+
+`EvaluateInput` includes `User`, `Purpose`, and a generic `Context` map for client specific information, for example transaction amount.
 
 ---
 
-### 5. Audit Layer (`internal/audit`)
+### Audit
 
-Centralised audit service:
+**Responsibilities**
 
-* Accepts an `AuditEvent` structure from domain services.
-* Appends to in memory store and logs to standard output for now.
-* Events include:
+* Provide a simple API for other services to publish audit events.
+* Decouple publishing from persistence using a queue or Go channel.
+* Persist events in an `AuditStore` and log them.
 
-  * `actor_id` (user or client)
-  * `action` (login, consent_granted, registry_query, vc_issued, decision_made, data_exported, data_deleted)
-  * `purpose` (where relevant)
-  * `subject_id` (who the data relates to)
-  * `decision` and `reason` (if applicable)
-  * `timestamp` and `request_id`.
+**Key types**
 
-This gives you a concrete talking point about auditability in regulated environments.
+```go
+type AuditEvent struct {
+    ID        string
+    ActorID   string
+    SubjectID string
+    Action    string
+    Purpose   string
+    Decision  string
+    Reason    string
+    Timestamp time.Time
+    RequestID string
+}
+```
+
+**Components**
+
+* `AuditPublisher` interface for publishing events.
+* Channel based implementation for the prototype.
+* Worker that drains the channel and writes to `AuditStore`.
+
+**Clients**
+
+* Called by auth, consent, evidence, decision, and transport layers when key actions occur.
+
+---
+
+### Transport HTTP
+
+**Responsibilities**
+
+* Expose REST endpoints.
+* Marshal and unmarshal JSON.
+* Handle errors and HTTP status codes.
+* Call into services only, no business rules.
+
+Key handlers grouped by file, for example:
+
+* `handlers_auth.go` for `/auth/*` endpoints.
+* `handlers_consent.go` for `/auth/consent`.
+* `handlers_evidence.go` for `/vc/*` or registry endpoints if you expose them.
+* `handlers_decision.go` for `/decision/evaluate`.
+* `handlers_me.go` for `/me/data-export` and `/me`.
+
+---
+
+### Platform
+
+**Responsibilities**
+
+* Cross cutting concerns, not domain logic.
+
+Typical contents:
+
+* Config loading (environment variables, flags).
+* Logger initialisation.
+* HTTP server startup and graceful shutdown.
 
 ---
 
 ## Core Flows
 
-### Login And Consent Flow
+The flows are similar to the earlier version, but now you can see clearly which internal services are involved.
+
+### Login and Consent
 
 ```mermaid
 sequenceDiagram
     participant App as Client App
-    participant API as HTTP Layer
-    participant Auth as Auth Service
-    participant Consent as Consent Service
-    participant Audit as Audit Service
+    participant HTTP as transport/http
+    participant Auth as auth
+    participant Consent as consent
+    participant Audit as audit
 
-    App->>API: POST /auth/authorize (login request)
-    API->>Auth: StartAuthSession
-    Auth-->>API: auth_session_id
-    API-->>App: redirect to consent UI with session id
+    App->>HTTP: POST /auth/authorize
+    HTTP->>Auth: StartAuthSession(email, clientID)
+    Auth-->>HTTP: session
+    HTTP->>Audit: Publish(login_started)
+    HTTP-->>App: session_id
 
-    App->>API: POST /auth/consent (session, purposes[])
-    API->>Consent: GrantConsent(user, purposes)
-    Consent->>Audit: Emit consent_granted events
-    Consent-->>API: success
+    App->>HTTP: POST /auth/consent (session_id, purposes[])
+    HTTP->>Auth: GetSession(session_id)
+    Auth-->>HTTP: user
+    HTTP->>Consent: GrantPurposes(userID, purposes)
+    Consent->>Audit: Publish(consent_granted)
+    Consent-->>HTTP: ok
+    HTTP-->>App: success
 
-    App->>API: POST /auth/token (session)
-    API->>Auth: IssueTokens
-    Auth-->>API: id_token, access_token
-    API-->>App: tokens
+    App->>HTTP: POST /auth/token
+    HTTP->>Auth: IssueTokens(session_id)
+    Auth->>Audit: Publish(tokens_issued)
+    Auth-->>HTTP: tokens
+    HTTP-->>App: tokens
 ```
-
-Key points:
-
-* Consent is explicit and purpose based.
-* Tokens are not issued until consent is recorded.
-* Consent grant is auditable.
 
 ---
 
-### Verification And VC Issuance
+### Verification and VC Issuance
 
 ```mermaid
 sequenceDiagram
     participant App as Client App
-    participant API as HTTP Layer
-    participant Consent as Consent Service
-    participant Reg as Registry Orchestrator
-    participant VC as VC Service
-    participant Audit as Audit Service
+    participant HTTP as transport/http
+    participant Auth as auth
+    participant Consent as consent
+    participant Evidence as evidence
+    participant VC as evidence.vc
+    participant Audit as audit
 
-    App->>API: POST /vc/issue (purpose=age_verification)
-    API->>Consent: RequireConsent(user, age_verification)
-    Consent-->>API: ok or error
+    App->>HTTP: POST /vc/issue (type=AgeOver18)
+    HTTP->>Auth: GetUserFromToken
+    Auth-->>HTTP: user
+    HTTP->>Consent: RequireConsent(userID, age_verification)
+    Consent-->>HTTP: ok
 
-    API->>Reg: GetCitizenRecord(user)
-    Reg->>Citizen: GET /citizen (mock)
-    Citizen-->>Reg: full record including DOB
-    Reg-->>API: derived attributes (is_over_18, etc in regulated mode)
+    HTTP->>Evidence: GetCitizenRecord(user)
+    Evidence-->>HTTP: citizenRecord (minimised if regulated)
 
-    API->>VC: IssueVC(user, "AgeOver18")
-    VC->>Audit: Emit vc_issued
-    VC-->>API: VC payload
+    HTTP->>VC: IssueAgeOver18VC(user, citizenRecord)
+    VC->>Audit: Publish(vc_issued)
+    VC-->>HTTP: vc
 
-    API-->>App: VC
+    HTTP-->>App: vc JSON
 ```
-
-In regulated mode the domain layer should drop raw DOB once `is_over_18` is derived.
 
 ---
 
-### Decision Evaluation Flow
+### Decision Evaluation
 
 ```mermaid
 sequenceDiagram
     participant App as Client App
-    participant API as HTTP Layer
-    participant Consent as Consent Service
-    participant Reg as Registry Orchestrator
-    participant VC as VC Service
-    participant Dec as Decision Engine
-    participant Audit as Audit Service
+    participant HTTP as transport/http
+    participant Auth as auth
+    participant Consent as consent
+    participant Evidence as evidence
+    participant VC as evidence.vc
+    participant Decision as decision
+    participant Audit as audit
 
-    App->>API: POST /decision/evaluate (purpose, context)
-    API->>Consent: RequireConsent(user, purpose)
-    Consent-->>API: ok
+    App->>HTTP: POST /decision/evaluate (purpose, context)
+    HTTP->>Auth: GetUserFromToken
+    Auth-->>HTTP: user
 
-    API->>Reg: EnsureRequiredChecks(purpose)
-    Reg-->>API: registry results (minimised if regulated)
+    HTTP->>Consent: RequireConsent(userID, purpose)
+    Consent-->>HTTP: ok
 
-    API->>VC: GetRelevantVCs(user, purpose)
-    VC-->>API: list of VCs
+    HTTP->>Evidence: Fetch required registry records for purpose
+    Evidence-->>HTTP: registry results
 
-    API->>Dec: Evaluate(user, purpose, registries, vcs, context)
-    Dec-->>API: DecisionResult{status, reason, conditions}
+    HTTP->>VC: Fetch relevant VCs for purpose
+    VC-->>HTTP: vc list
 
-    API->>Audit: Emit decision_made
-    API-->>App: result
+    HTTP->>Decision: Evaluate(user, purpose, registries, vcs, context)
+    Decision-->>HTTP: decision
+
+    HTTP->>Audit: Publish(decision_made)
+    HTTP-->>App: decision JSON
 ```
-
-Purposes can be mapped to required checks. For example:
-
-* `age_verification` → citizen registry only
-* `sanctions_screening` → sanctions registry only
-* `full_kyc` → both registries and presence of certain VCs.
 
 ---
 
-### Data Export And Deletion
+### Data Export and Deletion
 
 ```mermaid
 sequenceDiagram
     participant App as Client App
-    participant API as HTTP Layer
-    participant Stores as Data Stores
-    participant Audit as Audit Service
+    participant HTTP as transport/http
+    participant Auth as auth
+    participant Consent as consent
+    participant Evidence as evidence
+    participant Decision as decision
+    participant Audit as audit
 
-    App->>API: GET /me/data-export
-    API->>Stores: Fetch user, consents, vcs, registry snapshots, decisions
-    Stores-->>API: aggregated data
-    API->>Audit: Emit data_exported
-    API-->>App: JSON export
+    App->>HTTP: GET /me/data-export
+    HTTP->>Auth: GetUserFromToken
+    Auth-->>HTTP: user
+    HTTP->>Consent: ListConsents(userID)
+    HTTP->>Evidence: ListEvidence(userID)
+    HTTP->>Decision: ListDecisions(userID)
+    HTTP->>Audit: ListAuditEvents(userID)
+    HTTP->>Audit: Publish(data_exported)
+    HTTP-->>App: aggregated JSON
 
-    App->>API: DELETE /me
-    API->>Stores: Delete or anonymise all user linked data
-    Stores-->>API: success
-    API->>Audit: Emit user_data_deleted
-    API-->>App: 204 No Content
+    App->>HTTP: DELETE /me
+    HTTP->>Auth: DeleteUser(userID)
+    HTTP->>Consent: DeleteConsents(userID)
+    HTTP->>Evidence: DeleteEvidence(userID)
+    HTTP->>Decision: DeleteDecisions(userID)
+    HTTP->>Audit: Publish(user_data_deleted)
+    HTTP-->>App: 204 No Content
 ```
-
-This flow is intentionally simple but gives you a handle to talk about user rights in regulated domains.
 
 ---
 
-## Data Model
+## Data Model Overview
 
-High level domain entities. Initial implementation can be structs plus in memory maps.
+High level entities across services:
 
-```mermaid
-classDiagram
-    class User {
-        string ID
-        string Email
-        string DisplayName
-        // PII: high
-    }
+* `auth`
 
-    class Session {
-        string ID
-        string UserID
-        time.Time ExpiresAt
-        string ClientID
-        string[] GrantedPurposes
-    }
+  * `User`
+  * `Session`
 
-    class ConsentRecord {
-        string ID
-        string UserID
-        string Purpose
-        time.Time GrantedAt
-        time.Time? ExpiresAt
-        time.Time? RevokedAt
-    }
+* `consent`
 
-    class VerifiableCredential {
-        string ID
-        string UserID
-        string Type          // e.g. "AgeOver18"
-        map[string]any Claims
-        bool Revoked
-        time.Time IssuedAt
-    }
+  * `ConsentRecord`
 
-    class RegistrySnapshot {
-        string ID
-        string UserID
-        string Source       // "citizen" or "sanctions"
-        map[string]any Data // may include PII when not minimised
-        time.Time RetrievedAt
-        time.Time ExpiresAt // retention policy
-    }
+* `evidence.registry`
 
-    class Decision {
-        string ID
-        string UserID
-        string Purpose
-        string Status       // pass, pass_with_conditions, fail
-        string Reason
-        string[] Conditions
-        time.Time CreatedAt
-    }
+  * `CitizenRecord`
+  * `SanctionsRecord`
+  * `RegistrySnapshot` (if you add it as persistent type)
 
-    class AuditEvent {
-        string ID
-        string ActorID
-        string SubjectID
-        string Action
-        string Purpose
-        string Decision
-        string Reason
-        time.Time Timestamp
-        string RequestID
-    }
+* `evidence.vc`
 
-    User "1" -- "many" Session
-    User "1" -- "many" ConsentRecord
-    User "1" -- "many" VerifiableCredential
-    User "1" -- "many" RegistrySnapshot
-    User "1" -- "many" Decision
-    User "1" -- "many" AuditEvent
-```
+  * `VerifiableCredential`
 
-You can annotate fields in code with comments for PII classification, for example:
+* `decision`
 
-```go
-type CitizenRecord struct {
-    // PII high - subject to strict retention
-    FullName string
-    DOB      time.Time
+  * `Decision`
 
-    // Derived attributes - safer to retain
-    IsOver18 bool
-}
-```
+* `audit`
+
+  * `AuditEvent`
+
+These are joined by `UserID` and purpose strings.
 
 ---
 
 ## Regulated Mode Behaviour
 
-When `REGULATED_MODE=true`:
+`REGULATED_MODE=true` should affect behaviour across services, not just one:
 
-* Consent is mandatory for any registry, VC, or decision call.
-* Registry results are reduced to minimal necessary attributes for the requested purpose.
-* Raw PII is not stored beyond short lived registry snapshots, which have strict TTL.
-* Audit events are required for all sensitive operations.
-* Some operations may fail hard if required consent or data minimisation rules are not met.
+* `auth`
+  Same, but you might choose stricter session duration.
 
-When `REGULATED_MODE=false`:
+* `consent`
+  Mandatory for registry, VC, and decision flows. Missing consent returns a hard failure.
 
-* The same flows work, but the system may store richer data and run in a more relaxed demo mode.
-* This lets you contrast sandbox behaviour with regulated aware behaviour in interviews.
+* `evidence.registry`
+  Minimises data. Derives attributes like `IsOver18` then discards full DOB after use or keeps it under strict TTL.
+
+* `evidence.vc`
+  Uses derived attributes as claims instead of raw PII where possible.
+
+* `decision`
+  May enforce stricter rules for certain purposes.
+
+* `audit`
+  Required for all sensitive operations. No best effort logging.
+
+Having the code structured by services makes these toggles easier to reason about.
+
+---
+
+## Productionisation Considerations
+
+Key improvements if you wanted to harden this design:
+
+* Replace in memory stores with Postgres based repositories per service.
+* Replace channel based audit publisher with a real queue and an audit worker deployment.
+* Replace OIDC lite with a real OIDC provider.
+* Add metrics and tracing around service boundaries.
+* Introduce a policy engine for decisions and retention logic.
+
+The boundaries already match likely service splits, so you can talk about how you would pull `auth`, `consent`, `evidence`, `decision`, and `audit` out into separate deployable services if needed.
 
 ---
 
 ## Design Rationale
 
-1. **Separation of HTTP and domain logic**
-   You avoid pushing complex consent or decision logic into handlers. This keeps testability and makes it easy to reason about regulatory controls as pure domain functions.
-
-2. **Purpose based consent as first class concept**
-   Consent is not a boolean on the user. It is a separate object keyed by purpose with its own lifecycle. This mirrors real financial and health flows.
-
-3. **Data minimisation and derived attributes**
-   The system shows a clear example of how to derive a safe attribute, such as `is_over_18`, then discard or tightly retain the original PII. This is a concrete demonstration of privacy by design.
-
-4. **Explicit audit events**
-   Every meaningful step in a regulated flow results in a structured audit event. This is what compliance and risk teams care about and gives you discussion material on monitoring and incident investigation.
-
-5. **TTL driven registry cache**
-   Registry snapshots are not kept forever. They expire according to a policy. This gives you a way to talk about data retention strategies and staleness risks.
-
-6. **Regulated mode toggle**
-   The configuration flag allows you to demonstrate how the same architecture can serve both sandbox clients and more constrained regulated environments. It lets you talk about progressive hardening and feature gating.
-
-7. **In memory stores first, interfaces ready for databases**
-   Starting with in memory implementations keeps the project small enough to build quickly, while the clean interfaces let you describe how you would move to a real data store in production.
+* The monolith avoids early distributed systems complexity while still modelling realistic identity flows.
+* Internal packages map to clear business responsibilities, so the code is explainable in interviews.
+* The separation of auth, consent, evidence, decision, and audit reflects how regulated environments are usually structured in practice, even when everything runs on one platform.
