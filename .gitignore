@@ -20,9 +20,11 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+.gocache
 # Go workspace file
 go.work
 go.work.sum
+
 
 # env file
 .env
@@ -30,3 +32,4 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
