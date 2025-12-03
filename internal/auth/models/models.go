@@ -19,6 +19,7 @@ type Session struct {
 }
 
 type AuthorizationRequest struct {
+	Email       string
 	ClientID    string
 	Scopes      []string
 	RedirectURI string

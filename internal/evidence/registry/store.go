@@ -3,7 +3,7 @@ package registry
 import (
 	"context"
 
-	pkgerrors "id-gateway/pkg/errors"
+	pkgerrors "id-gateway/pkg/http-errors"
 )
 
 var (

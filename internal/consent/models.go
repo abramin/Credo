@@ -3,7 +3,7 @@ package consent
 import (
 	"time"
 
-	pkgerrors "id-gateway/pkg/errors"
+	pkgerrors "id-gateway/pkg/http-errors"
 )
 
 // ConsentPurpose labels why data is processed. Purpose binding allows selective

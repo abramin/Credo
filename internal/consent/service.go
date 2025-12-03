@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	pkgerrors "id-gateway/pkg/errors"
+	pkgerrors "id-gateway/pkg/http-errors"
 )
 
 // Service persists consent decisions and provides purpose-aware checks. It keeps

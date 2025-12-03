@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"id-gateway/internal/auth/models"
-	pkgerrors "id-gateway/pkg/errors"
+	pkgerrors "id-gateway/pkg/http-errors"
 )
 
 var (
