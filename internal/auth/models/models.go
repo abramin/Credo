@@ -55,3 +55,14 @@ type TokenResult struct {
 	IDToken     string `json:"id_token" validate:"required"`
 	ExpiresIn   int    `json:"expires_in" validate:"required"`
 }
+
+var ErrUserNotFound = &ModelError{Code: "user_not_found", Message: "user not found"}
+
+type ModelError struct {
+	Code    string
+	Message string
+}
+
+func (e *ModelError) Error() string {
+	return e.Message
+}
