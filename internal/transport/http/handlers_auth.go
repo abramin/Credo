@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/asaskevich/govalidator"
+	"github.com/go-playground/validator/v10"
 
 	authModel "id-gateway/internal/auth/models"
 	httpErrors "id-gateway/pkg/http-errors"
@@ -103,31 +103,34 @@ func (h *AuthHandler) notImplemented(w http.ResponseWriter, endpoint string) {
 }
 
 func validateAuthorizationRequest(req authModel.AuthorizationRequest) error {
-	if !govalidator.StringLength(req.Email, "1", "255") || !govalidator.IsEmail(req.Email) {
-		return httpErrors.New(httpErrors.CodeInvalidInput, "invalid email")
+	payload := authorizationRequestValidation{
+		Email:       req.Email,
+		ClientID:    req.ClientID,
+		Scopes:      req.Scopes,
+		RedirectURI: req.RedirectURI,
+		State:       req.State,
 	}
 
-	if !govalidator.StringLength(req.ClientID, "3", "100") {
-		return httpErrors.New(httpErrors.CodeInvalidInput, "invalid client_id")
+	if err := authValidator.Struct(payload); err != nil {
+		return httpErrors.New(httpErrors.CodeInvalidInput, "invalid request body")
 	}
-
-	if len(req.Scopes) == 0 {
-		return httpErrors.New(httpErrors.CodeInvalidInput, "scopes are required")
-	}
-
-	for _, scope := range req.Scopes {
-		if strings.TrimSpace(scope) == "" {
-			return httpErrors.New(httpErrors.CodeInvalidInput, "scopes contain empty value")
-		}
-	}
-
-	if !govalidator.StringLength(req.RedirectURI, "1", "2048") || !govalidator.IsURL(req.RedirectURI) {
-		return httpErrors.New(httpErrors.CodeInvalidInput, "invalid redirect_uri")
-	}
-
-	if len(req.State) > 500 {
-		return httpErrors.New(httpErrors.CodeInvalidInput, "state too long")
-	}
-
 	return nil
+}
+
+type authorizationRequestValidation struct {
+	Email       string   `validate:"required,email,max=255"`
+	ClientID    string   `validate:"required,min=3,max=100"`
+	Scopes      []string `validate:"required,min=1,dive,notblank"`
+	RedirectURI string   `validate:"required,url,max=2048"`
+	State       string   `validate:"max=500"`
+}
+
+var authValidator = newAuthValidator()
+
+func newAuthValidator() *validator.Validate {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	_ = v.RegisterValidation("notblank", func(fl validator.FieldLevel) bool {
+		return strings.TrimSpace(fl.Field().String()) != ""
+	})
+	return v
 }
