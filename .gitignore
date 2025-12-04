@@ -21,6 +21,8 @@ profile.cov
 # vendor/
 
 .gocache
+.cache
+
 # Go workspace file
 go.work
 go.work.sum
@@ -31,5 +33,4 @@ go.work.sum
 
 # Editor/IDE
 # .idea/
-# .vscode/
-guide.md
+.vscode/

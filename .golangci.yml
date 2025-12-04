@@ -8,7 +8,9 @@ linters:
   enable:
     - errcheck
     - govet
+    - ineffassign
     - staticcheck
+    - unused
 
 issues:
   exclude-use-default: false
