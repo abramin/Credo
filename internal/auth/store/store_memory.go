@@ -44,6 +44,10 @@ func (s *InMemoryUserStore) FindUserByEmail(_ context.Context, email string) (*m
 	return nil, ErrNotFound
 }
 
+func (s *InMemoryUserStore) FindByEmail(ctx context.Context, email string) (*models.User, error) {
+	return s.FindUserByEmail(ctx, email)
+}
+
 type InMemorySessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*models.Session

@@ -14,12 +14,12 @@ var (
 )
 
 type UserStore interface {
-	Save(ctx context.Context, user models.User) error
-	FindByID(ctx context.Context, id string) (models.User, error)
-	FindUserByEmail(ctx context.Context, email string) (models.User, error)
+	Save(ctx context.Context, user *models.User) error
+	FindByID(ctx context.Context, id string) (*models.User, error)
+	FindByEmail(ctx context.Context, email string) (*models.User, error)
 }
 
 type SessionStore interface {
-	Save(ctx context.Context, session models.Session) error
-	FindByID(ctx context.Context, id string) (models.Session, error)
+	Save(ctx context.Context, session *models.Session) error
+	FindByID(ctx context.Context, id string) (*models.Session, error)
 }

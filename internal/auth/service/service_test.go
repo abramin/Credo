@@ -64,7 +64,7 @@ func (s *ServiceSuite) TestAuthorize() {
 			return nil
 		})
 		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, session models.Session) error {
+			func(ctx context.Context, session *models.Session) error {
 				assert.NotNil(s.T(), session.UserID)
 				assert.True(s.T(), session.ExpiresAt.After(time.Now()))
 				assert.Equal(s.T(), StatusPendingConsent, session.Status)
@@ -85,7 +85,7 @@ func (s *ServiceSuite) TestAuthorize() {
 
 		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(existingUser, nil)
 		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, session models.Session) error {
+			func(ctx context.Context, session *models.Session) error {
 				assert.Equal(s.T(), existingUser.ID, session.UserID)
 				assert.True(s.T(), session.ExpiresAt.After(time.Now()))
 				assert.Equal(s.T(), StatusPendingConsent, session.Status)

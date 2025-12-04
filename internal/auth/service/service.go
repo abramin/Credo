@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,6 +11,7 @@ import (
 	"id-gateway/internal/auth/models"
 	"id-gateway/internal/auth/store"
 	"id-gateway/pkg/email"
+	httpErrors "id-gateway/pkg/http-errors"
 )
 
 type UserStore interface {
@@ -20,7 +22,7 @@ type UserStore interface {
 
 type SessionStore interface {
 	Save(ctx context.Context, session *models.Session) error
-	FindByID(ctx context.Context, id string) (models.Session, error)
+	FindByID(ctx context.Context, id string) (*models.Session, error)
 }
 
 type Service struct {
@@ -56,11 +58,11 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 			}
 			err = s.users.Save(ctx, newUser)
 			if err != nil {
-				return nil, err
+				return nil, httpErrors.New(httpErrors.CodeInternal, "failed to save user")
 			}
 			user = newUser
 		} else {
-			return nil, err
+			return nil, httpErrors.New(httpErrors.CodeInternal, "failed to find user")
 		}
 	}
 
@@ -80,12 +82,22 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 
 	err = s.sessions.Save(ctx, newSession)
 	if err != nil {
-		return nil, err
+		return nil, httpErrors.New(httpErrors.CodeInternal, "failed to save session")
 	}
 
-	redirectURI := req.RedirectURI + "?session_id=" + newSession.ID.String()
-	if req.State != "" {
-		redirectURI += "&state=" + req.State
+	redirectURI := req.RedirectURI
+	if redirectURI != "" {
+		u, parseErr := url.Parse(redirectURI)
+		if parseErr != nil {
+			return nil, httpErrors.New(httpErrors.CodeInvalidInput, "invalid redirect_uri")
+		}
+		query := u.Query()
+		query.Set("session_id", newSession.ID.String())
+		if req.State != "" {
+			query.Set("state", req.State)
+		}
+		u.RawQuery = query.Encode()
+		redirectURI = u.String()
 	}
 	res := &models.AuthorizationResult{
 		SessionID:   newSession.ID,

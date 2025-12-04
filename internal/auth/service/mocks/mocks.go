@@ -110,10 +110,10 @@ func (m *MockSessionStore) EXPECT() *MockSessionStoreMockRecorder {
 }
 
 // FindByID mocks base method.
-func (m *MockSessionStore) FindByID(ctx context.Context, id string) (models.Session, error) {
+func (m *MockSessionStore) FindByID(ctx context.Context, id string) (*models.Session, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FindByID", ctx, id)
-	ret0, _ := ret[0].(models.Session)
+	ret0, _ := ret[0].(*models.Session)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
