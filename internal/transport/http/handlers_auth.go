@@ -62,6 +62,8 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sanitizeAuthorizationRequest(&req)
+
 	if err := validateAuthorizationRequest(req); err != nil {
 		writeError(w, err)
 		return
@@ -100,6 +102,16 @@ func (h *AuthHandler) notImplemented(w http.ResponseWriter, endpoint string) {
 		"message":  "TODO: implement handler",
 		"endpoint": endpoint,
 	})
+}
+
+func sanitizeAuthorizationRequest(req *authModel.AuthorizationRequest) {
+	req.Email = strings.TrimSpace(req.Email)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	req.RedirectURI = strings.TrimSpace(req.RedirectURI)
+	req.State = strings.TrimSpace(req.State)
+	for i, scope := range req.Scopes {
+		req.Scopes[i] = strings.TrimSpace(scope)
+	}
 }
 
 func validateAuthorizationRequest(req authModel.AuthorizationRequest) error {
