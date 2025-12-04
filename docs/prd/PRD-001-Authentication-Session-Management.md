@@ -10,9 +10,11 @@
 ## 1. Overview
 
 ### Problem Statement
+
 The ID Gateway requires a lightweight authentication system that manages user identities and sessions without implementing a full OAuth2/OIDC stack. Users need to authenticate, receive tokens, and access their profile information through standard endpoints.
 
 ### Goals
+
 - Implement OIDC-lite authentication flow (OAuth2 + minimal identity layer)
 - Manage user lifecycle (creation, retrieval, profile access)
 - Handle session creation and validation
@@ -20,6 +22,7 @@ The ID Gateway requires a lightweight authentication system that manages user id
 - Provide userinfo endpoint for profile claims
 
 ### Non-Goals
+
 - Full OIDC certification compliance
 - Social login integration (Google, Facebook, etc.)
 - Password management (passwords not required for demo)
@@ -49,12 +52,14 @@ The ID Gateway requires a lightweight authentication system that manages user id
 This implementation supports a simplified OAuth2 authorization code flow with the following optional parameters:
 
 **redirect_uri**
+
 - Used for browser-based flows where the user is redirected back to the client application after authentication
 - The gateway appends the `session_id` and `state` as query parameters to this URI
 - Client applications can then extract the session_id and exchange it for tokens
 - Optional: If not provided, the response contains only the session_id
 
 **state**
+
 - CSRF protection token provided by the client
 - The gateway echoes this value back in the redirect_uri
 - Client should validate the state matches before using the session_id
@@ -62,6 +67,7 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 - Optional but recommended for production flows
 
 **Example browser-based flow:**
+
 1. Client redirects user to: `POST /auth/authorize` with redirect_uri and state
 2. Gateway responds with: `{"redirect_uri": "https://client.com/callback?session_id=sess_xyz&state=abc"}`
 3. Client redirects user to the returned redirect_uri
@@ -73,22 +79,25 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 ## 3. Functional Requirements
 
 ### FR-1: User Authorization
+
 **Endpoint:** `POST /auth/authorize`
 
 **Description:** Initiate an authentication session for a user by email. If the user doesn't exist, create them automatically.
 
 **Input:**
+
 ```json
 {
   "email": "user@example.com",
   "client_id": "demo-client",
-  "scopes": ["openid", "profile"],      // Optional
-  "redirect_uri": "https://app.example.com/callback",  // Optional
-  "state": "xyz123"                     // Optional, CSRF protection
+  "scopes": ["openid", "profile"], // Optional
+  "redirect_uri": "https://app.example.com/callback", // Optional
+  "state": "xyz123" // Optional, CSRF protection
 }
 ```
 
 **Output (Success - 200):**
+
 ```json
 {
   "session_id": "sess_abc123xyz",
@@ -97,6 +106,7 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 ```
 
 **Business Logic:**
+
 1. Validate email format
 2. Validate redirect_uri format if provided (must be valid URL)
 3. Check if user exists by email
@@ -119,6 +129,7 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 9. Return session_id and redirect_uri
 
 **Error Cases:**
+
 - 400 Bad Request: Invalid email format
 - 400 Bad Request: Invalid redirect_uri format
 - 500 Internal Server Error: Store failure
@@ -126,19 +137,22 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 ---
 
 ### FR-2: Token Exchange
+
 **Endpoint:** `POST /auth/token`
 
 **Description:** Exchange a valid session ID for access and ID tokens.
 
 **Input:**
+
 ```json
 {
   "session_id": "sess_abc123xyz",
-  "grant_type": "session"  // Custom grant type
+  "grant_type": "session" // Custom grant type
 }
 ```
 
 **Output (Success - 200):**
+
 ```json
 {
   "access_token": "at_sess_abc123xyz",
@@ -149,16 +163,18 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 ```
 
 **Business Logic:**
+
 1. Validate session_id is provided
 2. Retrieve session from SessionStore
 3. If session not found, return 404
 4. Check if session is expired (if TTL implemented)
-5. Generate access_token as: `"at_" + session_id`
-6. Generate id_token as: `"idt_" + session_id`
+5. Generate access*token as: `"at*" + session_id`
+6. Generate id*token as: `"idt*" + session_id`
 7. Set expires_in = 3600 (1 hour)
 8. Return tokens
 
 **Error Cases:**
+
 - 400 Bad Request: Missing session_id
 - 404 Not Found: Session not found
 - 401 Unauthorized: Session expired
@@ -167,14 +183,17 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 ---
 
 ### FR-3: User Info Retrieval
+
 **Endpoint:** `GET /auth/userinfo`
 
 **Description:** Retrieve authenticated user's profile information using a bearer token.
 
 **Input:**
+
 - Header: `Authorization: Bearer at_sess_abc123xyz`
 
 **Output (Success - 200):**
+
 ```json
 {
   "sub": "user_def456",
@@ -187,9 +206,10 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 ```
 
 **Business Logic:**
+
 1. Extract bearer token from Authorization header
 2. Validate format: "Bearer <token>"
-3. Parse token to extract session_id (remove "at_" prefix)
+3. Parse token to extract session*id (remove "at*" prefix)
 4. Retrieve session from SessionStore
 5. If session not found, return 401
 6. Retrieve user from UserStore using session.UserID
@@ -197,6 +217,7 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 8. Return user profile in OIDC userinfo format
 
 **Error Cases:**
+
 - 401 Unauthorized: Missing or invalid Authorization header
 - 401 Unauthorized: Token not found or expired
 - 401 Unauthorized: User not found
@@ -209,9 +230,10 @@ This implementation supports a simplified OAuth2 authorization code flow with th
 ### TR-1: Data Models
 
 **User Model** (Location: `internal/auth/models.go`)
+
 ```go
 type User struct {
-    ID        string    // Format: "user_<uuid>"
+    ID        uuid.UUID    // Format: "user_<uuid>"
     Email     string    // Unique, valid email format
     FirstName string    // Extracted from email or provided
     LastName  string    // Extracted from email or provided
@@ -221,6 +243,7 @@ type User struct {
 ```
 
 **Session Model** (Location: `internal/auth/models.go`)
+
 ```go
 type Session struct {
     ID             string   // Format: "sess_<uuid>"
@@ -235,6 +258,7 @@ type Session struct {
 ### TR-2: Storage Interfaces
 
 **UserStore** (Location: `internal/auth/store.go`)
+
 ```go
 type UserStore interface {
     SaveUser(ctx context.Context, user *User) error
@@ -245,6 +269,7 @@ type UserStore interface {
 ```
 
 **SessionStore** (Location: `internal/auth/store.go`)
+
 ```go
 type SessionStore interface {
     SaveSession(ctx context.Context, session *Session) error
@@ -257,6 +282,7 @@ type SessionStore interface {
 ### TR-3: Service Layer
 
 **AuthService** (Location: `internal/auth/service.go`)
+
 ```go
 type AuthService struct {
     users    UserStore
@@ -271,6 +297,7 @@ func (s *AuthService) UserInfo(ctx context.Context, token string) (*User, error)
 ### TR-4: HTTP Handlers
 
 **Handler Struct** (Location: `internal/transport/http/router.go`)
+
 ```go
 type Handler struct {
     authService   *auth.AuthService
@@ -279,6 +306,7 @@ type Handler struct {
 ```
 
 **Handler Functions** (Location: `internal/transport/http/handlers_auth.go`)
+
 ```go
 func (h *Handler) handleAuthorize(w http.ResponseWriter, r *http.Request)
 func (h *Handler) handleToken(w http.ResponseWriter, r *http.Request)
@@ -288,11 +316,13 @@ func (h *Handler) handleUserInfo(w http.ResponseWriter, r *http.Request)
 ### TR-5: Dependencies
 
 **Required:**
+
 - `internal/platform/logger` - For structured logging
 - `pkg/errors` - For typed error handling
 - `internal/audit` - For logging authentication events
 
 **Store Implementation:**
+
 - Use `internal/auth/store_memory.go` (already implemented)
 - Thread-safe with `sync.RWMutex`
 - Returns typed errors from `pkg/errors`
@@ -303,11 +333,11 @@ func (h *Handler) handleUserInfo(w http.ResponseWriter, r *http.Request)
 
 ### Endpoint Summary
 
-| Endpoint | Method | Auth Required | Purpose |
-|----------|--------|---------------|---------|
-| `/auth/authorize` | POST | No | Start auth session |
-| `/auth/token` | POST | No | Exchange session for tokens |
-| `/auth/userinfo` | GET | Yes (Bearer) | Get user profile |
+| Endpoint          | Method | Auth Required | Purpose                     |
+| ----------------- | ------ | ------------- | --------------------------- |
+| `/auth/authorize` | POST   | No            | Start auth session          |
+| `/auth/token`     | POST   | No            | Exchange session for tokens |
+| `/auth/userinfo`  | GET    | Yes (Bearer)  | Get user profile            |
 
 ### Token Format
 
@@ -321,6 +351,7 @@ func (h *Handler) handleUserInfo(w http.ResponseWriter, r *http.Request)
 ### Error Response Format
 
 All endpoints return errors in this format:
+
 ```json
 {
   "error": "invalid_request",
@@ -334,22 +365,26 @@ All endpoints return errors in this format:
 ## 6. Security Requirements
 
 ### SR-1: Input Validation
+
 - Validate all email addresses match regex: `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 - Validate redirect_uri is a valid URL with https:// scheme (http:// allowed for localhost)
 - Sanitize all string inputs (trim whitespace, validate length)
 - Reject requests with missing required fields
 
 ### SR-2: Token Security
+
 - Tokens must be unguessable (include UUIDs)
 - Tokens should expire after 1 hour
 - Bearer tokens must be validated on every request
 
 ### SR-3: CSRF Protection
+
 - When state parameter is provided in authorize request, echo it back in redirect_uri
 - Clients should validate state matches their original value before using session_id
 - State should be cryptographically random and unpredictable
 
 ### SR-4: Data Privacy
+
 - Never log passwords (not applicable for email-only auth)
 - Log only user IDs, not email addresses, in non-audit logs
 - Use audit system for sensitive operations
@@ -359,7 +394,9 @@ All endpoints return errors in this format:
 ## 7. Observability Requirements
 
 ### Logging
+
 **Events to Log:**
+
 - User created: `user_created` (audit)
 - Session started: `session_created` (audit)
 - Token issued: `token_issued` (audit)
@@ -367,6 +404,7 @@ All endpoints return errors in this format:
 - Authentication failures: `auth_failed` (standard log)
 
 **Log Format:**
+
 ```go
 logger.Info("session created",
     "user_id", user.ID,
@@ -376,6 +414,7 @@ logger.Info("session created",
 ```
 
 ### Metrics
+
 - Total users created (counter)
 - Active sessions (gauge)
 - Token requests per minute (rate)
@@ -387,6 +426,7 @@ logger.Info("session created",
 ## 8. Testing Requirements
 
 ### Unit Tests
+
 - [ ] Test user creation with valid email
 - [ ] Test user retrieval by ID and email
 - [ ] Test session creation and retrieval
@@ -398,12 +438,14 @@ logger.Info("session created",
 - [ ] Test error cases (invalid email, invalid redirect_uri, not found, etc.)
 
 ### Integration Tests
+
 - [ ] Test complete flow: authorize → token → userinfo
 - [ ] Test concurrent user creation (race conditions)
 - [ ] Test session expiry handling
 - [ ] Test invalid bearer token rejection
 
 ### Manual Testing
+
 ```bash
 # 1. Authorize (Simple)
 curl -X POST http://localhost:8080/auth/authorize \
@@ -444,6 +486,7 @@ curl http://localhost:8080/auth/userinfo \
 ## 9. Implementation Steps
 
 ### Phase 1: Service Layer (2-3 hours)
+
 1. Update `AuthService` in `internal/auth/service.go`
 2. Implement `Authorize()` method:
    - Find or create user by email
@@ -459,6 +502,7 @@ curl http://localhost:8080/auth/userinfo \
    - Return user profile
 
 ### Phase 2: HTTP Handlers (1-2 hours)
+
 1. Update `Handler` struct in `router.go` to include `AuthService`
 2. Implement `handleAuthorize`:
    - Parse JSON request body
@@ -474,6 +518,7 @@ curl http://localhost:8080/auth/userinfo \
    - Return JSON response or error
 
 ### Phase 3: Dependency Injection (30 min)
+
 1. Update `cmd/server/main.go`:
    - Initialize UserStore (already exists)
    - Initialize SessionStore (already exists)
@@ -482,6 +527,7 @@ curl http://localhost:8080/auth/userinfo \
 2. Wire up in router
 
 ### Phase 4: Testing (1-2 hours)
+
 1. Write unit tests for AuthService methods
 2. Write integration test for complete flow
 3. Manual testing with curl commands
@@ -507,12 +553,14 @@ curl http://localhost:8080/auth/userinfo \
 ## 11. Dependencies & Blockers
 
 ### Dependencies
+
 - `internal/auth/store_memory.go` - ✅ Already implemented
 - `pkg/errors` - ✅ Already implemented
 - `internal/audit` - ✅ Already implemented
 - `internal/platform/logger` - ✅ Already implemented
 
 ### Potential Blockers
+
 - None identified
 
 ---
@@ -534,9 +582,11 @@ curl http://localhost:8080/auth/userinfo \
 ## 13. Open Questions
 
 1. **Session Expiry:** Should sessions expire? If yes, after how long?
+
    - **Recommendation:** Yes, 24 hours for MVP
 
 2. **User Auto-Creation:** Should we auto-create users on first auth?
+
    - **Recommendation:** Yes, for demo purposes. Simplifies onboarding.
 
 3. **Token Revocation:** Do we need ability to revoke tokens?
@@ -556,6 +606,6 @@ curl http://localhost:8080/auth/userinfo \
 
 ## Revision History
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-12-03 | Product Team | Initial PRD |
+| Version | Date       | Author       | Changes     |
+| ------- | ---------- | ------------ | ----------- |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD |

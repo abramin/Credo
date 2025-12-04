@@ -20,7 +20,7 @@ func NewInMemoryUserStore() *InMemoryUserStore {
 func (s *InMemoryUserStore) Save(_ context.Context, user models.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.users[user.ID] = user
+	s.users[user.ID.String()] = user
 	return nil
 }
 
@@ -45,7 +45,7 @@ func NewInMemorySessionStore() *InMemorySessionStore {
 func (s *InMemorySessionStore) Save(_ context.Context, session models.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions[session.ID] = session
+	s.sessions[session.ID.String()] = session
 	return nil
 }
 

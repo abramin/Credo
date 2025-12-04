@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -35,24 +36,24 @@ func (s *AuthHandlerSuite) TestService_Authorize() {
 		Email:       "user@example.com",
 		ClientID:    "test-client-id",
 		Scopes:      []string{"scope1", "scope2"},
-		RedirectURI: "some-redirect-uri/",
+		RedirectURI: "https://example.com/redirect",
 		State:       "test-state",
 	}
 	s.T().Run("user is found and authorized - 200", func(t *testing.T) {
 		mockService, router := s.newHandler(t)
 		expectedResp := &authModel.AuthorizationResult{
-			SessionID: uuid.New(),
-			UserID:    uuid.New(),
+			SessionID:   uuid.New(),
+			RedirectURI: validRequest.RedirectURI,
 		}
 		mockService.EXPECT().Authorize(gomock.Any(), validRequest).Return(expectedResp, nil)
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(validRequest, t))
 
-		require.Equal(t, http.StatusOK, status)
-		require.NotNil(t, got)
-		require.Nil(t, errBody)
-		require.Equal(t, expectedResp.SessionID, got.SessionID)
-		require.Equal(t, expectedResp.UserID, got.UserID)
+		assert.Equal(t, http.StatusOK, status)
+		assert.NotNil(t, got)
+		assert.Nil(t, errBody)
+		assert.Equal(t, expectedResp.SessionID, got.SessionID)
+		assert.Equal(t, expectedResp.RedirectURI, got.RedirectURI)
 	})
 
 	s.T().Run("returns 400 when request body is invalid json", func(t *testing.T) {
@@ -61,9 +62,9 @@ func (s *AuthHandlerSuite) TestService_Authorize() {
 
 		status, got, errBody := s.doAuthRequest(t, router, "{bad-json")
 
-		require.Equal(t, http.StatusBadRequest, status)
-		require.Nil(t, got)
-		require.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
 	})
 
 	s.T().Run("returns 400 when email is invalid", func(t *testing.T) {
@@ -75,9 +76,23 @@ func (s *AuthHandlerSuite) TestService_Authorize() {
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(invalidEmailRequest, t))
 
-		require.Equal(t, http.StatusBadRequest, status)
-		require.Nil(t, got)
-		require.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+	})
+
+	s.T().Run("returns 400 when redirect URI is invalid", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		mockService.EXPECT().Authorize(gomock.Any(), gomock.Any()).Times(0)
+		invalid := *validRequest
+		invalid.RedirectURI = "invalid-uri"
+		invalidRedirectURIRequest := &invalid
+
+		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(invalidRedirectURIRequest, t))
+
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
 	})
 
 	s.T().Run("returns 400 when params missing", func(t *testing.T) {
@@ -89,9 +104,35 @@ func (s *AuthHandlerSuite) TestService_Authorize() {
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(missingParamRequest, t))
 
-		require.Equal(t, http.StatusBadRequest, status)
-		require.Nil(t, got)
-		require.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+	})
+
+	s.T().Run("returns 400 when scopes contain empty value", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		mockService.EXPECT().Authorize(gomock.Any(), gomock.Any()).Times(0)
+		invalid := *validRequest
+		invalid.Scopes = []string{"scope1", " "}
+
+		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(&invalid, t))
+
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+	})
+
+	s.T().Run("returns 400 when scopes list is empty", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		mockService.EXPECT().Authorize(gomock.Any(), gomock.Any()).Times(0)
+		invalid := *validRequest
+		invalid.Scopes = []string{}
+
+		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(&invalid, t))
+
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
 	})
 
 	s.T().Run("returns 500 when service fails", func(t *testing.T) {
@@ -100,9 +141,9 @@ func (s *AuthHandlerSuite) TestService_Authorize() {
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(validRequest, t))
 
-		require.Equal(t, http.StatusInternalServerError, status)
-		require.Nil(t, got)
-		require.Equal(t, string(httpErrors.CodeInternal), errBody["error"])
+		assert.Equal(t, http.StatusInternalServerError, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInternal), errBody["error"])
 	})
 }
 

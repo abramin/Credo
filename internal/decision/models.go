@@ -38,7 +38,7 @@ type DecisionInput struct {
 func DerivedIdentityFromCitizen(user authModel.User, citizen registry.CitizenRecord) DerivedIdentity {
 	isOver18 := deriveIsOver18(citizen.DateOfBirth)
 	return DerivedIdentity{
-		PseudonymousID: user.ID, // treat as pseudonymous identifier; avoid emails/names.
+		PseudonymousID: user.ID.String(), // treat as pseudonymous identifier; avoid emails/names.
 		IsOver18:       isOver18,
 		CitizenValid:   citizen.Valid,
 	}

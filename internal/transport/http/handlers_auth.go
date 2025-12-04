@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/mail"
+	"strings"
+
+	"github.com/asaskevich/govalidator"
 
 	authModel "id-gateway/internal/auth/models"
 	httpErrors "id-gateway/pkg/http-errors"
@@ -59,16 +61,12 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, httpErrors.New(httpErrors.CodeInvalidInput, "invalid request body"))
 		return
 	}
-	// validate all required fields are present
-	if req.Email == "" || req.ClientID == "" || req.RedirectURI == "" {
-		writeError(w, httpErrors.New(httpErrors.CodeInvalidInput, "missing required fields"))
+
+	if err := validateAuthorizationRequest(req); err != nil {
+		writeError(w, err)
 		return
 	}
-	// validate email format (simple regex or use a library)
-	if _, err := mail.ParseAddress(req.Email); err != nil {
-		writeError(w, httpErrors.New(httpErrors.CodeInvalidInput, "invalid email format"))
-		return
-	}
+
 	res, err := h.auth.Authorize(r.Context(), &req)
 	if err != nil {
 		writeError(w, err)
@@ -78,8 +76,8 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(w).Encode(authModel.AuthorizationResult{
-		SessionID: res.SessionID,
-		UserID:    res.UserID,
+		SessionID:   res.SessionID,
+		RedirectURI: res.RedirectURI,
 	})
 	if err != nil {
 		writeError(w, err)
@@ -102,4 +100,34 @@ func (h *AuthHandler) notImplemented(w http.ResponseWriter, endpoint string) {
 		"message":  "TODO: implement handler",
 		"endpoint": endpoint,
 	})
+}
+
+func validateAuthorizationRequest(req authModel.AuthorizationRequest) error {
+	if !govalidator.StringLength(req.Email, "1", "255") || !govalidator.IsEmail(req.Email) {
+		return httpErrors.New(httpErrors.CodeInvalidInput, "invalid email")
+	}
+
+	if !govalidator.StringLength(req.ClientID, "3", "100") {
+		return httpErrors.New(httpErrors.CodeInvalidInput, "invalid client_id")
+	}
+
+	if len(req.Scopes) == 0 {
+		return httpErrors.New(httpErrors.CodeInvalidInput, "scopes are required")
+	}
+
+	for _, scope := range req.Scopes {
+		if strings.TrimSpace(scope) == "" {
+			return httpErrors.New(httpErrors.CodeInvalidInput, "scopes contain empty value")
+		}
+	}
+
+	if !govalidator.StringLength(req.RedirectURI, "1", "2048") || !govalidator.IsURL(req.RedirectURI) {
+		return httpErrors.New(httpErrors.CodeInvalidInput, "invalid redirect_uri")
+	}
+
+	if len(req.State) > 500 {
+		return httpErrors.New(httpErrors.CodeInvalidInput, "state too long")
+	}
+
+	return nil
 }

@@ -31,5 +31,5 @@ func TestService_Authorize(t *testing.T) {
 	result, err := service.Authorize(context.Background(), &req)
 	assert.NoError(t, err)
 	assert.Equal(t, "todo-session-id", result.SessionID)
-	assert.Equal(t, "user_xyz", result.UserID)
+	assert.Equal(t, "https://client.app/callback", result.RedirectURI)
 }
