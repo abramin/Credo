@@ -125,7 +125,7 @@ func (mr *MockSessionStoreMockRecorder) FindByID(ctx, id any) *gomock.Call {
 }
 
 // Save mocks base method.
-func (m *MockSessionStore) Save(ctx context.Context, session models.Session) error {
+func (m *MockSessionStore) Save(ctx context.Context, session *models.Session) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Save", ctx, session)
 	ret0, _ := ret[0].(error)

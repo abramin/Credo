@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"id-gateway/internal/auth/models"
+	"id-gateway/internal/auth/store"
 	"id-gateway/pkg/email"
 )
 
@@ -18,7 +19,7 @@ type UserStore interface {
 }
 
 type SessionStore interface {
-	Save(ctx context.Context, session models.Session) error
+	Save(ctx context.Context, session *models.Session) error
 	FindByID(ctx context.Context, id string) (models.Session, error)
 }
 
@@ -44,7 +45,7 @@ func NewService(users UserStore, sessions SessionStore, sessionTTL time.Duration
 func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error) {
 	user, err := s.users.FindByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, models.ErrUserNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			firstName, lastName := email.DeriveNameFromEmail(req.Email)
 			newUser := &models.User{
 				ID:        uuid.New(),
@@ -68,7 +69,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	if len(scopes) == 0 {
 		scopes = []string{"openid"}
 	}
-	newSession := models.Session{
+	newSession := &models.Session{
 		ID:             uuid.New(),
 		UserID:         user.ID,
 		RequestedScope: scopes,

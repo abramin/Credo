@@ -3,10 +3,12 @@ package service
 //go:generate mockgen -source=service.go -destination=mocks/mocks.go -package=mocks UserStore,SessionStoreimport
 import (
 	"context"
-	"id-gateway/internal/auth/models"
-	"id-gateway/internal/auth/service/mocks"
 	"testing"
 	"time"
+
+	"id-gateway/internal/auth/models"
+	"id-gateway/internal/auth/service/mocks"
+	"id-gateway/internal/auth/store"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -52,7 +54,7 @@ func (s *ServiceSuite) TestAuthorize() {
 		req := baseReq
 		req.State = "xyz"
 
-		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(nil, models.ErrUserNotFound)
+		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(nil, store.ErrNotFound)
 		s.mockUserStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.User) error {
 			assert.Equal(s.T(), req.Email, user.Email)
 			assert.Equal(s.T(), "Email", user.FirstName)
