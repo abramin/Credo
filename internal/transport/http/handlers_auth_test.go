@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"id-gateway/internal/transport/http/mocks"
-	httpErrors "id-gateway/pkg/http-errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	authModel "id-gateway/internal/auth/models"
-
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
+
+	authModel "id-gateway/internal/auth/models"
+	"id-gateway/internal/transport/http/mocks"
+	httpErrors "id-gateway/pkg/http-errors"
 )
 
 //go:generate mockgen -source=handlers_auth.go -destination=mocks/auth-mocks.go -package=mocks AuthService
