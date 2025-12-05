@@ -23,7 +23,7 @@ The ID Gateway is a **regulated identity and authorization system** that:
 
 | PRD | Feature | Priority | Status | Est. Time |
 |-----|---------|----------|--------|-----------|
-| [PRD-001](./PRD-001-Authentication-Session-Management.md) | Authentication & Session Management | P0 | 🟡 To Implement | 4-6 hours |
+| [PRD-001](./PRD-001-Authentication-Session-Management.md) | Authentication & Session Management | P0 | 🟢 Done | 4-6 hours |
 | [PRD-002](./PRD-002-Consent-Management.md) | Consent Management System | P0 | 🟡 To Implement | 4-6 hours |
 | [PRD-003](./PRD-003-Registry-Integration.md) | Registry Integration (Citizen & Sanctions) | P0 | 🟡 To Implement | 4-6 hours |
 | [PRD-004](./PRD-004-Verifiable-Credentials.md) | Verifiable Credentials | P0 | 🟡 To Implement | 3-5 hours |
