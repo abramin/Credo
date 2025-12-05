@@ -118,13 +118,13 @@ func ContentTypeJSON(next http.Handler) http.Handler {
 	})
 }
 
-func LatencyMiddleware(m *metrics.Metrics, endpoint string) func(http.Handler) http.Handler {
+func LatencyMiddleware(m *metrics.Metrics) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			next.ServeHTTP(w, r)
 			if m != nil {
-				m.ObserveEndpointLatency(endpoint, time.Since(start).Seconds())
+				m.ObserveEndpointLatency(r.URL.Path, time.Since(start).Seconds())
 			}
 		})
 	}

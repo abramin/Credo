@@ -22,8 +22,8 @@ func New() *Metrics {
 			Help: "Total number of users created in the system",
 		}),
 		ActiveSessions: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "id_gateway_active_sessions_total",
-			Help: "Total number of active sessions",
+			Name: "id_gateway_active_sessions",
+			Help: "Current number of active sessions",
 		}),
 		// 		- Token requests per minute (rate)
 		TokenRequests: promauto.NewCounter(prometheus.CounterOpts{
@@ -61,6 +61,9 @@ func (m *Metrics) IncrementTokenRequests() {
 func (m *Metrics) IncrementAuthFailures() {
 	m.AuthFailures.Inc()
 }
+
+// ObserveEndpointLatency records the latency for a given endpoint
+
 func (m *Metrics) ObserveEndpointLatency(endpoint string, durationSeconds float64) {
 	m.EndpointLatency.WithLabelValues(endpoint).Observe(durationSeconds)
 }

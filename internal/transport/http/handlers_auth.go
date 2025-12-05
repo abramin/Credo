@@ -55,9 +55,7 @@ func (h *AuthHandler) Register(r chi.Router) {
 	r.Use(middleware.Logger(h.logger))
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(middleware.ContentTypeJSON)
-	r.Use(middleware.LatencyMiddleware(h.metrics, "/auth/authorize"))
-	r.Use(middleware.LatencyMiddleware(h.metrics, "/auth/token"))
-	r.Use(middleware.LatencyMiddleware(h.metrics, "/auth/userinfo"))
+	r.Use(middleware.LatencyMiddleware(h.metrics))
 
 	r.Post("/auth/authorize", h.handleAuthorize)
 	r.Post("/auth/token", h.handleToken)
