@@ -14,6 +14,7 @@ import (
 	"id-gateway/internal/auth/store"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
+	"id-gateway/pkg/attrs"
 	dErrors "id-gateway/pkg/domain-errors"
 	"id-gateway/pkg/email"
 )
@@ -111,9 +112,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 			"user_id", user.ID.String(),
 			"client_id", req.ClientID,
 		)
-		if s.metrics != nil {
-			s.metrics.IncrementUsersCreated()
-		}
+		s.incrementUserCreated()
 	}
 
 	now := time.Now()
@@ -148,9 +147,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		"session_id", newSession.ID.String(),
 		"client_id", req.ClientID,
 	)
-	if s.metrics != nil {
-		s.metrics.IncrementActiveSessions(1)
-	}
+	s.incrementActiveSession()
 
 	redirectURI := req.RedirectURI
 	if redirectURI != "" {
@@ -181,9 +178,7 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"session_id", sessionID.String(),
 			)
-			if s.metrics != nil {
-				s.metrics.IncrementAuthFailures()
-			}
+			s.incrementAuthFailure()
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "session not found")
 		}
 		s.logAuthFailure(ctx, "session_lookup_failed", true,
@@ -198,9 +193,7 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 			"session_id", sessionID.String(),
 			"status", session.Status,
 		)
-		if s.metrics != nil {
-			s.metrics.IncrementAuthFailures()
-		}
+		s.incrementAuthFailure()
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "session not active")
 	}
 
@@ -211,9 +204,7 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 				"session_id", sessionID.String(),
 				"user_id", session.UserID.String(),
 			)
-			if s.metrics != nil {
-				s.metrics.IncrementAuthFailures()
-			}
+			s.incrementAuthFailure()
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "user not found")
 		}
 		s.logAuthFailure(ctx, "user_lookup_failed", true,
@@ -256,9 +247,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"client_id", req.ClientID,
 			)
-			if s.metrics != nil {
-				s.metrics.IncrementAuthFailures()
-			}
+			s.incrementAuthFailure()
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid authorization code")
 		}
 		s.logAuthFailure(ctx, "session_lookup_failed", true,
@@ -275,9 +264,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 			"user_id", session.UserID.String(),
 			"client_id", session.ClientID,
 		)
-		if s.metrics != nil {
-			s.metrics.IncrementAuthFailures()
-		}
+		s.incrementAuthFailure()
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code expired")
 	}
 
@@ -288,9 +275,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 			"user_id", session.UserID.String(),
 			"client_id", session.ClientID,
 		)
-		if s.metrics != nil {
-			s.metrics.IncrementAuthFailures()
-		}
+		s.incrementAuthFailure()
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code already used")
 	}
 
@@ -344,19 +329,19 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	}, nil
 }
 
-func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
+func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
 	// Add request_id from context if available
 	if requestID := middleware.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
+		attributes = append(attributes, "request_id", requestID)
 	}
-	args := append(attrs, "event", event, "log_type", "audit")
+	args := append(attributes, "event", event, "log_type", "audit")
 	if s.logger != nil {
 		s.logger.InfoContext(ctx, event, args...)
 	}
 	if s.auditPublisher == nil {
 		return
 	}
-	userID := extractStringAttr(attrs, "user_id")
+	userID := attrs.ExtractString(attributes, "user_id")
 	_ = s.auditPublisher.Emit(ctx, audit.Event{
 		UserID:  userID,
 		Subject: userID,
@@ -364,12 +349,12 @@ func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
 	})
 }
 
-func (s *Service) logAuthFailure(ctx context.Context, reason string, isError bool, attrs ...any) {
+func (s *Service) logAuthFailure(ctx context.Context, reason string, isError bool, attributes ...any) {
 	// Add request_id from context if available
 	if requestID := middleware.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
+		attributes = append(attributes, "request_id", requestID)
 	}
-	args := append(attrs, "event", eventAuthFailed, "reason", reason, "log_type", "standard")
+	args := append(attributes, "event", eventAuthFailed, "reason", reason, "log_type", "standard")
 	if s.logger == nil {
 		return
 	}
@@ -380,17 +365,23 @@ func (s *Service) logAuthFailure(ctx context.Context, reason string, isError boo
 	s.logger.WarnContext(ctx, eventAuthFailed, args...)
 }
 
-func extractStringAttr(attrs []any, key string) string {
-	for i := 0; i < len(attrs)-1; i += 2 {
-		k, ok := attrs[i].(string)
-		if !ok {
-			continue
-		}
-		if k == key {
-			if v, ok := attrs[i+1].(string); ok {
-				return v
-			}
-		}
+// incrementUserCreated increments the users created metric if metrics are enabled
+func (s *Service) incrementUserCreated() {
+	if s.metrics != nil {
+		s.metrics.IncrementUsersCreated()
 	}
-	return ""
+}
+
+// incrementActiveSession increments the active sessions metric if metrics are enabled
+func (s *Service) incrementActiveSession() {
+	if s.metrics != nil {
+		s.metrics.IncrementActiveSessions(1)
+	}
+}
+
+// incrementAuthFailure increments the auth failures metric if metrics are enabled
+func (s *Service) incrementAuthFailure() {
+	if s.metrics != nil {
+		s.metrics.IncrementAuthFailures()
+	}
 }

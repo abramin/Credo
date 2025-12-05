@@ -6,29 +6,31 @@ The runtime is a single process (modular monolith), but internal packages are st
 
 ## Table of Contents
 
-* [High Level Architecture](#high-level-architecture)
-* [Service Boundaries inside the Monolith](#service-boundaries-inside-the-monolith)
-* [Package Layout](#package-layout)
-* [User Scenarios](#user-scenarios)
-* [Component Breakdown](#component-breakdown)
+- [High Level Architecture](#high-level-architecture)
+- [Service Boundaries inside the Monolith](#service-boundaries-inside-the-monolith)
+- [Package Layout](#package-layout)
+- [User Scenarios](#user-scenarios)
+- [Component Breakdown](#component-breakdown)
 
-  * [Auth](#auth)
-  * [Consent](#consent)
-  * [Evidence](#evidence)
-  * [Decision](#decision)
-  * [Audit](#audit)
-  * [Transport HTTP](#transport-http)
-  * [Platform](#platform)
-* [Core Flows](#core-flows)
+  - [Auth](#auth)
+  - [Consent](#consent)
+  - [Evidence](#evidence)
+  - [Decision](#decision)
+  - [Audit](#audit)
+  - [Transport HTTP](#transport-http)
+  - [Platform](#platform)
 
-  * [Login and Consent](#login-and-consent)
-  * [Verification and VC Issuance](#verification-and-vc-issuance)
-  * [Decision Evaluation](#decision-evaluation)
-  * [Data Export and Deletion](#data-export-and-deletion)
-* [Data Model Overview](#data-model-overview)
-* [Regulated Mode Behaviour](#regulated-mode-behaviour)
-* [Productionisation Considerations](#productionisation-considerations)
-* [Design Rationale](#design-rationale)
+- [Core Flows](#core-flows)
+
+  - [Login and Consent](#login-and-consent)
+  - [Verification and VC Issuance](#verification-and-vc-issuance)
+  - [Decision Evaluation](#decision-evaluation)
+  - [Data Export and Deletion](#data-export-and-deletion)
+
+- [Data Model Overview](#data-model-overview)
+- [Regulated Mode Behaviour](#regulated-mode-behaviour)
+- [Productionisation Considerations](#productionisation-considerations)
+- [Design Rationale](#design-rationale)
 
 ---
 
@@ -49,11 +51,11 @@ The runtime is a single process (modular monolith), but internal packages are st
                                ▼
       ┌─────────────── internal (same process) ─────────────────┐
       │                                                         │
-      │  ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌────────┐ │
-      │  │  auth   │  │  consent  │  │ evidence  │  │decision│ │
-      │  │ users   │  │ purposes  │  │ registry  │  │ engine │ │
-      │  │ sessions│  │ lifecycle │  │ vc        │  │ rules  │ │
-      │  └────┬────┘  └─────┬─────┘  └─────┬─────┘  └────┬───┘ │
+      │  ┌─────────┐  ┌───────────┐  ┌───────────┐  ┌────────┐  │
+      │  │  auth   │  │  consent  │  │ evidence  │  │decision│  │
+      │  │ users   │  │ purposes  │  │ registry  │  │ engine │  │
+      │  │ sessions│  │ lifecycle │  │ vc        │  │ rules  │  │
+      │  └────┬────┘  └─────┬─────┘  └─────┬─────┘  └────┬───┘  │
       │       │             │               │             │     │
       │       └──────────┬──┴───────────────┴─────────────┘     │
       │                  ▼                                      │
@@ -145,10 +147,10 @@ cmd/
 
 Rules of thumb:
 
-* `transport/http` depends on services only, not on storage details.
-* Services depend on their own stores and on other services through interfaces, not on handlers.
-* `audit` is a shared dependency all services can call to emit events.
-* `platform` provides cross cutting concerns: config, logging, middleware, metrics, and HTTP server setup.
+- `transport/http` depends on services only, not on storage details.
+- Services depend on their own stores and on other services through interfaces, not on handlers.
+- `audit` is a shared dependency all services can call to emit events.
+- `platform` provides cross cutting concerns: config, logging, middleware, metrics, and HTTP server setup.
 
 ---
 
@@ -156,26 +158,26 @@ Rules of thumb:
 
 ### Scenario 1 - Fintech age verification for onboarding
 
-* Auth service logs the user in and issues tokens.
-* Consent service records consent for `age_verification`.
-* Evidence service calls citizen registry, derives `is_over_18`, issues an `AgeOver18` VC.
-* Decision service uses registry evidence and VC to return `pass`.
-* Audit service records login, consent, registry query, VC issuance, and decision.
+- Auth service logs the user in and issues tokens.
+- Consent service records consent for `age_verification`.
+- Evidence service calls citizen registry, derives `is_over_18`, issues an `AgeOver18` VC.
+- Decision service uses registry evidence and VC to return `pass`.
+- Audit service records login, consent, registry query, VC issuance, and decision.
 
 ### Scenario 2 - Sanctions check for high risk operation
 
-* Auth service identifies current user via access token.
-* Consent service verifies consent for `sanctions_screening`.
-* Evidence service calls sanctions registry and returns `IsPep`, `IsSanctioned`.
-* Decision service returns `fail` or `pass_with_conditions` based on policy.
-* Audit service records the decision with reason.
+- Auth service identifies current user via access token.
+- Consent service verifies consent for `sanctions_screening`.
+- Evidence service calls sanctions registry and returns `IsPep`, `IsSanctioned`.
+- Decision service returns `fail` or `pass_with_conditions` based on policy.
+- Audit service records the decision with reason.
 
 ### Scenario 3 - Data export and deletion for user rights
 
-* Auth service identifies user.
-* Consent, evidence, decision, and audit services expose read methods via their stores to gather all data for the user.
-* Transport layer exposes `/me/data-export` and `/me` on top of these services.
-* Audit service records `data_exported` and `user_data_deleted` events.
+- Auth service identifies user.
+- Consent, evidence, decision, and audit services expose read methods via their stores to gather all data for the user.
+- Transport layer exposes `/me/data-export` and `/me` on top of these services.
+- Audit service records `data_exported` and `user_data_deleted` events.
 
 ---
 
@@ -185,9 +187,9 @@ Rules of thumb:
 
 **Responsibilities**
 
-* Manage `User` and `Session` objects.
-* Implement minimal OIDC like behaviour: authorize, token, userinfo.
-* Provide a helper to resolve the current user from an access token for other services.
+- Manage `User` and `Session` objects.
+- Implement minimal OIDC like behaviour: authorize, token, userinfo.
+- Provide a helper to resolve the current user from an access token for other services.
 
 **Key types**
 
@@ -217,8 +219,8 @@ type Session struct {
 
 **Clients**
 
-* Called by `transport/http` for login and token endpoints.
-* Called by `transport/http` to resolve current user for any authenticated endpoints.
+- Called by `transport/http` for login and token endpoints.
+- Called by `transport/http` to resolve current user for any authenticated endpoints.
 
 ---
 
@@ -226,9 +228,9 @@ type Session struct {
 
 **Responsibilities**
 
-* Model purpose based consent as first class data.
-* Enforce consent requirements before sensitive operations.
-* Provide a stable enforcement API used by other services.
+- Model purpose based consent as first class data.
+- Enforce consent requirements before sensitive operations.
+- Provide a stable enforcement API used by other services.
 
 **Key types**
 
@@ -254,13 +256,13 @@ type ConsentRecord struct {
 
 **Services**
 
-* `GrantPurposes(userID, purposes)`
-* `RequireConsent(userID, purpose)` returns typed errors `ErrMissingConsent`, `ErrConsentExpired`.
+- `GrantPurposes(userID, purposes)`
+- `RequireConsent(userID, purpose)` returns typed errors `ErrMissingConsent`, `ErrConsentExpired`.
 
 **Clients**
 
-* Called by `transport/http` on `/auth/consent`.
-* Called by `evidence` and `decision` services to enforce requirements.
+- Called by `transport/http` on `/auth/consent`.
+- Called by `evidence` and `decision` services to enforce requirements.
 
 ---
 
@@ -272,9 +274,9 @@ Evidence is split into `registry` and `vc`.
 
 **Responsibilities**
 
-* Integrate with citizen and sanctions registry mocks.
-* Cache results with TTL.
-* Apply minimisation when regulated mode is active.
+- Integrate with citizen and sanctions registry mocks.
+- Cache results with TTL.
+- Apply minimisation when regulated mode is active.
 
 **Key types**
 
@@ -298,9 +300,9 @@ type SanctionsRecord struct {
 
 **Service**
 
-* `Check(ctx, nationalID)` - Returns both citizen and sanctions records
-* `Citizen(ctx, nationalID)` - Returns citizen record from cache or registry
-* `Sanctions(ctx, nationalID)` - Returns sanctions record from cache or registry
+- `Check(ctx, nationalID)` - Returns both citizen and sanctions records
+- `Citizen(ctx, nationalID)` - Returns citizen record from cache or registry
+- `Sanctions(ctx, nationalID)` - Returns sanctions record from cache or registry
 
 This service is the only place that knows about external registry details. It handles caching with a 5-minute TTL and applies data minimization in regulated mode using `MinimizeCitizenRecord()`.
 
@@ -308,8 +310,8 @@ This service is the only place that knows about external registry details. It ha
 
 **Responsibilities**
 
-* Issue and verify simple verifiable credentials such as `AgeOver18`.
-* Store and revoke credentials.
+- Issue and verify simple verifiable credentials such as `AgeOver18`.
+- Store and revoke credentials.
 
 **Key types**
 
@@ -327,8 +329,8 @@ type VerifiableCredential struct {
 
 **Service**
 
-* `Issue(ctx, IssueRequest)` - Issues a verifiable credential based on type and claims
-* `Verify(ctx, credentialID)` - Verifies a credential exists and is not revoked
+- `Issue(ctx, IssueRequest)` - Issues a verifiable credential based on type and claims
+- `Verify(ctx, credentialID)` - Verifies a credential exists and is not revoked
 
 The service supports claim minimization in regulated mode using `MinimizeClaims()` which removes PII keys like full_name, national_id, and date_of_birth.
 
@@ -338,8 +340,8 @@ The service supports claim minimization in regulated mode using `MinimizeClaims(
 
 **Responsibilities**
 
-* Combine purpose, user, evidence, and context into a decision.
-* Encapsulate business rules for `age_verification`, `sanctions_screening`, and any other purposes.
+- Combine purpose, user, evidence, and context into a decision.
+- Encapsulate business rules for `age_verification`, `sanctions_screening`, and any other purposes.
 
 **Key types**
 
@@ -376,7 +378,7 @@ type DecisionOutcome struct {
 
 **Service**
 
-* `Evaluate(ctx, DecisionInput) (DecisionOutcome, error)`
+- `Evaluate(ctx, DecisionInput) (DecisionOutcome, error)`
 
 The `DecisionInput` structure contains pre-processed evidence (sanctions status, citizen validity, credential existence) and derived identity attributes. This ensures no PII is passed to the decision engine - only boolean flags and computed values.
 
@@ -386,9 +388,9 @@ The `DecisionInput` structure contains pre-processed evidence (sanctions status,
 
 **Responsibilities**
 
-* Provide a simple API for other services to publish audit events.
-* Decouple publishing from persistence using a queue or Go channel.
-* Persist events in an `AuditStore` and log them.
+- Provide a simple API for other services to publish audit events.
+- Decouple publishing from persistence using a queue or Go channel.
+- Persist events in an `AuditStore` and log them.
 
 **Key types**
 
@@ -407,13 +409,13 @@ type Event struct {
 
 **Components**
 
-* `AuditPublisher` interface for publishing events.
-* Channel based implementation for the prototype.
-* Worker that drains the channel and writes to `AuditStore`.
+- `AuditPublisher` interface for publishing events.
+- Channel based implementation for the prototype.
+- Worker that drains the channel and writes to `AuditStore`.
 
 **Clients**
 
-* Called by auth, consent, evidence, decision, and transport layers when key actions occur.
+- Called by auth, consent, evidence, decision, and transport layers when key actions occur.
 
 ---
 
@@ -421,18 +423,18 @@ type Event struct {
 
 **Responsibilities**
 
-* Expose REST endpoints.
-* Marshal and unmarshal JSON.
-* Handle errors and HTTP status codes.
-* Call into services only, no business rules.
+- Expose REST endpoints.
+- Marshal and unmarshal JSON.
+- Handle errors and HTTP status codes.
+- Call into services only, no business rules.
 
 Key handlers grouped by file, for example:
 
-* `handlers_auth.go` for `/auth/*` endpoints.
-* `handlers_consent.go` for `/auth/consent`.
-* `handlers_evidence.go` for `/vc/*` or registry endpoints if you expose them.
-* `handlers_decision.go` for `/decision/evaluate`.
-* `handlers_me.go` for `/me/data-export` and `/me`.
+- `handlers_auth.go` for `/auth/*` endpoints.
+- `handlers_consent.go` for `/auth/consent`.
+- `handlers_evidence.go` for `/vc/*` or registry endpoints if you expose them.
+- `handlers_decision.go` for `/decision/evaluate`.
+- `handlers_me.go` for `/me/data-export` and `/me`.
 
 ---
 
@@ -440,18 +442,18 @@ Key handlers grouped by file, for example:
 
 **Responsibilities**
 
-* Cross cutting concerns, not domain logic.
+- Cross cutting concerns, not domain logic.
 
 **Components:**
 
-* **Config** - Environment variable loading and configuration management
-* **Logger** - Structured logging with slog
+- **Config** - Environment variable loading and configuration management
+- **Logger** - Structured logging with slog
   - Context-aware logging (InfoContext, WarnContext, ErrorContext)
   - Automatic request_id extraction from context for distributed tracing
   - JSON output format for production observability
-* **Middleware** - HTTP middleware stack (see Middleware section below)
-* **Metrics** - Prometheus metrics collection and exposition at `/metrics`
-* **HTTP Server** - Server startup and graceful shutdown handling
+- **Middleware** - HTTP middleware stack (see Middleware section below)
+- **Metrics** - Prometheus metrics collection and exposition at `/metrics`
+- **HTTP Server** - Server startup and graceful shutdown handling
 
 ---
 
@@ -459,27 +461,27 @@ Key handlers grouped by file, for example:
 
 **Responsibilities**
 
-* Provide reusable HTTP middleware for cross-cutting concerns
-* Request tracing, logging, recovery, timeouts, and metrics collection
+- Provide reusable HTTP middleware for cross-cutting concerns
+- Request tracing, logging, recovery, timeouts, and metrics collection
 
 **Available Middleware:**
 
-* `Recovery(logger)` - Recovers from panics and logs with context and request_id
-* `RequestID` - Injects unique request ID into context and response headers
-* `Logger(logger)` - Logs all HTTP requests with context-aware structured logging
-* `Timeout(duration)` - Enforces request timeout (default: 30 seconds)
-* `ContentTypeJSON` - Validates Content-Type header for POST/PUT/PATCH requests
-* `LatencyMiddleware(metrics)` - Tracks endpoint latency in Prometheus histogram
+- `Recovery(logger)` - Recovers from panics and logs with context and request_id
+- `RequestID` - Injects unique request ID into context and response headers
+- `Logger(logger)` - Logs all HTTP requests with context-aware structured logging
+- `Timeout(duration)` - Enforces request timeout (default: 30 seconds)
+- `ContentTypeJSON` - Validates Content-Type header for POST/PUT/PATCH requests
+- `LatencyMiddleware(metrics)` - Tracks endpoint latency in Prometheus histogram
 
 All middleware supports context propagation and includes request_id for distributed tracing.
 
 **Metrics Collected:**
 
-* `id_gateway_users_created_total` - Counter for total users created
-* `id_gateway_active_sessions` - Gauge for current active sessions
-* `id_gateway_token_requests_total` - Counter for token exchange requests
-* `id_gateway_auth_failures_total` - Counter for authentication failures
-* `id_gateway_endpoint_latency_seconds` - Histogram for endpoint latency by path
+- `id_gateway_users_created_total` - Counter for total users created
+- `id_gateway_active_sessions` - Gauge for current active sessions
+- `id_gateway_token_requests_total` - Counter for token exchange requests
+- `id_gateway_auth_failures_total` - Counter for authentication failures
+- `id_gateway_endpoint_latency_seconds` - Histogram for endpoint latency by path
 
 ---
 
@@ -620,33 +622,39 @@ sequenceDiagram
 
 High level entities across services:
 
-* `auth`
-  * `User` - ID, Email, FirstName, LastName, Verified
-  * `Session` - ID, UserID, Code, CodeExpiresAt, CodeUsed, ClientID, RedirectURI, RequestedScope, Status, CreatedAt, ExpiresAt
+- `auth`
 
-* `consent`
-  * `ConsentPurpose` - Enum: login, registry_check, vc_issuance, decision_evaluation
-  * `ConsentRecord` - ID, UserID, Purpose, GrantedAt, ExpiresAt, RevokedAt
+  - `User` - ID, Email, FirstName, LastName, Verified
+  - `Session` - ID, UserID, Code, CodeExpiresAt, CodeUsed, ClientID, RedirectURI, RequestedScope, Status, CreatedAt, ExpiresAt
 
-* `evidence.registry`
-  * `CitizenRecord` - NationalID, FullName, DateOfBirth (string), Address, Valid, CheckedAt
-  * `SanctionsRecord` - NationalID, Listed, Source, CheckedAt
-  * Cached in `RegistryCacheStore` with 5-minute TTL
+- `consent`
 
-* `evidence.vc`
-  * `VerifiableCredential` - ID, Type, Subject, Issuer, IssuedAt, Claims (map), Revoked
-  * `IssueRequest` / `IssueResult` - Request/response structures
-  * `VerifyRequest` / `VerifyResult` - Verification structures
+  - `ConsentPurpose` - Enum: login, registry_check, vc_issuance, decision_evaluation
+  - `ConsentRecord` - ID, UserID, Purpose, GrantedAt, ExpiresAt, RevokedAt
 
-* `decision`
-  * `DecisionInput` - UserID, Purpose, SanctionsListed, CitizenValid, HasCredential, DerivedIdentity, Context
-  * `DerivedIdentity` - PseudonymousID, IsOver18 (no PII)
-  * `DecisionOutcome` - Status, Reason, Conditions
+- `evidence.registry`
 
-* `audit`
-  * `Event` - ID, Timestamp, UserID, Action, Purpose, Decision, Reason, RequestID
+  - `CitizenRecord` - NationalID, FullName, DateOfBirth (string), Address, Valid, CheckedAt
+  - `SanctionsRecord` - NationalID, Listed, Source, CheckedAt
+  - Cached in `RegistryCacheStore` with 5-minute TTL
+
+- `evidence.vc`
+
+  - `VerifiableCredential` - ID, Type, Subject, Issuer, IssuedAt, Claims (map), Revoked
+  - `IssueRequest` / `IssueResult` - Request/response structures
+  - `VerifyRequest` / `VerifyResult` - Verification structures
+
+- `decision`
+
+  - `DecisionInput` - UserID, Purpose, SanctionsListed, CitizenValid, HasCredential, DerivedIdentity, Context
+  - `DerivedIdentity` - PseudonymousID, IsOver18 (no PII)
+  - `DecisionOutcome` - Status, Reason, Conditions
+
+- `audit`
+  - `Event` - ID, Timestamp, UserID, Action, Purpose, Decision, Reason, RequestID
 
 **Relationships:**
+
 - All entities linked by `UserID`
 - Purpose strings from `ConsentPurpose` enum
 - DerivedIdentity computed from CitizenRecord without storing PII
@@ -658,34 +666,37 @@ High level entities across services:
 
 `REGULATED_MODE=true` affects behaviour across services to enforce GDPR data minimization principles:
 
-* `auth`
+- `auth`
   Standard user and session management. May enforce stricter session duration in production.
 
-* `consent`
+- `consent`
   Mandatory for registry, VC, and decision flows. Missing consent returns HTTP 403 with typed error `CodeMissingConsent`.
 
-* `evidence.registry`
+- `evidence.registry`
   **Key minimization logic:**
+
   - Calls `MinimizeCitizenRecord()` before returning data
   - In regulated mode: strips `FullName`, `DateOfBirth`, `Address` - keeps only `Valid` boolean and `NationalID`
   - Derives `IsOver18` from `DateOfBirth` in decision logic, then discards raw DOB
   - Cache TTL enforced at 5 minutes (from `config.RegistryCacheTTL`)
   - Sanctions records are not minimized (contain no PII, only boolean `Listed` flag)
 
-* `evidence.vc`
+- `evidence.vc`
   **Key minimization logic:**
+
   - Calls `MinimizeClaims()` before storing credentials
   - In regulated mode: removes keys `full_name`, `national_id`, `date_of_birth`, `verified_via`
   - Keeps only derived attributes (e.g., `is_over_18: true`)
   - Issues credentials with minimal claims, not raw identity data
 
-* `decision`
+- `decision`
   **Privacy-first design:**
+
   - Accepts `DerivedIdentity` struct with `IsOver18` boolean, not raw DOB
   - Decision logic operates on pre-computed flags (`SanctionsListed`, `CitizenValid`, `HasCredential`)
   - No PII flows through decision engine, only boolean evidence
 
-* `audit`
+- `audit`
   Required for all sensitive operations. Events include action, purpose, decision, reason but avoid logging raw PII (use user IDs, not emails).
 
 Having the code structured by services makes these toggles easier to reason about. The pattern is: **derive → decide → discard PII**.
@@ -695,7 +706,9 @@ Having the code structured by services makes these toggles easier to reason abou
 ## Productionisation Considerations
 
 ### Current State (MVP)
+
 **What's Implemented:**
+
 - ✅ Complete domain models and service layer logic
 - ✅ In-memory stores (UserStore, SessionStore, ConsentStore, VCStore, RegistryCacheStore, AuditStore)
 - ✅ Storage interfaces abstracted (ready for Postgres implementations)
@@ -713,32 +726,38 @@ Having the code structured by services makes these toggles easier to reason abou
 - ✅ Basic audit event models
 
 **What's Partially Implemented:**
+
 - ✅ Auth handlers fully implemented (authorize, token, userinfo)
 - ⚠️ Consent, Evidence, Decision, and User Data Rights handlers (501 Not Implemented)
 - ⚠️ Real VC credential ID generation
 - ⚠️ Async audit worker (worker.go exists but not wired)
 
 ### Production Roadmap
+
 Key improvements to harden this design:
 
 1. **Persistent Storage**
+
    - Replace in-memory stores with Postgres repositories per service
    - Add connection pooling and retry logic
    - Implement proper transaction handling for multi-store operations
 
 2. **Audit System**
+
    - Replace synchronous audit with buffered channel + background worker
    - Deploy worker as separate goroutine or process
    - Consider NATS/Kafka for audit event streaming
    - Add audit log encryption and signing for tamper-proofing
 
 3. **Authentication**
+
    - Replace OIDC-lite with real OIDC provider (e.g., Ory Fosite, Keycloak)
    - Implement JWT signing with RS256/ES256
    - Add refresh token support
    - Implement token revocation list
 
 4. **Observability** (Partially Complete)
+
    - ✅ Structured logging with slog and context-aware logging
    - ✅ Request ID middleware for distributed tracing
    - ✅ Prometheus metrics collection at service boundaries
@@ -748,11 +767,13 @@ Key improvements to harden this design:
    - ⚠️ Add metrics dashboard (Grafana) and alerting rules
 
 5. **Policy Engine**
+
    - Externalize decision rules to JSON/YAML configuration
    - Support dynamic rule updates without redeployment
    - Add A/B testing framework for rule variations
 
 6. **Security Hardening**
+
    - Add rate limiting per user/IP
    - Implement circuit breakers for registry calls
    - Add request signing/verification
@@ -761,6 +782,7 @@ Key improvements to harden this design:
 
 7. **Microservices Split**
    The boundaries already match likely service splits:
+
    - `auth` service (users, sessions, tokens)
    - `consent` service (consent lifecycle)
    - `evidence` service (registry + VC)
@@ -774,33 +796,40 @@ Key improvements to harden this design:
 ## Design Rationale
 
 ### Why a Modular Monolith?
-* **Avoid premature distribution:** The monolith avoids early distributed systems complexity (network latency, partial failures, consistency challenges) while still modelling realistic identity flows.
-* **Clear boundaries:** Internal packages map to clear business responsibilities with well-defined service interfaces, making the code easy to explain and reason about.
-* **Production-ready pattern:** The separation of auth, consent, evidence, decision, and audit reflects how regulated environments are actually structured in practice, even when everything runs on one platform.
-* **Easy to split later:** Service boundaries are designed to support microservices extraction if needed - each package has its own store interface and minimal cross-dependencies.
+
+- **Avoid premature distribution:** The monolith avoids early distributed systems complexity (network latency, partial failures, consistency challenges) while still modelling realistic identity flows.
+- **Clear boundaries:** Internal packages map to clear business responsibilities with well-defined service interfaces, making the code easy to explain and reason about.
+- **Production-ready pattern:** The separation of auth, consent, evidence, decision, and audit reflects how regulated environments are actually structured in practice, even when everything runs on one platform.
+- **Easy to split later:** Service boundaries are designed to support microservices extraction if needed - each package has its own store interface and minimal cross-dependencies.
 
 ### Why Interface-Based Storage?
-* **Testability:** Service logic can be tested with mock stores without spinning up databases.
-* **Flexibility:** Easy to swap in-memory stores for Postgres, MongoDB, or cloud-native storage.
-* **Clear contracts:** Store interfaces document exactly what persistence operations each service needs.
+
+- **Testability:** Service logic can be tested with mock stores without spinning up databases.
+- **Flexibility:** Easy to swap in-memory stores for Postgres, MongoDB, or cloud-native storage.
+- **Clear contracts:** Store interfaces document exactly what persistence operations each service needs.
 
 ### Why Derived Identity Pattern?
-* **GDPR compliance:** Computing `IsOver18` from `DateOfBirth` then discarding the raw DOB satisfies data minimization requirements.
-* **Privacy by design:** Decision engine operates on boolean flags, not PII - prevents accidental logging or exposure.
-* **Audit-friendly:** Decisions based on derived attributes can be logged without violating privacy.
+
+- **GDPR compliance:** Computing `IsOver18` from `DateOfBirth` then discarding the raw DOB satisfies data minimization requirements.
+- **Privacy by design:** Decision engine operates on boolean flags, not PII - prevents accidental logging or exposure.
+- **Audit-friendly:** Decisions based on derived attributes can be logged without violating privacy.
 
 ### Why Purpose-Based Consent?
-* **Regulatory requirement:** GDPR Article 7 requires consent to be "specific" - blanket consent is not valid.
-* **User control:** Users can grant consent for age verification while denying consent for marketing.
-* **Enforcement:** The `Require()` pattern forces handlers to explicitly check consent before data processing.
+
+- **Regulatory requirement:** GDPR Article 7 requires consent to be "specific" - blanket consent is not valid.
+- **User control:** Users can grant consent for age verification while denying consent for marketing.
+- **Enforcement:** The `Require()` pattern forces handlers to explicitly check consent before data processing.
 
 ### Why Separate Evidence Domain?
-* **Separation of concerns:** Registry integration (external systems, caching, errors) is isolated from decision logic.
-* **Testability:** Decision engine can be tested with mock evidence without caring about registry implementation.
-* **Flexibility:** Easy to add new evidence sources (credit checks, KYC providers) without touching decision logic.
+
+- **Separation of concerns:** Registry integration (external systems, caching, errors) is isolated from decision logic.
+- **Testability:** Decision engine can be tested with mock evidence without caring about registry implementation.
+- **Flexibility:** Easy to add new evidence sources (credit checks, KYC providers) without touching decision logic.
 
 ### Current Implementation Status
+
 The codebase currently has:
+
 - ✅ **Strong foundation:** All domain models, service interfaces, and storage abstractions are complete and follow best practices.
 - ✅ **Testable architecture:** In-memory stores and service layer are fully functional, allowing unit testing without external dependencies.
 - ✅ **Production-ready auth:** OAuth 2.0 Authorization Code Flow fully implemented with comprehensive test coverage.

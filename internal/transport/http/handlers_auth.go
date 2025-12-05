@@ -3,15 +3,11 @@ package httptransport
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
 	authModel "id-gateway/internal/auth/models"
@@ -20,6 +16,7 @@ import (
 	"id-gateway/internal/platform/middleware"
 	dErrors "id-gateway/pkg/domain-errors"
 	s "id-gateway/pkg/string"
+	"id-gateway/pkg/validation"
 )
 
 // AuthHandler handles authentication endpoints including authorize, token, and userinfo.
@@ -81,8 +78,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, dErrors.New(dErrors.CodeInvalidRequest, "Invalid JSON in request body"))
 		return
 	}
-	err := validateAuthRequest(&req)
-	if err != nil {
+	if err := validation.Validate(&req); err != nil {
 		h.logger.WarnContext(ctx, "invalid authorize request",
 			"error", err,
 			"request_id", requestID,
@@ -131,8 +127,7 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, dErrors.New(dErrors.CodeInvalidRequest, "Invalid JSON in request body"))
 		return
 	}
-	err := validateAuthRequest(&req)
-	if err != nil {
+	if err := validation.Validate(&req); err != nil {
 		h.logger.WarnContext(ctx, "invalid token request",
 			"error", err,
 			"request_id", requestID,
@@ -227,50 +222,4 @@ func sanitizeAuthorizationRequest(req *authModel.AuthorizationRequest) {
 
 func sanitizeTokenRequest(req *authModel.TokenRequest) {
 	s.TrimStrings(&req.GrantType, &req.Code, &req.RedirectURI, &req.ClientID)
-}
-
-var authValidator = newAuthValidator()
-
-func newAuthValidator() *validator.Validate {
-	v := validator.New(validator.WithRequiredStructEnabled())
-	_ = v.RegisterValidation("notblank", func(fl validator.FieldLevel) bool {
-		return strings.TrimSpace(fl.Field().String()) != ""
-	})
-	return v
-}
-
-func validateAuthRequest(req any) error {
-	if err := authValidator.Struct(req); err != nil {
-		return dErrors.New(dErrors.CodeValidation, validationErrorMessage(err))
-	}
-	return nil
-}
-
-func validationErrorMessage(err error) string {
-	var validationErrs validator.ValidationErrors
-	if !errors.As(err, &validationErrs) || len(validationErrs) == 0 {
-		return "invalid request body"
-	}
-
-	fe := validationErrs[0]
-	field := s.ToSnakeCase(fe.Field())
-
-	switch fe.ActualTag() {
-	case "required":
-		return fmt.Sprintf("%s is required", field)
-	case "email":
-		return fmt.Sprintf("%s must be a valid email", field)
-	case "url":
-		return fmt.Sprintf("%s must be a valid url", field)
-	case "min":
-		return fmt.Sprintf("%s must be at least %s", field, fe.Param())
-	case "max":
-		return fmt.Sprintf("%s must be at most %s", field, fe.Param())
-	case "oneof":
-		return fmt.Sprintf("%s must be one of [%s]", field, fe.Param())
-	case "notblank":
-		return fmt.Sprintf("%s must not be blank", field)
-	default:
-		return fmt.Sprintf("%s is invalid", field)
-	}
 }
