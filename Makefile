@@ -6,7 +6,7 @@ MAIN := ./cmd/server/main.go
 # === DEFAULT ===
 default: dev
 
-.PHONY: default build run test test-cover test-one lint fmt imports clean help
+.PHONY: default build run test test-cover test-one lint fmt imports clean docker-clean help
 
 # === BUILD ===
 build:
@@ -53,6 +53,11 @@ imports:
 clean:
 	rm -rf bin/
 
+# === DOCKER CLEANUP ===
+docker-clean:
+	@echo "Stopping and removing docker-compose services, images, and volumes for $(APP_NAME)..."
+	docker compose down --rmi local --volumes --remove-orphans
+
 # === HELP ===
 help:
 	@echo "Available targets:"
@@ -65,4 +70,5 @@ help:
 	@echo "  fmt          Format code and run vet"
 	@echo "  imports      Fix import ordering (goimports)"
 	@echo "  clean        Remove build artifacts"
+	@echo "  docker-clean Stop containers and remove images/volumes for this app"
 	@echo "  help         Show this help"
