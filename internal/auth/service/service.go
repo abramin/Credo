@@ -12,6 +12,7 @@ import (
 	"id-gateway/internal/audit"
 	"id-gateway/internal/auth/models"
 	"id-gateway/internal/auth/store"
+	"id-gateway/internal/platform/metrics"
 	dErrors "id-gateway/pkg/domain-errors"
 	"id-gateway/pkg/email"
 )
@@ -35,6 +36,7 @@ type Service struct {
 	sessionTTL     time.Duration
 	logger         *slog.Logger
 	auditPublisher AuditPublisher
+	metrics        *metrics.Metrics
 }
 
 const StatusPendingConsent = "pending_consent"
@@ -63,6 +65,12 @@ func WithLogger(logger *slog.Logger) Option {
 func WithAuditPublisher(publisher AuditPublisher) Option {
 	return func(s *Service) {
 		s.auditPublisher = publisher
+	}
+}
+
+func WithMetrics(m *metrics.Metrics) Option {
+	return func(s *Service) {
+		s.metrics = m
 	}
 }
 
@@ -102,6 +110,9 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 			"user_id", user.ID.String(),
 			"client_id", req.ClientID,
 		)
+		if s.metrics != nil {
+			s.metrics.IncrementUsersCreated()
+		}
 	}
 
 	now := time.Now()
