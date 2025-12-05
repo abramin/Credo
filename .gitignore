@@ -38,3 +38,5 @@ go.work.sum
 frontend/node_modules/
 frontend/dist/
 frontend/.cache/
+
+temp_docs/
