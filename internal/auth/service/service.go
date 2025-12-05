@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"time"
 
 	"github.com/google/uuid"
 
 	"id-gateway/internal/auth/models"
+	"id-gateway/internal/auth/store"
 	dErrors "id-gateway/pkg/domain-errors"
 	"id-gateway/pkg/email"
 )
@@ -21,6 +23,7 @@ type UserStore interface {
 type SessionStore interface {
 	Save(ctx context.Context, session *models.Session) error
 	FindByID(ctx context.Context, id string) (*models.Session, error)
+	FindByCode(ctx context.Context, code string) (*models.Session, error)
 }
 
 type Service struct {
@@ -122,36 +125,36 @@ func (s *Service) Consent(ctx context.Context, req *models.ConsentRequest) (*mod
 func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error) {
 	// 1. Validate grant_type
 	if req.GrantType != "authorization_code" {
-		return nil, httpErrors.New(httpErrors.CodeInvalidInput, "unsupported grant_type")
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "unsupported grant_type")
 	}
 
 	// 2. Find session by authorization code
 	session, err := s.sessions.FindByCode(ctx, req.Code)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, httpErrors.New(httpErrors.CodeUnauthorized, "invalid authorization code")
+			return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid authorization code")
 		}
-		return nil, httpErrors.New(httpErrors.CodeInternal, "failed to find session")
+		return nil, dErrors.New(dErrors.CodeInternal, "failed to find session")
 	}
 
 	// 3. Validate code not expired (OAuth 2.0 spec: codes expire quickly)
 	if time.Now().After(session.CodeExpiresAt) {
-		return nil, httpErrors.New(httpErrors.CodeUnauthorized, "authorization code expired")
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code expired")
 	}
 
 	// 4. Validate code not already used (prevent replay attacks)
 	if session.CodeUsed {
-		return nil, httpErrors.New(httpErrors.CodeUnauthorized, "authorization code already used")
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code already used")
 	}
 
 	// 5. Validate redirect_uri matches (OAuth 2.0 security requirement)
 	if req.RedirectURI != session.RedirectURI {
-		return nil, httpErrors.New(httpErrors.CodeInvalidInput, "redirect_uri mismatch")
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "redirect_uri mismatch")
 	}
 
 	// 6. Validate client_id matches
 	if req.ClientID != session.ClientID {
-		return nil, httpErrors.New(httpErrors.CodeInvalidInput, "client_id mismatch")
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "client_id mismatch")
 	}
 
 	// 7. Mark code as used and update session status
@@ -159,7 +162,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	session.Status = "active"
 	err = s.sessions.Save(ctx, session)
 	if err != nil {
-		return nil, httpErrors.New(httpErrors.CodeInternal, "failed to update session")
+		return nil, dErrors.New(dErrors.CodeInternal, "failed to update session")
 	}
 
 	// 8. Generate tokens

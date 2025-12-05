@@ -109,6 +109,21 @@ func (m *MockSessionStore) EXPECT() *MockSessionStoreMockRecorder {
 	return m.recorder
 }
 
+// FindByCode mocks base method.
+func (m *MockSessionStore) FindByCode(ctx context.Context, code string) (*models.Session, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindByCode", ctx, code)
+	ret0, _ := ret[0].(*models.Session)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindByCode indicates an expected call of FindByCode.
+func (mr *MockSessionStoreMockRecorder) FindByCode(ctx, code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindByCode", reflect.TypeOf((*MockSessionStore)(nil).FindByCode), ctx, code)
+}
+
 // FindByID mocks base method.
 func (m *MockSessionStore) FindByID(ctx context.Context, id string) (*models.Session, error) {
 	m.ctrl.T.Helper()

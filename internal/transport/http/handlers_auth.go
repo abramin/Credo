@@ -86,7 +86,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("authorization successful",
 		"request_id", requestID,
-		"session_id", res.SessionID,
+		"code", res.Code,
 	)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -94,7 +94,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Note: We ignore encoding errors here since the response has already started.
 	// Proper error handling would require buffering the response.
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"session_id":   res.SessionID.String(),
+		"code":         res.Code,
 		"redirect_uri": res.RedirectURI,
 	})
 }
