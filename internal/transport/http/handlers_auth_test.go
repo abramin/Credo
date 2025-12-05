@@ -20,6 +20,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	authModel "id-gateway/internal/auth/models"
+	"id-gateway/internal/platform/middleware"
 	"id-gateway/internal/transport/http/mocks"
 	dErrors "id-gateway/pkg/domain-errors"
 )
@@ -381,21 +382,24 @@ func (s *AuthHandlerSuite) newHandler(t *testing.T) (*mocks.MockAuthService, *ch
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	mockService := mocks.NewMockAuthService(ctrl)
-	handler := NewAuthHandler(mockService, logger, false, nil, nil) // TODO; test regulatedMode true cases
+	handler := NewAuthHandler(mockService, logger, false, nil)
 	r := chi.NewRouter()
 	handler.Register(r)
-	router := r
-	return mockService, router
+	return mockService, r
 }
 
 func (s *AuthHandlerSuite) doUserInfoRequest(t *testing.T, router *chi.Mux, sessionID uuid.UUID) (int, *authModel.UserInfoResult, map[string]string) {
 	t.Helper()
 	httpReq := httptest.NewRequest(http.MethodGet, "/auth/userinfo", nil)
-	if sessionID != uuid.Nil {
-		httpReq.Header.Set("Authorization", "Bearer at_sess_"+sessionID.String())
-	}
-	rr := httptest.NewRecorder()
 
+	// Inject session ID into context (simulating what the auth middleware would do)
+	if sessionID != uuid.Nil {
+		ctx := httpReq.Context()
+		ctx = context.WithValue(ctx, middleware.ContextKeySessionID, sessionID.String())
+		httpReq = httpReq.WithContext(ctx)
+	}
+
+	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, httpReq)
 
 	raw, err := io.ReadAll(rr.Body)

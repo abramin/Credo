@@ -15,6 +15,8 @@ import (
 	"id-gateway/internal/auth/models"
 	"id-gateway/internal/auth/service"
 	"id-gateway/internal/auth/store"
+	jwttoken "id-gateway/internal/jwt_token"
+	"id-gateway/internal/platform/middleware"
 	httptransport "id-gateway/internal/transport/http"
 	dErrors "id-gateway/pkg/domain-errors"
 
@@ -24,22 +26,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemorySessionStore) {
+func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemorySessionStore, *jwttoken.JWTService) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	userStore := store.NewInMemoryUserStore()
 	sessionStore := store.NewInMemorySessionStore()
 
 	authService := service.NewService(userStore, sessionStore, 5*time.Minute, service.WithLogger(logger))
-	authHandler := httptransport.NewAuthHandler(authService, logger, false, nil, nil) // TODO; test regulatedMode true cases
+
+	// Initialize JWT service for token generation/validation in tests
+	jwtService := jwttoken.NewJWTService(
+		"test-secret-key",
+		"id-gateway",
+		"id-gateway-client",
+	)
+	jwtValidator := jwttoken.NewJWTServiceAdapter(jwtService)
 
 	router := chi.NewRouter()
-	authHandler.Register(router)
+	authHandler := httptransport.NewAuthHandler(authService, logger, false, nil)
 
-	return router, userStore, sessionStore
+	// Public endpoints (no auth required) - mirrors production setup
+	router.Post("/auth/authorize", authHandler.HandleAuthorize)
+	router.Post("/auth/token", authHandler.HandleToken)
+
+	// Protected endpoints (auth required)
+	router.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAuth(jwtValidator, logger))
+		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
+	})
+
+	return router, userStore, sessionStore, jwtService
 }
+
 func TestCompleteAuthFlow(t *testing.T) {
-	r, userStore, sessionStore := SetupSuite(t)
+	r, userStore, sessionStore, _ := SetupSuite(t)
 	reqBody := models.AuthorizationRequest{
 		Email:       "jane.doe@example.com",
 		ClientID:    "client-123",
@@ -129,7 +149,7 @@ func TestConcurrentUserCreation(t *testing.T) {
 	// This test would simulate multiple concurrent requests to create
 	// the same user and ensure that the user store handles it correctly
 	// without creating duplicate users.
-	r, userStore, _ := SetupSuite(t)
+	r, userStore, _, _ := SetupSuite(t)
 	concurrentRequests := 10
 	errCh := make(chan error, concurrentRequests)
 
@@ -176,7 +196,7 @@ func TestConcurrentUserCreation(t *testing.T) {
 
 // - [ ] Test session expiry handling
 func TestSessionExpiryHandling(t *testing.T) {
-	r, _, sessionStore := SetupSuite(t)
+	r, _, sessionStore, _ := SetupSuite(t)
 	session := &models.Session{
 		ID:            uuid.New(),
 		UserID:        uuid.New(),
@@ -219,7 +239,7 @@ func TestSessionExpiryHandling(t *testing.T) {
 }
 
 func TestInvalidBearerTokenRejection(t *testing.T) {
-	r, _, _ := SetupSuite(t)
+	r, _, _, _ := SetupSuite(t)
 	invalidTokens := []string{
 		"",                   // Empty token
 		"invalidtoken",       // Random string

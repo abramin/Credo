@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -25,7 +24,6 @@ type AuthHandler struct {
 	auth          AuthService
 	logger        *slog.Logger
 	metrics       *metrics.Metrics
-	jwtValidator  middleware.JWTValidator
 }
 
 // AuthService defines the interface for authentication operations.grant_type must be one of
@@ -36,41 +34,30 @@ type AuthService interface {
 }
 
 // NewAuthHandler creates a new AuthHandler with the given service and logger.
-func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool, metrics *metrics.Metrics, jwtValidator middleware.JWTValidator) *AuthHandler {
+func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool, metrics *metrics.Metrics) *AuthHandler {
 	return &AuthHandler{
 		regulatedMode: regulatedMode,
 		auth:          auth,
 		logger:        logger,
 		metrics:       metrics,
-		jwtValidator:  jwtValidator,
 	}
 }
 
 // Register registers the auth routes with the chi router.
+// Note: Authentication middleware should be applied by the parent router to protected routes.
 func (h *AuthHandler) Register(r chi.Router) {
-	authRouter := chi.NewRouter()
-	authRouter.Use(middleware.Recovery(h.logger))
-	authRouter.Use(middleware.RequestID)
-	authRouter.Use(middleware.Logger(h.logger))
-	authRouter.Use(middleware.Timeout(30 * time.Second))
-	authRouter.Use(middleware.ContentTypeJSON)
-	authRouter.Use(middleware.LatencyMiddleware(h.metrics))
-	authRouter.Use(middleware.RequireAuth(h.jwtValidator, h.logger))
-
-	authRouter.Post("/auth/authorize", h.handleAuthorize)
-	authRouter.Post("/auth/token", h.handleToken)
-	authRouter.Get("/auth/userinfo", h.handleUserInfo)
-
-	r.Mount("/", authRouter)
+	r.Post("/auth/authorize", h.HandleAuthorize)
+	r.Post("/auth/token", h.HandleToken)
+	r.Get("/auth/userinfo", h.HandleUserInfo)
 }
 
-// handleAuthorize implements POST /auth/authorize per PRD-001 FR-1.
+// HandleAuthorize implements POST /auth/authorize per PRD-001 FR-1.
 // Initiates an authentication session for a user by email.
 // If the user doesn't exist, creates them automatically.
 //
 // Input: { "email": "user@example.com", "client_id": "demo-client", "scopes": [...], "redirect_uri": "...", "state": "..." }
 // Output: { "session_id": "sess_...", "redirect_uri": "https://..." }
-func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 
@@ -119,7 +106,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 
@@ -171,37 +158,36 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
+	sessionIDStr := middleware.GetSessionID(ctx)
 
-	claims, err := h.jwtValidator.ValidateToken(r.Header.Get("Authorization"))
-	if err != nil {
-		h.logger.WarnContext(ctx, "missing or invalid access token",
+	if sessionIDStr == "" {
+		h.logger.WarnContext(ctx, "missing session ID in context",
 			"request_id", requestID,
 		)
-		writeError(w, dErrors.New(dErrors.CodeUnauthorized, "missing or invalid access token"))
-		if h.metrics != nil {
-			h.metrics.IncrementAuthFailures()
-		}
+		writeError(w, dErrors.New(dErrors.CodeUnauthorized, "Missing or invalid session"))
 		return
 	}
-	session_id, err := uuid.Parse(claims.SessionID)
+
+	sessionID, err := uuid.Parse(sessionIDStr)
 	if err != nil {
-		h.logger.WarnContext(ctx, "invalid session id format",
+		h.logger.WarnContext(ctx, "invalid session ID format",
 			"error", err,
 			"request_id", requestID,
+			"session_id", sessionIDStr,
 		)
-		writeError(w, dErrors.New(dErrors.CodeInvalidInput, "invalid session id format"))
+		writeError(w, dErrors.New(dErrors.CodeUnauthorized, "Invalid session ID"))
 		return
 	}
 
-	userInfo, err := h.auth.UserInfo(ctx, session_id)
+	userInfo, err := h.auth.UserInfo(ctx, sessionID)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to get user info",
 			"error", err,
 			"request_id", requestID,
-			"session_id", session_id,
+			"session_id", sessionIDStr,
 		)
 		writeError(w, err)
 		return
@@ -209,7 +195,7 @@ func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.InfoContext(ctx, "user info retrieved successfully",
 		"request_id", requestID,
-		"session_id", session_id,
+		"session_id", sessionIDStr,
 	)
 
 	w.Header().Set("Content-Type", "application/json")
