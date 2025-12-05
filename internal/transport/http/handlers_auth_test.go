@@ -333,10 +333,10 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 		assert.Equal(t, string(httpErrors.CodeUnauthorized), errBody["error"])
 	})
 
-	// - 401 Unauthorized: Token not found or expired
-	s.T().Run("token not found or expired - 401", func(t *testing.T) {
+	// - 401 Unauthorized: session not found or expired
+	s.T().Run("session not found or expired - 401", func(t *testing.T) {
 		mockService, router := s.newHandler(t)
-		serviceErr := dErrors.New(dErrors.CodeUnauthorized, "token not found or expired")
+		serviceErr := dErrors.New(dErrors.CodeUnauthorized, "session not found or expired")
 		mockService.EXPECT().UserInfo(gomock.Any(), validSessionID).Return(nil, serviceErr)
 
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID)
