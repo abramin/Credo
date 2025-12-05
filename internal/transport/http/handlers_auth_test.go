@@ -381,7 +381,7 @@ func (s *AuthHandlerSuite) newHandler(t *testing.T) (*mocks.MockAuthService, *ch
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	mockService := mocks.NewMockAuthService(ctrl)
-	handler := NewAuthHandler(mockService, logger, false, nil) // TODO; test regulatedMode true cases
+	handler := NewAuthHandler(mockService, logger, false, nil, nil) // TODO; test regulatedMode true cases
 	r := chi.NewRouter()
 	handler.Register(r)
 	router := r

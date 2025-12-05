@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	authModel "id-gateway/internal/auth/models"
-	jwttoken "id-gateway/internal/jwt_token"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
 	dErrors "id-gateway/pkg/domain-errors"
@@ -26,6 +25,7 @@ type AuthHandler struct {
 	auth          AuthService
 	logger        *slog.Logger
 	metrics       *metrics.Metrics
+	jwtValidator  middleware.JWTValidator
 }
 
 // AuthService defines the interface for authentication operations.grant_type must be one of
@@ -36,12 +36,13 @@ type AuthService interface {
 }
 
 // NewAuthHandler creates a new AuthHandler with the given service and logger.
-func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool, metrics *metrics.Metrics) *AuthHandler {
+func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool, metrics *metrics.Metrics, jwtValidator middleware.JWTValidator) *AuthHandler {
 	return &AuthHandler{
 		regulatedMode: regulatedMode,
 		auth:          auth,
 		logger:        logger,
 		metrics:       metrics,
+		jwtValidator:  jwtValidator,
 	}
 }
 
@@ -54,6 +55,7 @@ func (h *AuthHandler) Register(r chi.Router) {
 	authRouter.Use(middleware.Timeout(30 * time.Second))
 	authRouter.Use(middleware.ContentTypeJSON)
 	authRouter.Use(middleware.LatencyMiddleware(h.metrics))
+	authRouter.Use(middleware.RequireAuth(h.jwtValidator, h.logger))
 
 	authRouter.Post("/auth/authorize", h.handleAuthorize)
 	authRouter.Post("/auth/token", h.handleToken)
@@ -173,7 +175,7 @@ func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 
-	session_id, err := jwttoken.ExtractSessionIDFromAuthHeader(r.Header.Get("Authorization"))
+	claims, err := h.jwtValidator.ValidateToken(r.Header.Get("Authorization"))
 	if err != nil {
 		h.logger.WarnContext(ctx, "missing or invalid access token",
 			"request_id", requestID,
@@ -184,7 +186,7 @@ func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	session_uuid, err := uuid.Parse(session_id)
+	session_id, err := uuid.Parse(claims.SessionID)
 	if err != nil {
 		h.logger.WarnContext(ctx, "invalid session id format",
 			"error", err,
@@ -194,7 +196,7 @@ func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userInfo, err := h.auth.UserInfo(ctx, session_uuid)
+	userInfo, err := h.auth.UserInfo(ctx, session_id)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to get user info",
 			"error", err,

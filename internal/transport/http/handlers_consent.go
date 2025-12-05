@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	consentModel "id-gateway/internal/consent/models"
-	jwttoken "id-gateway/internal/jwt_token"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
 	dErrors "id-gateway/pkg/domain-errors"
@@ -25,10 +24,11 @@ type ConsentService interface {
 
 // ConsentHandler handles consent-related endpoints.
 type ConsentHandler struct {
-	logger     *slog.Logger
-	consent    ConsentService
-	metrics    *metrics.Metrics
-	consentTTL time.Duration
+	logger       *slog.Logger
+	consent      ConsentService
+	metrics      *metrics.Metrics
+	consentTTL   time.Duration
+	jwtValidator middleware.JWTValidator
 }
 
 func (h *ConsentHandler) Register(r chi.Router) {
@@ -39,7 +39,7 @@ func (h *ConsentHandler) Register(r chi.Router) {
 	consentRouter.Use(middleware.Timeout(30 * time.Second))
 	consentRouter.Use(middleware.ContentTypeJSON)
 	consentRouter.Use(middleware.LatencyMiddleware(h.metrics))
-
+	consentRouter.Use(middleware.RequireAuth(h.jwtValidator, h.logger))
 	consentRouter.Post("/auth/consent", h.handleGrantConsent)
 	consentRouter.Post("/auth/consent/revoke", h.handleRevokeConsent)
 	consentRouter.Get("/auth/consent", h.handleGetConsent)
@@ -47,33 +47,38 @@ func (h *ConsentHandler) Register(r chi.Router) {
 	r.Mount("/", consentRouter)
 }
 
-func NewConsentHandler(consent ConsentService, logger *slog.Logger, metrics *metrics.Metrics) *ConsentHandler {
+func NewConsentHandler(
+	consent ConsentService,
+	logger *slog.Logger,
+	metrics *metrics.Metrics,
+	jwtValidator middleware.JWTValidator) *ConsentHandler {
 	return &ConsentHandler{
-		logger:  logger,
-		consent: consent,
-		metrics: metrics,
+		logger:       logger,
+		consent:      consent,
+		metrics:      metrics,
+		jwtValidator: jwtValidator,
 	}
 }
 
-// NewConsentHandler creates a new ConsentHandler with the given logger.
+// handleGrantConsent grants consent for the authenticated user.
 func (h *ConsentHandler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
-	ok, err := jwttoken.ValidateAuthToken(r.Header.Get("Authorization"))
-	if !ok || err != nil {
-		h.logger.WarnContext(ctx, "missing or invalid access token",
+
+	// The middleware has already validated the JWT and set the userID in context
+	userID := middleware.GetUserID(ctx)
+	if userID == "" {
+		// This should never happen if RequireAuth middleware is configured correctly
+		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
 			"request_id", requestID,
 		)
-		writeError(w, dErrors.New(dErrors.CodeUnauthorized, "missing or invalid access token"))
-		if h.metrics != nil {
-			h.metrics.IncrementAuthFailures()
-		}
+		writeError(w, dErrors.New(dErrors.CodeInternal, "authentication context error"))
 		return
 	}
 
-	var grantReq *consentModel.GrantConsentRequest
+	var grantReq consentModel.GrantConsentRequest
 	// Purposes array must not be empty
-	err = json.NewDecoder(r.Body).Decode(grantReq)
+	err := json.NewDecoder(r.Body).Decode(&grantReq)
 	if err != nil {
 		h.logger.WarnContext(ctx, "invalid grant consent request",
 			"request_id", requestID,
@@ -109,11 +114,9 @@ func (h *ConsentHandler) handleGrantConsent(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	userID := ctx.Value(middleware.ContextKeyUserID).(string)
-
 	// Grant consent for each purpose
 	for _, purpose := range grantReq.Purposes {
-		err = h.consent.Grant(ctx, userID, purpose, h.consentTTL)
+		err := h.consent.Grant(ctx, userID, purpose, h.consentTTL)
 		if err != nil {
 			h.logger.ErrorContext(ctx, "failed to grant consent",
 				"request_id", requestID,

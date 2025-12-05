@@ -1,7 +1,10 @@
 package jwttoken
 
 import (
+	"errors"
 	"time"
+
+	dErrors "id-gateway/pkg/domain-errors"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -22,66 +25,79 @@ type JWTService struct {
 	audience   string
 }
 
-// NewJWTService creates a new JWT service
-// TODO: Implement this function
-// - Store the signingKey, issuer, and audience in the struct
-// - Return a pointer to the JWTService
 func NewJWTService(signingKey string, issuer string, audience string) *JWTService {
-	// TODO: Your implementation here
-	panic("not implemented")
+	return &JWTService{
+		signingKey: []byte(signingKey),
+		issuer:     issuer,
+		audience:   audience,
+	}
 }
 
-// GenerateAccessToken creates a new JWT access token for a user session
-// TODO: Implement this function
-// - Create a new Claims struct with:
-//   - UserID, SessionID, ClientID from parameters
-//   - ExpiresAt set to current time + expiresIn duration
-//   - IssuedAt set to current time
-//   - Issuer and Audience from the service
-//
-// - Create a new JWT token with HS256 signing method
-// - Sign the token with the signing key
-// - Return the signed token string
-func (s *JWTService) GenerateAccessToken(userID uuid.UUID, sessionID uuid.UUID, clientID string, expiresIn time.Duration) (string, error) {
-	// TODO: Your implementation here
-	// Hint: Use jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	// Hint: Then call token.SignedString(s.signingKey)
-	panic("not implemented")
+func (s *JWTService) GenerateAccessToken(
+	userID uuid.UUID,
+	sessionID uuid.UUID,
+	clientID string,
+	expiresIn time.Duration) (string, error) {
+	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+		UserID:    userID.String(),
+		SessionID: sessionID.String(),
+		ClientID:  clientID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    s.issuer,
+			Audience:  []string{s.audience},
+			ID:        uuid.NewString(),
+		},
+	})
+
+	signedToken, err := newToken.SignedString(s.signingKey)
+	if err != nil {
+		return "", err
+	}
+	return signedToken, nil
 }
 
-// ValidateToken validates a JWT token and returns the claims
-// TODO: Implement this function
-// - Parse the token string with the Claims struct
-// - Validate the signing method is HMAC
-// - Verify the token with the signing key
-// - Check if token is expired
-// - Return the claims if valid, error otherwise
 func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
-	// TODO: Your implementation here
-	// Hint: Use jwt.ParseWithClaims(tokenString, &Claims{}, keyFunc)
-	// Hint: The keyFunc should return your signing key
-	// Hint: Check token.Valid before returning claims
-	panic("not implemented")
+	var err error
+	parsed, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrTokenUnverifiable
+		}
+		return s.signingKey, nil
+	})
+
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, dErrors.New(dErrors.CodeUnauthorized, "token has expired")
+		}
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token")
+	}
+
+	if !parsed.Valid {
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token")
+	}
+
+	claims, ok := parsed.Claims.(*Claims)
+	if !ok {
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token claims")
+	}
+
+	return claims, nil
 }
 
-// ExtractUserIDFromToken is a convenience method to get just the user ID
-// TODO: Implement this function
-// - Call ValidateToken to get claims
-// - Parse the UserID string as UUID
-// - Return the UUID
 func (s *JWTService) ExtractUserIDFromToken(tokenString string) (uuid.UUID, error) {
-	// TODO: Your implementation here
-	panic("not implemented")
+	claims, err := s.ValidateToken(tokenString)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.Parse(claims.UserID)
 }
 
-// ExtractSessionIDFromAuthHeader extracts and validates session ID from Authorization header
-// TODO: Implement this function to maintain backward compatibility
-// - Check for "Bearer " prefix
-// - Extract the token
-// - Call ValidateToken
-// - Return the SessionID from claims
-func (s *JWTService) ExtractSessionIDFromAuthHeader(authHeader string) (string, error) {
-	// TODO: Your implementation here
-	// This replaces the old placeholder function
-	panic("not implemented")
+func (s *JWTService) ExtractSessionIDFromAuthHeader(authHeader string) (uuid.UUID, error) {
+	claims, err := s.ValidateToken(authHeader)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.Parse(claims.SessionID)
 }
