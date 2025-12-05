@@ -297,6 +297,7 @@ type UserStore interface {
     SaveUser(ctx context.Context, user *User) error
     FindUserByID(ctx context.Context, id string) (*User, error)
     FindUserByEmail(ctx context.Context, email string) (*User, error)
+    FindOrCreateByEmail(ctx context.Context, email string, user *models.User) (*models.User, error)
     DeleteUser(ctx context.Context, id string) error // For GDPR
 }
 ```
@@ -702,3 +703,4 @@ curl -X POST http://localhost:8080/auth/token \
 |         |            |              | - Added code expiry, replay prevention, and redirect_uri validation   |
 |         |            |              | - Updated Session model with Code, CodeExpiresAt, CodeUsed fields     |
 |         |            |              | - Added FindByCode() to SessionStore interface                        |
+|         |            |              | - Added FindOrCreateByEmail() to User Store interface                 |
