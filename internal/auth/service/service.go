@@ -33,6 +33,7 @@ type Service struct {
 }
 
 const StatusPendingConsent = "pending_consent"
+const StatusActive = "active"
 
 func NewService(users UserStore, sessions SessionStore, sessionTTL time.Duration) *Service {
 	if sessionTTL <= 0 {

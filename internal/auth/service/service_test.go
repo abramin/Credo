@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -127,6 +128,99 @@ func (s *ServiceSuite) TestAuthorize() {
 		assert.Nil(s.T(), result)
 	})
 }
+
+func (s *ServiceSuite) TestToken() {
+	req := models.TokenRequest{
+		GrantType:   "authorization_code",
+		Code:        "authz_12345",
+		RedirectURI: "https://client.app/callback",
+		ClientID:    "client-123",
+	}
+
+	validSession := &models.Session{
+		ID:             uuid.New(),
+		UserID:         uuid.New(),
+		Code:           req.Code,
+		CodeExpiresAt:  time.Now().Add(5 * time.Minute),
+		CodeUsed:       false,
+		ClientID:       req.ClientID,
+		RedirectURI:    req.RedirectURI,
+		RequestedScope: []string{"openid", "profile"},
+		Status:         StatusActive,
+		CreatedAt:      time.Now().Add(-5 * time.Minute),
+		ExpiresAt:      time.Now().Add(10 * time.Minute),
+	}
+
+	s.T().Run("happy path - tokens returned", func(t *testing.T) {
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(validSession, nil)
+		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, session *models.Session) error {
+				assert.True(s.T(), session.CodeUsed)
+				return nil
+			})
+		result, err := s.service.Token(context.Background(), &req)
+		require.NoError(s.T(), err)
+		assert.NotEmpty(s.T(), result.AccessToken)
+		assert.NotEmpty(s.T(), result.IDToken)
+		assert.Greater(s.T(), result.ExpiresIn, int64(0))
+	})
+
+	s.T().Run("session not found", func(t *testing.T) {
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, store.ErrNotFound)
+
+		result, err := s.service.Token(context.Background(), &req)
+		assert.Error(s.T(), err)
+		assert.Nil(s.T(), result)
+	})
+
+	s.T().Run("session expired", func(t *testing.T) {
+		expiredSession := *validSession
+		expiredSession.CodeExpiresAt = time.Now().Add(-5 * time.Minute)
+
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&expiredSession, nil)
+
+		result, err := s.service.Token(context.Background(), &req)
+		assert.Error(s.T(), err)
+		assert.Nil(s.T(), result)
+	})
+
+	s.T().Run("session already used", func(t *testing.T) {
+		usedSession := *validSession
+		usedSession.CodeUsed = true
+
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&usedSession, nil)
+
+		result, err := s.service.Token(context.Background(), &req)
+		assert.Error(s.T(), err)
+		assert.Nil(s.T(), result)
+	})
+	s.T().Run("session store error", func(t *testing.T) {
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, assert.AnError)
+
+		result, err := s.service.Token(context.Background(), &req)
+		assert.Error(s.T(), err)
+		assert.Nil(s.T(), result)
+	})
+	s.T().Run("request redirect URI mismatch", func(t *testing.T) {
+		sess := *validSession
+		sess.RedirectURI = "https://other.app/callback"
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&sess, nil)
+
+		result, err := s.service.Token(context.Background(), &req)
+		assert.Error(s.T(), err)
+		assert.Nil(s.T(), result)
+	})
+
+	s.T().Run("request client ID mismatch", func(t *testing.T) {
+		sess := *validSession
+		sess.ClientID = "other-client"
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&sess, nil)
+		result, err := s.service.Token(context.Background(), &req)
+		assert.Error(s.T(), err)
+		assert.Nil(s.T(), result)
+	})
+}
+
 func TestServiceSuite(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }

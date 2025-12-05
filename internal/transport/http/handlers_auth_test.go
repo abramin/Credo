@@ -21,6 +21,7 @@ import (
 
 	authModel "id-gateway/internal/auth/models"
 	"id-gateway/internal/transport/http/mocks"
+	dErrors "id-gateway/pkg/domain-errors"
 	httpErrors "id-gateway/pkg/http-errors"
 )
 
@@ -155,14 +156,14 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 }
 
 func (s *AuthHandlerSuite) TestHandler_Token() {
+	validRequest := &authModel.TokenRequest{
+		GrantType:   "authorization_code",
+		Code:        "authz_code_123",
+		RedirectURI: "https://example.com/callback",
+		ClientID:    "some-client-id",
+	}
 	s.T().Run("happy path - tokens exchanged", func(t *testing.T) {
 		mockService, router := s.newHandler(t)
-		validRequest := &authModel.TokenRequest{
-			GrantType:   "authorization_code",
-			Code:        "authz_code_123",
-			RedirectURI: "https://example.com/callback",
-			ClientID:    "some-client-id",
-		}
 		expectedResp := &authModel.TokenResult{
 			AccessToken: "access-token-123",
 			IDToken:     "id-token-123",
@@ -186,79 +187,104 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 		assert.Equal(t, expectedResp.IDToken, got.IDToken)
 		assert.Equal(t, expectedResp.ExpiresIn, got.ExpiresIn)
 	})
-	/*
-		s.T().Run("session id not found - 404", func(t *testing.T) {
-			_, router := s.newHandler(t)
 
-			httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
-			rr := httptest.NewRecorder()
+	//- 400 Bad Request: Missing required fields (grant_type, code, redirect_uri, client_id)
+	s.T().Run("missing required fields - 400", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Times(0)
+		missing := *validRequest
+		missing.ClientID = ""
 
-			router.ServeHTTP(rr, httpReq)
+		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(&missing, t))
 
-			assert.Equal(t, http.StatusNotImplemented, rr.Code)
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+	})
 
-			var respBody map[string]string
-			err := json.Unmarshal(rr.Body.Bytes(), &respBody)
-			require.NoError(t, err)
+	// - 400 Bad Request: Unsupported grant_type (must be "authorization_code")
+	s.T().Run("unsupported grant_type - 400", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		invalid := *validRequest
+		invalid.GrantType = "invalid_grant"
+		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Times(0)
 
-			assert.Equal(t, "TODO: implement handler", respBody["message"])
-			assert.Equal(t, "/auth/token", respBody["endpoint"])
-		})
+		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(&invalid, t))
 
-		s.T().Run("internal server error", func(t *testing.T) {
-			_, router := s.newHandler(t)
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+	})
+	// - 401 Unauthorized: Invalid authorization code (not found)
+	// - 401 Unauthorized: Authorization code expired (> 10 minutes old)
+	// - 401 Unauthorized: Authorization code already used (replay attack prevention)
+	s.T().Run("unauthorized scenarios - 401", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			serviceErr error
+		}{
+			{
+				name:       "invalid authorization code",
+				serviceErr: dErrors.New(dErrors.CodeUnauthorized, "invalid authorization code"),
+			},
+			{
+				name:       "authorization code expired",
+				serviceErr: dErrors.New(dErrors.CodeUnauthorized, "authorization code expired"),
+			},
+			{
+				name:       "authorization code already used",
+				serviceErr: dErrors.New(dErrors.CodeUnauthorized, "authorization code already used"),
+			},
+		}
 
-			httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
-			rr := httptest.NewRecorder()
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				mockService, router := s.newHandler(t)
+				mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, tt.serviceErr)
 
-			router.ServeHTTP(rr, httpReq)
+				status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-			assert.Equal(t, http.StatusNotImplemented, rr.Code)
+				assert.Equal(t, http.StatusUnauthorized, status)
+				assert.Nil(t, got)
+				assert.Equal(t, string(httpErrors.CodeUnauthorized), errBody["error"])
+			})
+		}
+	})
 
-			var respBody map[string]string
-			err := json.Unmarshal(rr.Body.Bytes(), &respBody)
-			require.NoError(t, err)
+	// - 400 Bad Request: redirect_uri mismatch (doesn't match authorize request)
+	s.T().Run("redirect_uri mismatch - 400", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		serviceErr := dErrors.New(dErrors.CodeInvalidRequest, "redirect_uri mismatch")
+		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, serviceErr)
 
-			assert.Equal(t, "TODO: implement handler", respBody["message"])
-			assert.Equal(t, "/auth/token", respBody["endpoint"])
-		})
+		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-		s.T().Run("Bad Request- missing session id", func(t *testing.T) {
-			_, router := s.newHandler(t)
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidRequest), errBody["error"])
+	})
 
-			httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
-			rr := httptest.NewRecorder()
+	// - 400 Bad Request: client_id mismatch (doesn't match authorize request)
+	s.T().Run("client_id mismatch - 400", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		serviceErr := dErrors.New(dErrors.CodeInvalidRequest, "client_id mismatch")
+		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, serviceErr)
 
-			router.ServeHTTP(rr, httpReq)
+		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
+		assert.Equal(t, http.StatusBadRequest, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInvalidRequest), errBody["error"])
+	})
+	// - 500 Internal Server Error: Store failure
+	s.T().Run("internal server failure - 500", func(t *testing.T) {
+		mockService, router := s.newHandler(t)
+		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, errors.New("database error"))
+		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-			assert.Equal(t, http.StatusNotImplemented, rr.Code)
-
-			var respBody map[string]string
-			err := json.Unmarshal(rr.Body.Bytes(), &respBody)
-			require.NoError(t, err)
-
-			assert.Equal(t, "TODO: implement handler", respBody["message"])
-			assert.Equal(t, "/auth/token", respBody["endpoint"])
-		})
-
-		s.T().Run("Unauthorized - session expired", func(t *testing.T) {
-			_, router := s.newHandler(t)
-
-			httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
-			rr := httptest.NewRecorder()
-
-			router.ServeHTTP(rr, httpReq)
-
-			assert.Equal(t, http.StatusNotImplemented, rr.Code)
-
-			var respBody map[string]string
-			err := json.Unmarshal(rr.Body.Bytes(), &respBody)
-			require.NoError(t, err)
-
-			assert.Equal(t, "TODO: implement handler", respBody["message"])
-			assert.Equal(t, "/auth/token", respBody["endpoint"])
-		})
-	*/
+		assert.Equal(t, http.StatusInternalServerError, status)
+		assert.Nil(t, got)
+		assert.Equal(t, string(httpErrors.CodeInternal), errBody["error"])
+	})
 }
 
 func TestAuthHandlerSuite(t *testing.T) {

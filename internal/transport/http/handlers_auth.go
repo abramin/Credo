@@ -25,7 +25,7 @@ type AuthHandler struct {
 	logger *slog.Logger
 }
 
-// AuthService defines the interface for authentication operations.
+// AuthService defines the interface for authentication operations.grant_type must be one of
 type AuthService interface {
 	Authorize(ctx context.Context, req *authModel.AuthorizationRequest) (*authModel.AuthorizationResult, error)
 	Token(ctx context.Context, req *authModel.TokenRequest) (*authModel.TokenResult, error)

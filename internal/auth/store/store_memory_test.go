@@ -73,9 +73,13 @@ func (s *InMemorySessionStoreSuite) TestSaveAndFind() {
 	err := s.store.Save(context.Background(), session)
 	require.NoError(s.T(), err)
 
-	found, err := s.store.FindByID(context.Background(), session.ID.String())
+	foundByID, err := s.store.FindByID(context.Background(), session.ID.String())
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), session, found)
+	assert.Equal(s.T(), session, foundByID)
+
+	foundByCode, err := s.store.FindByCode(context.Background(), session.Code)
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), session, foundByCode)
 }
 
 func (s *InMemorySessionStoreSuite) TestFindNotFound() {
