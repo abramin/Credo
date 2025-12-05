@@ -22,7 +22,6 @@ import (
 	authModel "id-gateway/internal/auth/models"
 	"id-gateway/internal/transport/http/mocks"
 	dErrors "id-gateway/pkg/domain-errors"
-	httpErrors "id-gateway/pkg/http-errors"
 )
 
 //go:generate mockgen -source=handlers_auth.go -destination=mocks/auth-mocks.go -package=mocks AuthService
@@ -69,10 +68,10 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInvalidRequest), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
 	})
 
-	s.T().Run("400 error scenarios - invallid input", func(t *testing.T) {
+	s.T().Run("400 error scenarios - invalid input", func(t *testing.T) {
 		tests := []struct {
 			name    string
 			request *authModel.AuthorizationRequest
@@ -146,7 +145,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 				assert.Equal(t, http.StatusBadRequest, status)
 				assert.Nil(t, got)
-				assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+				assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
 			})
 		}
 	})
@@ -159,7 +158,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		assert.Equal(t, http.StatusInternalServerError, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInternal), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInternal), errBody["error"])
 	})
 }
 
@@ -207,7 +206,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
 	})
 
 	// - 400 Bad Request: Unsupported grant_type (must be "authorization_code")
@@ -221,7 +220,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
 	})
 	// - 401 Unauthorized: Invalid authorization code (not found)
 	// - 401 Unauthorized: Authorization code expired (> 10 minutes old)
@@ -254,7 +253,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 				assert.Equal(t, http.StatusUnauthorized, status)
 				assert.Nil(t, got)
-				assert.Equal(t, string(httpErrors.CodeUnauthorized), errBody["error"])
+				assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
 			})
 		}
 	})
@@ -269,7 +268,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInvalidRequest), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInvalidRequest), errBody["error"])
 	})
 
 	// - 400 Bad Request: client_id mismatch (doesn't match authorize request)
@@ -281,7 +280,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInvalidRequest), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInvalidRequest), errBody["error"])
 	})
 	// - 500 Internal Server Error: Store failure
 	s.T().Run("internal server failure - 500", func(t *testing.T) {
@@ -291,7 +290,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		assert.Equal(t, http.StatusInternalServerError, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInternal), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInternal), errBody["error"])
 	})
 }
 
@@ -330,7 +329,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID)
 		assert.Equal(t, http.StatusUnauthorized, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeUnauthorized), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
 	})
 
 	// - 401 Unauthorized: session not found or expired
@@ -343,7 +342,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		assert.Equal(t, http.StatusUnauthorized, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeUnauthorized), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
 	})
 
 	// - 401 Unauthorized: User not found
@@ -356,7 +355,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		assert.Equal(t, http.StatusUnauthorized, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeUnauthorized), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
 	})
 
 	s.T().Run("internal server failure - 500", func(t *testing.T) {
@@ -367,7 +366,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		assert.Equal(t, http.StatusInternalServerError, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(httpErrors.CodeInternal), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInternal), errBody["error"])
 	})
 }
 

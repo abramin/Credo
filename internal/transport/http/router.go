@@ -11,7 +11,6 @@ import (
 
 	"id-gateway/internal/platform/middleware"
 	dErrors "id-gateway/pkg/domain-errors"
-	httpErrors "id-gateway/pkg/http-errors"
 )
 
 // Handler is the thin HTTP layer. It should delegate to domain services without
@@ -86,24 +85,6 @@ func writeError(w http.ResponseWriter, err error) {
 		_ = json.NewEncoder(w).Encode(response)
 		return
 	}
-
-	// Fallback to legacy http errors (for backward compatibility)
-	gw, ok := err.(httpErrors.GatewayError)
-	status := http.StatusInternalServerError
-	code := string(httpErrors.CodeInternal)
-	if ok {
-		status = httpErrors.ToHTTPStatus(gw.Code)
-		code = string(gw.Code)
-	}
-	response := map[string]string{
-		"error": code,
-	}
-	if ok && gw.Message != "" {
-		response["error_description"] = gw.Message
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(response)
 }
 
 // domainCodeToHTTPStatus translates domain error codes to HTTP status codes.

@@ -15,6 +15,10 @@ type InMemoryUserStore struct {
 	users map[string]*models.User
 }
 
+func (s *InMemoryUserStore) ListAll(context context.Context) (map[string]*models.User, error) {
+	return s.users, nil
+}
+
 func NewInMemoryUserStore() *InMemoryUserStore {
 	return &InMemoryUserStore{users: make(map[string]*models.User)}
 }

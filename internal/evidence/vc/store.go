@@ -3,7 +3,7 @@ package vc
 import (
 	"context"
 
-	pkgerrors "id-gateway/pkg/http-errors"
+	pkgerrors "id-gateway/pkg/domain-errors"
 )
 
 var (
