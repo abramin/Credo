@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"id-gateway/internal/platform/metrics"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -16,11 +17,13 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
-					logger.Error("panic recovered",
+					ctx := r.Context()
+					logger.ErrorContext(ctx, "panic recovered",
 						"error", err,
 						"stack", string(debug.Stack()),
 						"path", r.URL.Path,
 						"method", r.Method,
+						"request_id", GetRequestID(ctx),
 					)
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				}
@@ -66,9 +69,10 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(wrapped, r)
 
 			duration := time.Since(start)
-			requestID := GetRequestID(r.Context())
+			ctx := r.Context()
+			requestID := GetRequestID(ctx)
 
-			logger.Info("http request",
+			logger.InfoContext(ctx, "http request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", wrapped.statusCode,
@@ -112,4 +116,16 @@ func ContentTypeJSON(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func LatencyMiddleware(m *metrics.Metrics, endpoint string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			next.ServeHTTP(w, r)
+			if m != nil {
+				m.ObserveEndpointLatency(endpoint, time.Since(start).Seconds())
+			}
+		})
+	}
 }

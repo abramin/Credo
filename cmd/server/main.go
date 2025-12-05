@@ -44,7 +44,7 @@ func main() {
 	// Add Prometheus metrics endpoint
 	r.Handle("/metrics", promhttp.Handler())
 
-	authHandler := httptransport.NewAuthHandler(a, log, cfg.RegulatedMode)
+	authHandler := httptransport.NewAuthHandler(a, log, cfg.RegulatedMode, m)
 	authHandler.Register(r)
 
 	srv := httpserver.New(cfg.Addr, r)

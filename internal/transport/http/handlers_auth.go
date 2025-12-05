@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -15,6 +16,7 @@ import (
 
 	authModel "id-gateway/internal/auth/models"
 	jwttoken "id-gateway/internal/jwt_token"
+	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
 	dErrors "id-gateway/pkg/domain-errors"
 	s "id-gateway/pkg/string"
@@ -26,6 +28,7 @@ type AuthHandler struct {
 	regulatedMode bool
 	auth          AuthService
 	logger        *slog.Logger
+	metrics       *metrics.Metrics
 }
 
 // AuthService defines the interface for authentication operations.grant_type must be one of
@@ -36,16 +39,26 @@ type AuthService interface {
 }
 
 // NewAuthHandler creates a new AuthHandler with the given service and logger.
-func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool) *AuthHandler {
+func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool, metrics *metrics.Metrics) *AuthHandler {
 	return &AuthHandler{
 		regulatedMode: regulatedMode,
 		auth:          auth,
 		logger:        logger,
+		metrics:       metrics,
 	}
 }
 
 // Register registers the auth routes with the chi router.
 func (h *AuthHandler) Register(r chi.Router) {
+	r.Use(middleware.Recovery(h.logger))
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Logger(h.logger))
+	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(middleware.ContentTypeJSON)
+	r.Use(middleware.LatencyMiddleware(h.metrics, "/auth/authorize"))
+	r.Use(middleware.LatencyMiddleware(h.metrics, "/auth/token"))
+	r.Use(middleware.LatencyMiddleware(h.metrics, "/auth/userinfo"))
+
 	r.Post("/auth/authorize", h.handleAuthorize)
 	r.Post("/auth/token", h.handleToken)
 	r.Get("/auth/userinfo", h.handleUserInfo)
@@ -63,7 +76,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	var req authModel.AuthorizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Warn("failed to decode authorize request",
+		h.logger.WarnContext(ctx, "failed to decode authorize request",
 			"error", err,
 			"request_id", requestID,
 		)
@@ -72,7 +85,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	err := validateAuthRequest(&req)
 	if err != nil {
-		h.logger.Warn("invalid authorize request",
+		h.logger.WarnContext(ctx, "invalid authorize request",
 			"error", err,
 			"request_id", requestID,
 		)
@@ -83,7 +96,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.auth.Authorize(ctx, &req)
 	if err != nil {
-		h.logger.Error("authorize failed",
+		h.logger.ErrorContext(ctx, "authorize failed",
 			"error", err,
 			"request_id", requestID,
 			"client_id", req.ClientID,
@@ -92,7 +105,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("authorize successful",
+	h.logger.InfoContext(ctx, "authorize successful",
 		"request_id", requestID,
 		"client_id", req.ClientID,
 	)
@@ -113,7 +126,7 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	var req authModel.TokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Warn("failed to decode token request",
+		h.logger.WarnContext(ctx, "failed to decode token request",
 			"error", err,
 			"request_id", requestID,
 		)
@@ -122,7 +135,7 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 	err := validateAuthRequest(&req)
 	if err != nil {
-		h.logger.Warn("invalid token request",
+		h.logger.WarnContext(ctx, "invalid token request",
 			"error", err,
 			"request_id", requestID,
 		)
@@ -133,7 +146,7 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.auth.Token(ctx, &req)
 	if err != nil {
-		h.logger.Error("token exchange failed",
+		h.logger.ErrorContext(ctx, "token exchange failed",
 			"error", err,
 			"request_id", requestID,
 			"client_id", req.ClientID,
@@ -142,11 +155,13 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("token exchange successful",
+	h.logger.InfoContext(ctx, "token exchange successful",
 		"request_id", requestID,
 		"client_id", req.ClientID,
 	)
-
+	if h.metrics != nil { // allow tests to skip instrumentation
+		h.metrics.IncrementTokenRequests()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	// Note: We ignore encoding errors here since the response has already started.
@@ -164,15 +179,18 @@ func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	session_id, err := jwttoken.ExtractSessionIDFromAuthHeader(r.Header.Get("Authorization"))
 	if err != nil {
-		h.logger.Warn("missing or invalid access token",
+		h.logger.WarnContext(ctx, "missing or invalid access token",
 			"request_id", requestID,
 		)
 		writeError(w, dErrors.New(dErrors.CodeUnauthorized, "missing or invalid access token"))
+		if h.metrics != nil {
+			h.metrics.IncrementAuthFailures()
+		}
 		return
 	}
 	session_uuid, err := uuid.Parse(session_id)
 	if err != nil {
-		h.logger.Warn("invalid session id format",
+		h.logger.WarnContext(ctx, "invalid session id format",
 			"error", err,
 			"request_id", requestID,
 		)
@@ -182,7 +200,7 @@ func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	userInfo, err := h.auth.UserInfo(ctx, session_uuid)
 	if err != nil {
-		h.logger.Error("failed to get user info",
+		h.logger.ErrorContext(ctx, "failed to get user info",
 			"error", err,
 			"request_id", requestID,
 			"session_id", session_id,
@@ -191,7 +209,7 @@ func (h *AuthHandler) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("user info retrieved successfully",
+	h.logger.InfoContext(ctx, "user info retrieved successfully",
 		"request_id", requestID,
 		"session_id", session_id,
 	)

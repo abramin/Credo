@@ -13,6 +13,7 @@ import (
 	"id-gateway/internal/auth/models"
 	"id-gateway/internal/auth/store"
 	"id-gateway/internal/platform/metrics"
+	"id-gateway/internal/platform/middleware"
 	dErrors "id-gateway/pkg/domain-errors"
 	"id-gateway/pkg/email"
 )
@@ -147,6 +148,9 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		"session_id", newSession.ID.String(),
 		"client_id", req.ClientID,
 	)
+	if s.metrics != nil {
+		s.metrics.IncrementActiveSessions(1)
+	}
 
 	redirectURI := req.RedirectURI
 	if redirectURI != "" {
@@ -177,6 +181,9 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"session_id", sessionID.String(),
 			)
+			if s.metrics != nil {
+				s.metrics.IncrementAuthFailures()
+			}
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "session not found")
 		}
 		s.logAuthFailure(ctx, "session_lookup_failed", true,
@@ -191,6 +198,9 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 			"session_id", sessionID.String(),
 			"status", session.Status,
 		)
+		if s.metrics != nil {
+			s.metrics.IncrementAuthFailures()
+		}
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "session not active")
 	}
 
@@ -201,6 +211,9 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 				"session_id", sessionID.String(),
 				"user_id", session.UserID.String(),
 			)
+			if s.metrics != nil {
+				s.metrics.IncrementAuthFailures()
+			}
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "user not found")
 		}
 		s.logAuthFailure(ctx, "user_lookup_failed", true,
@@ -243,6 +256,9 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"client_id", req.ClientID,
 			)
+			if s.metrics != nil {
+				s.metrics.IncrementAuthFailures()
+			}
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid authorization code")
 		}
 		s.logAuthFailure(ctx, "session_lookup_failed", true,
@@ -259,6 +275,9 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 			"user_id", session.UserID.String(),
 			"client_id", session.ClientID,
 		)
+		if s.metrics != nil {
+			s.metrics.IncrementAuthFailures()
+		}
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code expired")
 	}
 
@@ -269,6 +288,9 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 			"user_id", session.UserID.String(),
 			"client_id", session.ClientID,
 		)
+		if s.metrics != nil {
+			s.metrics.IncrementAuthFailures()
+		}
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code already used")
 	}
 
@@ -294,7 +316,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 
 	// 7. Mark code as used and update session status
 	session.CodeUsed = true
-	session.Status = "active"
+	session.Status = StatusActive
 	err = s.sessions.Save(ctx, session)
 	if err != nil {
 		s.logAuthFailure(ctx, "session_update_failed", true,
@@ -323,9 +345,13 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 }
 
 func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
+	// Add request_id from context if available
+	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+		attrs = append(attrs, "request_id", requestID)
+	}
 	args := append(attrs, "event", event, "log_type", "audit")
 	if s.logger != nil {
-		s.logger.Info(event, args...)
+		s.logger.InfoContext(ctx, event, args...)
 	}
 	if s.auditPublisher == nil {
 		return
@@ -339,15 +365,19 @@ func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
 }
 
 func (s *Service) logAuthFailure(ctx context.Context, reason string, isError bool, attrs ...any) {
+	// Add request_id from context if available
+	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+		attrs = append(attrs, "request_id", requestID)
+	}
 	args := append(attrs, "event", eventAuthFailed, "reason", reason, "log_type", "standard")
 	if s.logger == nil {
 		return
 	}
 	if isError {
-		s.logger.Error(eventAuthFailed, args...)
+		s.logger.ErrorContext(ctx, eventAuthFailed, args...)
 		return
 	}
-	s.logger.Warn(eventAuthFailed, args...)
+	s.logger.WarnContext(ctx, eventAuthFailed, args...)
 }
 
 func extractStringAttr(attrs []any, key string) string {
