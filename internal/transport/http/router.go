@@ -2,6 +2,7 @@ package httptransport
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"id-gateway/internal/platform/middleware"
-	"id-gateway/pkg/errors"
+	dErrors "id-gateway/pkg/domain-errors"
 	httpErrors "id-gateway/pkg/http-errors"
 )
 
@@ -70,7 +71,7 @@ func (h *Handler) notImplemented(w http.ResponseWriter, endpoint string) {
 // It translates transport-agnostic domain errors into HTTP status codes and error responses.
 func writeError(w http.ResponseWriter, err error) {
 	// Try domain error first (new approach)
-	var domainErr errors.DomainError
+	var domainErr dErrors.DomainError
 	if errors.As(err, &domainErr) {
 		status := domainCodeToHTTPStatus(domainErr.Code)
 		code := domainCodeToHTTPCode(domainErr.Code)
@@ -98,23 +99,23 @@ func writeError(w http.ResponseWriter, err error) {
 }
 
 // domainCodeToHTTPStatus translates domain error codes to HTTP status codes.
-func domainCodeToHTTPStatus(code errors.Code) int {
+func domainCodeToHTTPStatus(code dErrors.Code) int {
 	switch code {
-	case errors.CodeNotFound:
+	case dErrors.CodeNotFound:
 		return http.StatusNotFound
-	case errors.CodeInvalidRequest, errors.CodeValidation:
+	case dErrors.CodeInvalidRequest, dErrors.CodeValidation:
 		return http.StatusBadRequest
-	case errors.CodeConflict:
+	case dErrors.CodeConflict:
 		return http.StatusConflict
-	case errors.CodeUnauthorized:
+	case dErrors.CodeUnauthorized:
 		return http.StatusUnauthorized
-	case errors.CodeInvalidConsent, errors.CodeMissingConsent:
+	case dErrors.CodeInvalidConsent, dErrors.CodeMissingConsent:
 		return http.StatusForbidden
-	case errors.CodePolicyViolation:
+	case dErrors.CodePolicyViolation:
 		return http.StatusPreconditionFailed
-	case errors.CodeTimeout:
+	case dErrors.CodeTimeout:
 		return http.StatusGatewayTimeout
-	case errors.CodeInternal:
+	case dErrors.CodeInternal:
 		return http.StatusInternalServerError
 	default:
 		return http.StatusInternalServerError
@@ -122,27 +123,27 @@ func domainCodeToHTTPStatus(code errors.Code) int {
 }
 
 // domainCodeToHTTPCode translates domain error codes to HTTP error codes (for JSON response).
-func domainCodeToHTTPCode(code errors.Code) string {
+func domainCodeToHTTPCode(code dErrors.Code) string {
 	switch code {
-	case errors.CodeNotFound:
+	case dErrors.CodeNotFound:
 		return "not_found"
-	case errors.CodeInvalidRequest:
+	case dErrors.CodeInvalidRequest:
 		return "invalid_request"
-	case errors.CodeValidation:
+	case dErrors.CodeValidation:
 		return "invalid_input"
-	case errors.CodeConflict:
+	case dErrors.CodeConflict:
 		return "conflict"
-	case errors.CodeUnauthorized:
+	case dErrors.CodeUnauthorized:
 		return "unauthorized"
-	case errors.CodeInvalidConsent:
+	case dErrors.CodeInvalidConsent:
 		return "invalid_consent"
-	case errors.CodeMissingConsent:
+	case dErrors.CodeMissingConsent:
 		return "missing_consent"
-	case errors.CodePolicyViolation:
+	case dErrors.CodePolicyViolation:
 		return "policy_violation"
-	case errors.CodeTimeout:
+	case dErrors.CodeTimeout:
 		return "registry_timeout"
-	case errors.CodeInternal:
+	case dErrors.CodeInternal:
 		return "internal_error"
 	default:
 		return "internal_error"

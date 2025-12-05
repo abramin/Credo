@@ -12,7 +12,7 @@ import (
 
 	authModel "id-gateway/internal/auth/models"
 	"id-gateway/internal/platform/middleware"
-	"id-gateway/pkg/errors"
+	dErrors "id-gateway/pkg/domain-errors"
 )
 
 // AuthHandler handles authentication endpoints including authorize, token, and userinfo.
@@ -58,7 +58,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 			"error", err,
 			"request_id", requestID,
 		)
-		writeError(w, errors.New(errors.CodeInvalidRequest, "Invalid JSON in request body"))
+		writeError(w, dErrors.New(dErrors.CodeInvalidRequest, "Invalid JSON in request body"))
 		return
 	}
 	err := validateAuthorizationRequest(&req)
@@ -128,7 +128,7 @@ func sanitizeAuthorizationRequest(req *authModel.AuthorizationRequest) {
 
 func validateAuthorizationRequest(req *authModel.AuthorizationRequest) error {
 	if err := authValidator.Struct(req); err != nil {
-		return errors.New(errors.CodeValidation, "invalid request body")
+		return dErrors.New(dErrors.CodeValidation, "invalid request body")
 	}
 	return nil
 }
