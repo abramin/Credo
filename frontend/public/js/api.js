@@ -72,6 +72,46 @@ class APIClient {
         return data;
     }
 
+    // OAuth2 Authorization Code Flow
+    async authorizeOAuth(email, clientId, redirectUri, state, scopes) {
+        const data = await this.request('/auth/authorize', {
+            method: 'POST',
+            skipAuth: true,
+            body: JSON.stringify({
+                email,
+                client_id: clientId,
+                redirect_uri: redirectUri,
+                state: state,
+                scopes: scopes,
+            }),
+        });
+        return data;
+    }
+
+    async exchangeCodeForToken(code, redirectUri, clientId) {
+        const data = await this.request('/auth/token', {
+            method: 'POST',
+            skipAuth: true,
+            body: JSON.stringify({
+                grant_type: 'authorization_code',
+                code: code,
+                redirect_uri: redirectUri,
+                client_id: clientId,
+            }),
+        });
+        return data;
+    }
+
+    async getUserInfoWithToken(accessToken) {
+        return await this.request('/auth/userinfo', {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+            },
+            skipAuth: true,
+        });
+    }
+
     async getToken(sessionId) {
         const data = await this.request('/auth/token', {
             method: 'POST',

@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OAuth2 Flow Demo - ID Gateway</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/api.js"></script>
+    <script defer src="js/demo.js"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body class="bg-gray-50 min-h-screen" x-data="oauthDemo">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-xl font-bold text-gray-900">OAuth2 Flow Demo</h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <a
+              href="index.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >User Portal</a
+            >
+            <a
+              href="admin.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >Admin View</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <!-- Main Content Area (3 columns) -->
+        <div class="lg:col-span-3 space-y-6">
+          <!-- Introduction -->
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <h2 class="text-lg font-bold text-blue-900 mb-2">
+              OAuth2 Authorization Code Flow Demo
+            </h2>
+            <p class="text-sm text-blue-800">
+              This interactive demo shows the complete OAuth2 authorization code
+              flow. Follow the steps below to see how authorization codes are
+              issued, exchanged for tokens, and used to access protected
+              resources.
+            </p>
+          </div>
+
+          <!-- Step 1: Authorization Request -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-bold text-gray-900">
+                Step 1: Authorization Request
+              </h3>
+              <span
+                class="status-badge"
+                :class="getStepStatusClass('authorize')"
+              >
+                <span x-text="getStepStatusText('authorize')"></span>
+              </span>
+            </div>
+
+            <p class="text-sm text-gray-600 mb-4">
+              Start the OAuth2 flow by submitting an authorization request. This
+              simulates a user logging in to grant permission to a client
+              application.
+            </p>
+
+            <!-- Demo Presets Dropdown -->
+            <div class="mb-4">
+              <label class="block text-sm font-medium text-gray-700 mb-2"
+                >Demo Presets</label
+              >
+              <select
+                x-model="selectedPreset"
+                @change="applyPreset"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Select a preset --</option>
+                <option value="basic">Basic User (openid, profile)</option>
+                <option value="full">
+                  Full Access (openid, profile, email)
+                </option>
+                <option value="custom">Custom Client</option>
+              </select>
+            </div>
+
+            <form @submit.prevent="authorize" class="space-y-4">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-2"
+                    >Email</label
+                  >
+                  <input
+                    type="email"
+                    x-model="form.email"
+                    required
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="user@example.com"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-2"
+                    >Client ID</label
+                  >
+                  <input
+                    type="text"
+                    x-model="form.clientId"
+                    required
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="demo-client"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2"
+                  >Redirect URI</label
+                >
+                <input
+                  type="url"
+                  x-model="form.redirectUri"
+                  required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="https://example.com/callback"
+                />
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2"
+                  >State (optional)</label
+                >
+                <input
+                  type="text"
+                  x-model="form.state"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="random-state-string"
+                />
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2"
+                  >Scopes (one per line)</label
+                >
+                <textarea
+                  x-model="form.scopesText"
+                  rows="3"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="openid&#10;profile&#10;email"
+                ></textarea>
+              </div>
+
+              <button
+                type="submit"
+                :disabled="loading"
+                class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              >
+                <span x-show="!loading">Request Authorization</span>
+                <span x-show="loading">Processing...</span>
+              </button>
+            </form>
+
+            <!-- Authorization Response -->
+            <template x-if="authorizeResponse">
+              <div class="mt-6 space-y-4">
+                <div class="border-t pt-4">
+                  <h4 class="font-medium text-gray-900 mb-2">
+                    Authorization Code Issued
+                  </h4>
+                  <div
+                    class="bg-green-50 border border-green-200 rounded-lg p-4"
+                  >
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-sm font-medium text-green-900"
+                        >Authorization Code:</span
+                      >
+                      <button
+                        @click="copyToClipboard(authorizeResponse.code)"
+                        class="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <code
+                      class="text-xs font-mono break-all text-green-800"
+                      x-text="authorizeResponse.code"
+                    ></code>
+                  </div>
+                  <div
+                    class="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-2"
+                  >
+                    <span class="text-sm font-medium text-gray-900"
+                      >Redirect URI:</span
+                    >
+                    <code
+                      class="text-xs font-mono break-all text-gray-700 block mt-1"
+                      x-text="authorizeResponse.redirect_uri"
+                    ></code>
+                  </div>
+                </div>
+
+                <!-- Request/Response Payloads -->
+                <div x-data="{ showRequest: false, showResponse: false }">
+                  <button
+                    @click="showRequest = !showRequest"
+                    class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    <span x-show="!showRequest">▶ Show Request Payload</span>
+                    <span x-show="showRequest">▼ Hide Request Payload</span>
+                  </button>
+                  <div
+                    x-show="showRequest"
+                    class="mt-2 bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"
+                  >
+                    <pre
+                      class="text-xs"
+                    ><code x-text="JSON.stringify(authorizeRequest, null, 2)"></code></pre>
+                  </div>
+
+                  <button
+                    @click="showResponse = !showResponse"
+                    class="text-sm text-blue-600 hover:text-blue-800 font-medium mt-2"
+                  >
+                    <span x-show="!showResponse">▶ Show Response Payload</span>
+                    <span x-show="showResponse">▼ Hide Response Payload</span>
+                  </button>
+                  <div
+                    x-show="showResponse"
+                    class="mt-2 bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"
+                  >
+                    <pre
+                      class="text-xs"
+                    ><code x-text="JSON.stringify(authorizeResponse, null, 2)"></code></pre>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Step 2: Token Exchange -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-bold text-gray-900">
+                Step 2: Token Exchange
+              </h3>
+              <span class="status-badge" :class="getStepStatusClass('token')">
+                <span x-text="getStepStatusText('token')"></span>
+              </span>
+            </div>
+
+            <p class="text-sm text-gray-600 mb-4">
+              Exchange the authorization code for access and ID tokens. This
+              step validates the code and issues tokens that can be used to
+              access protected resources.
+            </p>
+
+            <template x-if="!tokenResponse">
+              <form @submit.prevent="exchangeToken" class="space-y-4">
+                <!-- Request Headers (collapsible, read-only) -->
+                <div x-data="{ showHeaders: false }">
+                  <button
+                    @click="showHeaders = !showHeaders"
+                    type="button"
+                    class="flex items-center text-sm font-medium text-gray-700 hover:text-gray-900"
+                  >
+                    <span x-show="!showHeaders">▶</span>
+                    <span x-show="showHeaders">▼</span>
+                    <span class="ml-2">Request Headers</span>
+                  </button>
+                  <div
+                    x-show="showHeaders"
+                    class="mt-2 bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"
+                  >
+                    <pre class="text-xs font-mono">
+{
+  "Content-Type": "application/json"
+}</pre
+                    >
+                  </div>
+                </div>
+
+                <!-- Request Body (editable JSON) -->
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-medium text-gray-700">
+                      Request Body
+                      <span class="text-red-600">*</span>
+                    </label>
+                    <button
+                      @click.prevent="resetTokenRequestBody"
+                      type="button"
+                      class="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      Reset to template
+                    </button>
+                  </div>
+                  <textarea
+                    x-model="manualTokenRequestBody"
+                    rows="8"
+                    required
+                    class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 font-mono text-xs"
+                    :class="jsonValidationError ? 'border-red-500' : 'border-gray-300'"
+                  ></textarea>
+                  <template x-if="jsonValidationError">
+                    <p
+                      class="text-xs text-red-600 mt-1"
+                      x-text="jsonValidationError"
+                    ></p>
+                  </template>
+                  <p class="text-xs text-gray-500 mt-1">
+                    ⚠ Edit the JSON above: paste the authorization code from
+                    Step 1 into the
+                    <code class="bg-gray-100 px-1 py-0.5 rounded">"code"</code>
+                    field.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  :disabled="loading"
+                  class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                >
+                  <span x-show="!loading">Exchange Code for Tokens</span>
+                  <span x-show="loading">Processing...</span>
+                </button>
+              </form>
+            </template>
+
+            <!-- Token Response -->
+            <template x-if="tokenResponse">
+              <div class="space-y-4">
+                <div class="border border-green-200 rounded-lg p-4 bg-green-50">
+                  <h4 class="font-medium text-green-900 mb-3">Tokens Issued</h4>
+
+                  <!-- Access Token -->
+                  <div class="mb-3">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium text-green-900"
+                        >Access Token:</span
+                      >
+                      <button
+                        @click="copyToClipboard(tokenResponse.access_token)"
+                        class="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <code
+                      class="text-xs font-mono break-all text-green-800 block bg-white p-2 rounded"
+                      x-text="tokenResponse.access_token"
+                    ></code>
+                  </div>
+
+                  <!-- ID Token -->
+                  <div class="mb-3">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium text-green-900"
+                        >ID Token:</span
+                      >
+                      <button
+                        @click="copyToClipboard(tokenResponse.id_token)"
+                        class="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                    <code
+                      class="text-xs font-mono break-all text-green-800 block bg-white p-2 rounded"
+                      x-text="tokenResponse.id_token"
+                    ></code>
+                  </div>
+
+                  <!-- Expires In -->
+                  <div>
+                    <span class="text-sm font-medium text-green-900"
+                      >Expires In:</span
+                    >
+                    <span
+                      class="text-sm text-green-800 ml-2"
+                      x-text="formatDuration(tokenResponse.expires_in)"
+                    ></span>
+                  </div>
+                </div>
+
+                <!-- Request/Response Payloads -->
+                <div x-data="{ showRequest: false, showResponse: false }">
+                  <button
+                    @click="showRequest = !showRequest"
+                    class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    <span x-show="!showRequest">▶ Show Request Payload</span>
+                    <span x-show="showRequest">▼ Hide Request Payload</span>
+                  </button>
+                  <div
+                    x-show="showRequest"
+                    class="mt-2 bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"
+                  >
+                    <pre
+                      class="text-xs"
+                    ><code x-text="JSON.stringify(tokenRequest, null, 2)"></code></pre>
+                  </div>
+
+                  <button
+                    @click="showResponse = !showResponse"
+                    class="text-sm text-blue-600 hover:text-blue-800 font-medium mt-2"
+                  >
+                    <span x-show="!showResponse">▶ Show Response Payload</span>
+                    <span x-show="showResponse">▼ Hide Response Payload</span>
+                  </button>
+                  <div
+                    x-show="showResponse"
+                    class="mt-2 bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"
+                  >
+                    <pre
+                      class="text-xs"
+                    ><code x-text="JSON.stringify(tokenResponse, null, 2)"></code></pre>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Step 3: UserInfo Request -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-bold text-gray-900">
+                Step 3: UserInfo Request
+              </h3>
+              <span
+                class="status-badge"
+                :class="getStepStatusClass('userinfo')"
+              >
+                <span x-text="getStepStatusText('userinfo')"></span>
+              </span>
+            </div>
+
+            <p class="text-sm text-gray-600 mb-4">
+              Use the access token to retrieve user information from the
+              protected UserInfo endpoint. The Bearer token format is used:
+              <code class="bg-gray-100 px-1 py-0.5 rounded text-xs"
+                >Bearer at_sess_&lt;id&gt;</code
+              >
+            </p>
+
+            <template x-if="!userInfoResponse">
+              <form @submit.prevent="getUserInfo" class="space-y-4">
+                <!-- Request Headers (editable JSON) -->
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-medium text-gray-700">
+                      Request Headers
+                      <span class="text-red-600">*</span>
+                    </label>
+                    <button
+                      @click.prevent="resetUserInfoHeaders"
+                      type="button"
+                      class="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      Reset to template
+                    </button>
+                  </div>
+                  <textarea
+                    x-model="manualUserInfoHeaders"
+                    rows="4"
+                    required
+                    class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-xs"
+                    :class="jsonValidationError ? 'border-red-500' : 'border-gray-300'"
+                  ></textarea>
+                  <template x-if="jsonValidationError">
+                    <p
+                      class="text-xs text-red-600 mt-1"
+                      x-text="jsonValidationError"
+                    ></p>
+                  </template>
+                  <p class="text-xs text-gray-500 mt-1">
+                    ⚠ Edit the JSON above: paste the access token from Step 2
+                    after
+                    <code class="bg-gray-100 px-1 py-0.5 rounded"
+                      >"Bearer "</code
+                    >
+                    in the Authorization header.
+                  </p>
+                </div>
+
+                <!-- Request Body (GET request - no body) -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p class="text-xs text-blue-800">
+                    <strong>Request Body:</strong> None (GET request)
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  :disabled="loading"
+                  class="w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+                >
+                  <span x-show="!loading">Get User Info</span>
+                  <span x-show="loading">Processing...</span>
+                </button>
+              </form>
+            </template>
+
+            <!-- UserInfo Response -->
+            <template x-if="userInfoResponse">
+              <div class="space-y-4">
+                <div
+                  class="border border-purple-200 rounded-lg p-4 bg-purple-50"
+                >
+                  <h4 class="font-medium text-purple-900 mb-3">
+                    User Information
+                  </h4>
+
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span class="font-medium text-purple-900"
+                        >Subject (User ID):</span
+                      >
+                      <div
+                        class="flex items-center justify-between bg-white p-2 rounded mt-1"
+                      >
+                        <code
+                          class="text-xs font-mono text-purple-800"
+                          x-text="userInfoResponse.sub"
+                        ></code>
+                        <button
+                          @click="copyToClipboard(userInfoResponse.sub)"
+                          class="text-xs bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700 ml-2"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <span class="font-medium text-purple-900">Email:</span>
+                      <p
+                        class="text-purple-800 bg-white p-2 rounded mt-1"
+                        x-text="userInfoResponse.email"
+                      ></p>
+                    </div>
+                    <div>
+                      <span class="font-medium text-purple-900"
+                        >Email Verified:</span
+                      >
+                      <p
+                        class="text-purple-800 bg-white p-2 rounded mt-1"
+                        x-text="userInfoResponse.email_verified ? 'Yes' : 'No'"
+                      ></p>
+                    </div>
+                    <div>
+                      <span class="font-medium text-purple-900">Name:</span>
+                      <p
+                        class="text-purple-800 bg-white p-2 rounded mt-1"
+                        x-text="userInfoResponse.name || 'N/A'"
+                      ></p>
+                    </div>
+                    <div>
+                      <span class="font-medium text-purple-900"
+                        >Given Name:</span
+                      >
+                      <p
+                        class="text-purple-800 bg-white p-2 rounded mt-1"
+                        x-text="userInfoResponse.given_name || 'N/A'"
+                      ></p>
+                    </div>
+                    <div>
+                      <span class="font-medium text-purple-900"
+                        >Family Name:</span
+                      >
+                      <p
+                        class="text-purple-800 bg-white p-2 rounded mt-1"
+                        x-text="userInfoResponse.family_name || 'N/A'"
+                      ></p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Request/Response Payloads -->
+                <div x-data="{ showResponse: false }">
+                  <button
+                    @click="showResponse = !showResponse"
+                    class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    <span x-show="!showResponse">▶ Show Response Payload</span>
+                    <span x-show="showResponse">▼ Hide Response Payload</span>
+                  </button>
+                  <div
+                    x-show="showResponse"
+                    class="mt-2 bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto"
+                  >
+                    <pre
+                      class="text-xs"
+                    ><code x-text="JSON.stringify(userInfoResponse, null, 2)"></code></pre>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Reset Button -->
+          <div class="bg-white rounded-lg shadow-md p-6">
+            <button
+              @click="reset"
+              class="w-full bg-gray-600 text-white py-2 px-4 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+            >
+              Reset Demo
+            </button>
+          </div>
+        </div>
+
+        <!-- Timeline Sidebar (1 column) -->
+        <div class="lg:col-span-1">
+          <div class="bg-white rounded-lg shadow-md p-6 sticky top-4">
+            <h3 class="text-lg font-bold text-gray-900 mb-4">Flow Timeline</h3>
+
+            <div class="space-y-4">
+              <!-- Step 1: Authorize -->
+              <div
+                class="relative pl-6 border-l-2"
+                :class="timeline.authorize.completed ? 'border-green-500' : 'border-gray-300'"
+              >
+                <div
+                  class="absolute -left-2 top-0 w-4 h-4 rounded-full"
+                  :class="timeline.authorize.completed ? 'bg-green-500' : (timeline.authorize.inProgress ? 'bg-blue-500' : 'bg-gray-300')"
+                ></div>
+                <div class="pb-4">
+                  <h4 class="text-sm font-semibold text-gray-900">
+                    1. Authorize
+                  </h4>
+                  <p class="text-xs text-gray-600 mt-1">
+                    Request authorization code
+                  </p>
+                  <template x-if="timeline.authorize.timestamp">
+                    <p
+                      class="text-xs text-gray-500 mt-1"
+                      x-text="formatTime(timeline.authorize.timestamp)"
+                    ></p>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Step 2: Token Exchange -->
+              <div
+                class="relative pl-6 border-l-2"
+                :class="timeline.token.completed ? 'border-green-500' : 'border-gray-300'"
+              >
+                <div
+                  class="absolute -left-2 top-0 w-4 h-4 rounded-full"
+                  :class="timeline.token.completed ? 'bg-green-500' : (timeline.token.inProgress ? 'bg-blue-500' : 'bg-gray-300')"
+                ></div>
+                <div class="pb-4">
+                  <h4 class="text-sm font-semibold text-gray-900">
+                    2. Token Exchange
+                  </h4>
+                  <p class="text-xs text-gray-600 mt-1">
+                    Get access & ID tokens
+                  </p>
+                  <template x-if="timeline.token.timestamp">
+                    <p
+                      class="text-xs text-gray-500 mt-1"
+                      x-text="formatTime(timeline.token.timestamp)"
+                    ></p>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Step 3: UserInfo -->
+              <div
+                class="relative pl-6 border-l-2"
+                :class="timeline.userinfo.completed ? 'border-green-500' : 'border-gray-300'"
+              >
+                <div
+                  class="absolute -left-2 top-0 w-4 h-4 rounded-full"
+                  :class="timeline.userinfo.completed ? 'bg-green-500' : (timeline.userinfo.inProgress ? 'bg-blue-500' : 'bg-gray-300')"
+                ></div>
+                <div>
+                  <h4 class="text-sm font-semibold text-gray-900">
+                    3. UserInfo
+                  </h4>
+                  <p class="text-xs text-gray-600 mt-1">
+                    Access protected resource
+                  </p>
+                  <template x-if="timeline.userinfo.timestamp">
+                    <p
+                      class="text-xs text-gray-500 mt-1"
+                      x-text="formatTime(timeline.userinfo.timestamp)"
+                    ></p>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Status Summary -->
+            <div class="mt-6 pt-4 border-t">
+              <h4 class="text-sm font-semibold text-gray-900 mb-2">Summary</h4>
+              <div class="text-xs text-gray-600 space-y-1">
+                <div class="flex justify-between">
+                  <span>Steps Completed:</span>
+                  <span
+                    class="font-medium"
+                    x-text="getCompletedSteps() + '/3'"
+                  ></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Toast -->
+      <div
+        x-show="error"
+        x-transition
+        class="fixed bottom-4 right-4 bg-red-100 border border-red-400 text-red-700 px-6 py-4 rounded-lg shadow-lg max-w-md"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="font-bold mb-1">Error</h4>
+            <p class="text-sm" x-text="error"></p>
+          </div>
+          <button
+            @click="error = null"
+            class="ml-4 text-red-700 hover:text-red-900"
+          >
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                fill-rule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                clip-rule="evenodd"
+              ></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Success Toast -->
+      <div
+        x-show="success"
+        x-transition
+        class="fixed bottom-4 right-4 bg-green-100 border border-green-400 text-green-700 px-6 py-4 rounded-lg shadow-lg max-w-md"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="font-bold mb-1">Success</h4>
+            <p class="text-sm" x-text="success"></p>
+          </div>
+          <button
+            @click="success = null"
+            class="ml-4 text-green-700 hover:text-green-900"
+          >
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path
+                fill-rule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                clip-rule="evenodd"
+              ></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
