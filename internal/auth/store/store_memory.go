@@ -39,7 +39,7 @@ func (s *InMemoryUserStore) FindByID(_ context.Context, id uuid.UUID) (*models.U
 	return nil, ErrNotFound
 }
 
-func (s *InMemoryUserStore) FindUserByEmail(_ context.Context, email string) (*models.User, error) {
+func (s *InMemoryUserStore) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, user := range s.users {
@@ -50,8 +50,22 @@ func (s *InMemoryUserStore) FindUserByEmail(_ context.Context, email string) (*m
 	return nil, ErrNotFound
 }
 
-func (s *InMemoryUserStore) FindByEmail(ctx context.Context, email string) (*models.User, error) {
-	return s.FindUserByEmail(ctx, email)
+// FindOrCreateByEmail atomically finds a user by email or creates it if not found.
+// This prevents duplicate user creation in concurrent scenarios.
+func (s *InMemoryUserStore) FindOrCreateByEmail(_ context.Context, email string, user *models.User) (*models.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if user already exists
+	for _, existingUser := range s.users {
+		if existingUser.Email == email {
+			return existingUser, nil
+		}
+	}
+
+	// User doesn't exist, create it
+	s.users[user.ID.String()] = user
+	return user, nil
 }
 
 type InMemorySessionStore struct {

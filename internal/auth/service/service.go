@@ -18,6 +18,7 @@ type UserStore interface {
 	Save(ctx context.Context, user *models.User) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
+	FindOrCreateByEmail(ctx context.Context, email string, user *models.User) (*models.User, error)
 }
 
 type SessionStore interface {
@@ -47,25 +48,17 @@ func NewService(users UserStore, sessions SessionStore, sessionTTL time.Duration
 }
 
 func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error) {
-	user, err := s.users.FindByEmail(ctx, req.Email)
+	firstName, lastName := email.DeriveNameFromEmail(req.Email)
+	newUser := &models.User{
+		ID:        uuid.New(),
+		Email:     req.Email,
+		FirstName: firstName,
+		LastName:  lastName,
+		Verified:  false,
+	}
+	user, err := s.users.FindOrCreateByEmail(ctx, req.Email, newUser)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
-			firstName, lastName := email.DeriveNameFromEmail(req.Email)
-			newUser := &models.User{
-				ID:        uuid.New(),
-				Email:     req.Email,
-				FirstName: firstName,
-				LastName:  lastName,
-				Verified:  false,
-			}
-			err = s.users.Save(ctx, newUser)
-			if err != nil {
-				return nil, dErrors.New(dErrors.CodeInternal, "failed to save user")
-			}
-			user = newUser
-		} else {
-			return nil, dErrors.New(dErrors.CodeInternal, "failed to find user")
-		}
+		return nil, dErrors.New(dErrors.CodeInternal, "failed to find or create user")
 	}
 
 	now := time.Now()
