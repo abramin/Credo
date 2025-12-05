@@ -4,6 +4,8 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -31,7 +33,8 @@ func (s *ServiceSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.mockUserStore = mocks.NewMockUserStore(s.ctrl)
 	s.mockSessStore = mocks.NewMockSessionStore(s.ctrl)
-	s.service = NewService(s.mockUserStore, s.mockSessStore, 15*time.Minute)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s.service = NewService(s.mockUserStore, s.mockSessStore, 15*time.Minute, WithLogger(logger))
 }
 
 func (s *ServiceSuite) TearDownTest() {
@@ -57,14 +60,14 @@ func (s *ServiceSuite) TestAuthorize() {
 		req := baseReq
 		req.State = "xyz"
 
-		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(nil, store.ErrNotFound)
-		s.mockUserStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, user *models.User) error {
+		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).DoAndReturn(func(ctx context.Context, email string, user *models.User) (*models.User, error) {
+			assert.Equal(s.T(), req.Email, email)
 			assert.Equal(s.T(), req.Email, user.Email)
 			assert.Equal(s.T(), "Email", user.FirstName)
 			assert.Equal(s.T(), "User", user.LastName)
 			assert.False(s.T(), user.Verified)
 			assert.NotNil(s.T(), user.ID)
-			return nil
+			return user, nil
 		})
 		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, session *models.Session) error {
@@ -87,7 +90,7 @@ func (s *ServiceSuite) TestAuthorize() {
 	s.T().Run("happy path - user exists", func(t *testing.T) {
 		req := baseReq
 
-		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(existingUser, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(existingUser, nil)
 		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, session *models.Session) error {
 				assert.Equal(s.T(), existingUser.ID, session.UserID)
@@ -107,7 +110,7 @@ func (s *ServiceSuite) TestAuthorize() {
 
 	s.T().Run("user store error", func(t *testing.T) {
 		req := baseReq
-		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(nil, assert.AnError)
+		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(nil, assert.AnError)
 
 		result, err := s.service.Authorize(context.Background(), &req)
 		assert.Error(s.T(), err)
@@ -122,7 +125,7 @@ func (s *ServiceSuite) TestAuthorize() {
 			Email:       "email@test.com",
 		}
 
-		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(existingUser, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(existingUser, nil)
 		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).Return(assert.AnError)
 
 		result, err := s.service.Authorize(context.Background(), &req)

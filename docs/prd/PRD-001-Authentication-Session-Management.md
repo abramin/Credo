@@ -190,8 +190,8 @@ This implementation follows the standard **OAuth 2.0 Authorization Code Flow** (
 7. Validate redirect_uri matches the one stored in session (OAuth 2.0 requirement)
 8. Validate client_id matches the one stored in session
 9. Mark authorization code as used in session (set CodeUsed = true)
-10. Generate access_token as: `"at_" + session.ID`
-11. Generate id_token as: `"idt_" + session.ID`
+10. Generate access*token as: `"at*" + session.ID`
+11. Generate id*token as: `"idt*" + session.ID`
 12. Set token expiry: expires_in = 3600 (1 hour)
 13. Update session status to "active"
 14. Save updated session
@@ -624,8 +624,8 @@ curl -X POST http://localhost:8080/auth/token \
 
 ## 10. Acceptance Criteria
 
-- [ ] User can authenticate with email and receive session ID
-- [ ] User can exchange session ID for access and ID tokens
+- [ ] User can authenticate with email and receive authcode
+- [ ] User can exchange authcode for access and ID tokens
 - [ ] User can retrieve profile using bearer token
 - [ ] Invalid bearer tokens return 401 Unauthorized
 - [ ] Non-existent sessions return 404 Not Found
@@ -693,12 +693,12 @@ curl -X POST http://localhost:8080/auth/token \
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                                 |
-| ------- | ---------- | ------------ | ----------------------------------------------------------------------- |
-| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                             |
-| 1.1     | 2025-12-05 | Engineering  | Updated to OAuth 2.0 Authorization Code Flow (RFC 6749 compliant)      |
-|         |            |              | - Changed authorize endpoint to return `code` instead of `session_id`  |
-|         |            |              | - Updated token endpoint to use `grant_type` and `code`                |
-|         |            |              | - Added code expiry, replay prevention, and redirect_uri validation    |
-|         |            |              | - Updated Session model with Code, CodeExpiresAt, CodeUsed fields      |
-|         |            |              | - Added FindByCode() to SessionStore interface                         |
+| Version | Date       | Author       | Changes                                                               |
+| ------- | ---------- | ------------ | --------------------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                           |
+| 1.1     | 2025-12-05 | Engineering  | Updated to OAuth 2.0 Authorization Code Flow (RFC 6749 compliant)     |
+|         |            |              | - Changed authorize endpoint to return `code` instead of `session_id` |
+|         |            |              | - Updated token endpoint to use `grant_type` and `code`               |
+|         |            |              | - Added code expiry, replay prevention, and redirect_uri validation   |
+|         |            |              | - Updated Session model with Code, CodeExpiresAt, CodeUsed fields     |
+|         |            |              | - Added FindByCode() to SessionStore interface                        |

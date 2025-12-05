@@ -24,7 +24,6 @@ func main() {
 		"regulated_mode", cfg.RegulatedMode,
 	)
 
-	// TODO: introduce real services when domain logic is implemented.
 	handler := httptransport.NewHandler(cfg.RegulatedMode, log)
 	router := httptransport.NewRouter(handler, log)
 

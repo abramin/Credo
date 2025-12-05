@@ -30,7 +30,7 @@ func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemo
 	userStore := store.NewInMemoryUserStore()
 	sessionStore := store.NewInMemorySessionStore()
 
-	authService := service.NewService(userStore, sessionStore, 5*time.Minute)
+	authService := service.NewService(userStore, sessionStore, 5*time.Minute, service.WithLogger(logger))
 	authHandler := httptransport.NewAuthHandler(authService, logger)
 
 	router := chi.NewRouter()
@@ -63,13 +63,13 @@ func TestCompleteAuthFlow(t *testing.T) {
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 
-	sessionID := body["session_id"]
+	code := body["code"]
 	redirectURI := body["redirect_uri"]
-	require.NotEmpty(t, sessionID)
-	require.Contains(t, redirectURI, "session_id="+sessionID)
+	require.NotEmpty(t, code)
+	require.Contains(t, redirectURI, "code="+code)
 	require.Contains(t, redirectURI, "state=state-xyz")
 
-	session, err := sessionStore.FindByID(context.Background(), uuid.MustParse(sessionID))
+	session, err := sessionStore.FindByCode(context.Background(), code)
 	require.NoError(t, err)
 	require.Equal(t, service.StatusPendingConsent, session.Status)
 	require.Equal(t, reqBody.Scopes, session.RequestedScope)
@@ -133,7 +133,7 @@ func TestConcurrentUserCreation(t *testing.T) {
 	concurrentRequests := 10
 	errCh := make(chan error, concurrentRequests)
 
-	for range concurrentRequests {
+	for i := 0; i < concurrentRequests; i++ {
 		go func() {
 			reqBody := models.AuthorizationRequest{
 				Email:       "testuser@example.com",
@@ -164,7 +164,7 @@ func TestConcurrentUserCreation(t *testing.T) {
 		}()
 	}
 
-	for range concurrentRequests {
+	for i := 0; i < concurrentRequests; i++ {
 		err := <-errCh
 		require.NoError(t, err)
 	}

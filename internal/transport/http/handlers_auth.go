@@ -61,7 +61,7 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	var req authModel.AuthorizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.Warn("failed to decode token request",
+		h.logger.Warn("failed to decode authorize request",
 			"error", err,
 			"request_id", requestID,
 		)
@@ -70,10 +70,9 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	err := validateAuthRequest(&req)
 	if err != nil {
-		h.logger.Warn("invalid token request",
+		h.logger.Warn("invalid authorize request",
 			"error", err,
 			"request_id", requestID,
-			"email", req.Email,
 		)
 		writeError(w, err)
 		return
@@ -82,18 +81,18 @@ func (h *AuthHandler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.auth.Authorize(ctx, &req)
 	if err != nil {
-		h.logger.Error("token failed",
+		h.logger.Error("authorize failed",
 			"error", err,
 			"request_id", requestID,
-			"email", req.Email,
+			"client_id", req.ClientID,
 		)
 		writeError(w, err)
 		return
 	}
 
-	h.logger.Info("token successful",
+	h.logger.Info("authorize successful",
 		"request_id", requestID,
-		"code", res.Code,
+		"client_id", req.ClientID,
 	)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -124,7 +123,6 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("invalid token request",
 			"error", err,
 			"request_id", requestID,
-			"code", req.Code,
 		)
 		writeError(w, err)
 		return
@@ -136,7 +134,7 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("token exchange failed",
 			"error", err,
 			"request_id", requestID,
-			"code", req.Code,
+			"client_id", req.ClientID,
 		)
 		writeError(w, err)
 		return
@@ -144,6 +142,7 @@ func (h *AuthHandler) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("token exchange successful",
 		"request_id", requestID,
+		"client_id", req.ClientID,
 	)
 
 	w.Header().Set("Content-Type", "application/json")

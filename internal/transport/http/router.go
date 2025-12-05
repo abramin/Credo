@@ -85,6 +85,13 @@ func writeError(w http.ResponseWriter, err error) {
 		_ = json.NewEncoder(w).Encode(response)
 		return
 	}
+
+	// Fallback for unexpected errors
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": domainCodeToHTTPCode(dErrors.CodeInternal),
+	})
 }
 
 // domainCodeToHTTPStatus translates domain error codes to HTTP status codes.

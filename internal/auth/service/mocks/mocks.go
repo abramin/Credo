@@ -72,6 +72,21 @@ func (mr *MockUserStoreMockRecorder) FindByID(ctx, id any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindByID", reflect.TypeOf((*MockUserStore)(nil).FindByID), ctx, id)
 }
 
+// FindOrCreateByEmail mocks base method.
+func (m *MockUserStore) FindOrCreateByEmail(ctx context.Context, email string, user *models.User) (*models.User, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindOrCreateByEmail", ctx, email, user)
+	ret0, _ := ret[0].(*models.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindOrCreateByEmail indicates an expected call of FindOrCreateByEmail.
+func (mr *MockUserStoreMockRecorder) FindOrCreateByEmail(ctx, email, user any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindOrCreateByEmail", reflect.TypeOf((*MockUserStore)(nil).FindOrCreateByEmail), ctx, email, user)
+}
+
 // Save mocks base method.
 func (m *MockUserStore) Save(ctx context.Context, user *models.User) error {
 	m.ctrl.T.Helper()

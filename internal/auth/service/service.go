@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/url"
 	"time"
 
 	"github.com/google/uuid"
 
+	"id-gateway/internal/audit"
 	"id-gateway/internal/auth/models"
 	"id-gateway/internal/auth/store"
 	dErrors "id-gateway/pkg/domain-errors"
@@ -28,23 +30,58 @@ type SessionStore interface {
 }
 
 type Service struct {
-	users      UserStore
-	sessions   SessionStore
-	sessionTTL time.Duration
+	users          UserStore
+	sessions       SessionStore
+	sessionTTL     time.Duration
+	logger         *slog.Logger
+	auditPublisher AuditPublisher
 }
 
 const StatusPendingConsent = "pending_consent"
 const StatusActive = "active"
 
-func NewService(users UserStore, sessions SessionStore, sessionTTL time.Duration) *Service {
+const (
+	eventUserCreated      = "user_created"
+	eventSessionCreated   = "session_created"
+	eventTokenIssued      = "token_issued"
+	eventUserInfoAccessed = "userinfo_accessed"
+	eventAuthFailed       = "auth_failed"
+)
+
+type AuditPublisher interface {
+	Emit(ctx context.Context, base audit.Event) error
+}
+
+type Option func(*Service)
+
+func WithLogger(logger *slog.Logger) Option {
+	return func(s *Service) {
+		s.logger = logger
+	}
+}
+
+func WithAuditPublisher(publisher AuditPublisher) Option {
+	return func(s *Service) {
+		s.auditPublisher = publisher
+	}
+}
+
+func NewService(users UserStore, sessions SessionStore, sessionTTL time.Duration, opts ...Option) *Service {
 	if sessionTTL <= 0 {
 		sessionTTL = 15 * time.Minute
 	}
-	return &Service{
+	svc := &Service{
 		users:      users,
 		sessions:   sessions,
 		sessionTTL: sessionTTL,
 	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	if svc.logger == nil {
+		svc.logger = slog.Default()
+	}
+	return svc
 }
 
 func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error) {
@@ -59,6 +96,12 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	user, err := s.users.FindOrCreateByEmail(ctx, req.Email, newUser)
 	if err != nil {
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to find or create user")
+	}
+	if user.ID == newUser.ID {
+		s.logAudit(ctx, eventUserCreated,
+			"user_id", user.ID.String(),
+			"client_id", req.ClientID,
+		)
 	}
 
 	now := time.Now()
@@ -88,6 +131,11 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	if err != nil {
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to save session")
 	}
+	s.logAudit(ctx, eventSessionCreated,
+		"user_id", user.ID.String(),
+		"session_id", newSession.ID.String(),
+		"client_id", req.ClientID,
+	)
 
 	redirectURI := req.RedirectURI
 	if redirectURI != "" {
@@ -115,20 +163,40 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 	session, err := s.sessions.FindByID(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.logAuthFailure(ctx, "session_not_found", false,
+				"session_id", sessionID.String(),
+			)
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "session not found")
 		}
+		s.logAuthFailure(ctx, "session_lookup_failed", true,
+			"session_id", sessionID.String(),
+			"error", err,
+		)
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to find session")
 	}
 
 	if session.Status != StatusActive {
+		s.logAuthFailure(ctx, "session_not_active", false,
+			"session_id", sessionID.String(),
+			"status", session.Status,
+		)
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "session not active")
 	}
 
 	user, err := s.users.FindByID(ctx, session.UserID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.logAuthFailure(ctx, "user_not_found", false,
+				"session_id", sessionID.String(),
+				"user_id", session.UserID.String(),
+			)
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "user not found")
 		}
+		s.logAuthFailure(ctx, "user_lookup_failed", true,
+			"session_id", sessionID.String(),
+			"user_id", session.UserID.String(),
+			"error", err,
+		)
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to find user")
 	}
 
@@ -140,6 +208,10 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 		FamilyName:    user.LastName,
 		Name:          user.FirstName + " " + user.LastName,
 	}
+	s.logAudit(ctx, eventUserInfoAccessed,
+		"user_id", user.ID.String(),
+		"session_id", session.ID.String(),
+	)
 
 	return userInfo, nil
 }
@@ -147,6 +219,9 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error) {
 	// 1. Validate grant_type
 	if req.GrantType != "authorization_code" {
+		s.logAuthFailure(ctx, "invalid_grant_type", false,
+			"client_id", req.ClientID,
+		)
 		return nil, dErrors.New(dErrors.CodeInvalidInput, "unsupported grant_type")
 	}
 
@@ -154,28 +229,55 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	session, err := s.sessions.FindByCode(ctx, req.Code)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
+			s.logAuthFailure(ctx, "session_not_found", false,
+				"client_id", req.ClientID,
+			)
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid authorization code")
 		}
+		s.logAuthFailure(ctx, "session_lookup_failed", true,
+			"client_id", req.ClientID,
+			"error", err,
+		)
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to find session")
 	}
 
 	// 3. Validate code not expired (OAuth 2.0 spec: codes expire quickly)
 	if time.Now().After(session.CodeExpiresAt) {
+		s.logAuthFailure(ctx, "authorization_code_expired", false,
+			"session_id", session.ID.String(),
+			"user_id", session.UserID.String(),
+			"client_id", session.ClientID,
+		)
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code expired")
 	}
 
 	// 4. Validate code not already used (prevent replay attacks)
 	if session.CodeUsed {
+		s.logAuthFailure(ctx, "authorization_code_reused", false,
+			"session_id", session.ID.String(),
+			"user_id", session.UserID.String(),
+			"client_id", session.ClientID,
+		)
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code already used")
 	}
 
 	// 5. Validate redirect_uri matches (OAuth 2.0 security requirement)
 	if req.RedirectURI != session.RedirectURI {
+		s.logAuthFailure(ctx, "redirect_uri_mismatch", false,
+			"session_id", session.ID.String(),
+			"user_id", session.UserID.String(),
+			"client_id", session.ClientID,
+		)
 		return nil, dErrors.New(dErrors.CodeInvalidInput, "redirect_uri mismatch")
 	}
 
 	// 6. Validate client_id matches
 	if req.ClientID != session.ClientID {
+		s.logAuthFailure(ctx, "client_id_mismatch", false,
+			"session_id", session.ID.String(),
+			"user_id", session.UserID.String(),
+			"client_id", session.ClientID,
+		)
 		return nil, dErrors.New(dErrors.CodeInvalidInput, "client_id mismatch")
 	}
 
@@ -184,16 +286,70 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	session.Status = "active"
 	err = s.sessions.Save(ctx, session)
 	if err != nil {
+		s.logAuthFailure(ctx, "session_update_failed", true,
+			"session_id", session.ID.String(),
+			"user_id", session.UserID.String(),
+			"client_id", session.ClientID,
+			"error", err,
+		)
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to update session")
 	}
 
 	// 8. Generate tokens
-	accessToken := "at_" + session.ID.String()
+	accessToken := "at_sess_" + session.ID.String()
 	idToken := "idt_" + session.ID.String()
+	s.logAudit(ctx, eventTokenIssued,
+		"user_id", session.UserID.String(),
+		"session_id", session.ID.String(),
+		"client_id", session.ClientID,
+	)
 
 	return &models.TokenResult{
 		AccessToken: accessToken,
 		IDToken:     idToken,
 		ExpiresIn:   3600, // 1 hour
 	}, nil
+}
+
+func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
+	args := append(attrs, "event", event, "log_type", "audit")
+	if s.logger != nil {
+		s.logger.Info(event, args...)
+	}
+	if s.auditPublisher == nil {
+		return
+	}
+	userID := extractStringAttr(attrs, "user_id")
+	_ = s.auditPublisher.Emit(ctx, audit.Event{
+		UserID:  userID,
+		Subject: userID,
+		Action:  event,
+	})
+}
+
+func (s *Service) logAuthFailure(ctx context.Context, reason string, isError bool, attrs ...any) {
+	args := append(attrs, "event", eventAuthFailed, "reason", reason, "log_type", "standard")
+	if s.logger == nil {
+		return
+	}
+	if isError {
+		s.logger.Error(eventAuthFailed, args...)
+		return
+	}
+	s.logger.Warn(eventAuthFailed, args...)
+}
+
+func extractStringAttr(attrs []any, key string) string {
+	for i := 0; i < len(attrs)-1; i += 2 {
+		k, ok := attrs[i].(string)
+		if !ok {
+			continue
+		}
+		if k == key {
+			if v, ok := attrs[i+1].(string); ok {
+				return v
+			}
+		}
+	}
+	return ""
 }

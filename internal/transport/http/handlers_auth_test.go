@@ -68,7 +68,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeInvalidRequest), errBody["error"])
 	})
 
 	s.T().Run("400 error scenarios - invalid input", func(t *testing.T) {
@@ -158,7 +158,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		assert.Equal(t, http.StatusInternalServerError, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeInternal), errBody["error"])
+		assert.Equal(t, "internal_error", errBody["error"])
 	})
 }
 
@@ -290,7 +290,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		assert.Equal(t, http.StatusInternalServerError, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeInternal), errBody["error"])
+		assert.Equal(t, "internal_error", errBody["error"])
 	})
 }
 
@@ -326,7 +326,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 		mockService, router := s.newHandler(t)
 		mockService.EXPECT().UserInfo(gomock.Any(), gomock.Any()).Times(0)
 
-		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID)
+		status, got, errBody := s.doUserInfoRequest(t, router, uuid.Nil)
 		assert.Equal(t, http.StatusUnauthorized, status)
 		assert.Nil(t, got)
 		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
@@ -366,7 +366,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		assert.Equal(t, http.StatusInternalServerError, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeInternal), errBody["error"])
+		assert.Equal(t, "internal_error", errBody["error"])
 	})
 }
 
@@ -391,7 +391,9 @@ func (s *AuthHandlerSuite) newHandler(t *testing.T) (*mocks.MockAuthService, *ch
 func (s *AuthHandlerSuite) doUserInfoRequest(t *testing.T, router *chi.Mux, sessionID uuid.UUID) (int, *authModel.UserInfoResult, map[string]string) {
 	t.Helper()
 	httpReq := httptest.NewRequest(http.MethodGet, "/auth/userinfo", nil)
-	httpReq.Header.Set("Authorization", "Bearer at_sess_"+sessionID.String())
+	if sessionID != uuid.Nil {
+		httpReq.Header.Set("Authorization", "Bearer at_sess_"+sessionID.String())
+	}
 	rr := httptest.NewRecorder()
 
 	router.ServeHTTP(rr, httpReq)
