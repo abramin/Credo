@@ -7,10 +7,14 @@ import (
 	"os/signal"
 	"time"
 
+	authService "id-gateway/internal/auth/service"
+	authStore "id-gateway/internal/auth/store"
 	"id-gateway/internal/platform/config"
 	"id-gateway/internal/platform/httpserver"
 	"id-gateway/internal/platform/logger"
 	httptransport "id-gateway/internal/transport/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // main wires high-level dependencies, exposes the HTTP router, and keeps the
@@ -24,10 +28,16 @@ func main() {
 		"regulated_mode", cfg.RegulatedMode,
 	)
 
-	handler := httptransport.NewHandler(cfg.RegulatedMode, log)
-	router := httptransport.NewRouter(handler, log)
+	a := authService.NewService(
+		authStore.NewInMemoryUserStore(),
+		authStore.NewInMemorySessionStore(),
+		24*time.Hour, // TODO Make configurable
+	)
+	r := chi.NewRouter()
+	authHandler := httptransport.NewAuthHandler(a, log, cfg.RegulatedMode)
+	authHandler.Register(r)
 
-	srv := httpserver.New(cfg.Addr, router)
+	srv := httpserver.New(cfg.Addr, r)
 
 	log.Info("starting http server", "addr", cfg.Addr)
 

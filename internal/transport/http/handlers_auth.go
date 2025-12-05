@@ -23,8 +23,9 @@ import (
 // AuthHandler handles authentication endpoints including authorize, token, and userinfo.
 // Implements the OIDC-lite flow described in PRD-001.
 type AuthHandler struct {
-	auth   AuthService
-	logger *slog.Logger
+	regulatedMode bool
+	auth          AuthService
+	logger        *slog.Logger
 }
 
 // AuthService defines the interface for authentication operations.grant_type must be one of
@@ -35,10 +36,11 @@ type AuthService interface {
 }
 
 // NewAuthHandler creates a new AuthHandler with the given service and logger.
-func NewAuthHandler(auth AuthService, logger *slog.Logger) *AuthHandler {
+func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool) *AuthHandler {
 	return &AuthHandler{
-		auth:   auth,
-		logger: logger,
+		regulatedMode: regulatedMode,
+		auth:          auth,
+		logger:        logger,
 	}
 }
 

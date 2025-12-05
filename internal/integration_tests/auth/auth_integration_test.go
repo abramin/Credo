@@ -31,7 +31,7 @@ func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemo
 	sessionStore := store.NewInMemorySessionStore()
 
 	authService := service.NewService(userStore, sessionStore, 5*time.Minute, service.WithLogger(logger))
-	authHandler := httptransport.NewAuthHandler(authService, logger)
+	authHandler := httptransport.NewAuthHandler(authService, logger, false) // TODO; test regulatedMode true cases
 
 	router := chi.NewRouter()
 	authHandler.Register(router)
