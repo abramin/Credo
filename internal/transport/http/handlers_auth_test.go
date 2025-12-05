@@ -38,7 +38,7 @@ func (s *AuthHandlerSuite) SetupSuite() {
 	s.ctx = context.Background()
 }
 
-func (s *AuthHandlerSuite) TestService_Authorize() {
+func (s *AuthHandlerSuite) TestHandler_Authorize() {
 	var validRequest = &authModel.AuthorizationRequest{
 		Email:       "user@example.com",
 		ClientID:    "test-client-id",
@@ -151,6 +151,98 @@ func (s *AuthHandlerSuite) TestService_Authorize() {
 		assert.Equal(t, http.StatusInternalServerError, status)
 		assert.Nil(t, got)
 		assert.Equal(t, string(httpErrors.CodeInternal), errBody["error"])
+	})
+}
+
+func (s *AuthHandlerSuite) TestHandler_Token() {
+	s.T().Run("happy path - tokens exchanged", func(t *testing.T) {
+		_, router := s.newHandler(t)
+
+		httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, httpReq)
+
+		assert.Equal(t, http.StatusNotImplemented, rr.Code)
+
+		var respBody map[string]string
+		err := json.Unmarshal(rr.Body.Bytes(), &respBody)
+		require.NoError(t, err)
+
+		assert.Equal(t, "TODO: implement handler", respBody["message"])
+		assert.Equal(t, "/auth/token", respBody["endpoint"])
+	})
+
+	s.T().Run("session id not found - 404", func(t *testing.T) {
+		_, router := s.newHandler(t)
+
+		httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, httpReq)
+
+		assert.Equal(t, http.StatusNotImplemented, rr.Code)
+
+		var respBody map[string]string
+		err := json.Unmarshal(rr.Body.Bytes(), &respBody)
+		require.NoError(t, err)
+
+		assert.Equal(t, "TODO: implement handler", respBody["message"])
+		assert.Equal(t, "/auth/token", respBody["endpoint"])
+	})
+
+	s.T().Run("internal server error", func(t *testing.T) {
+		_, router := s.newHandler(t)
+
+		httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, httpReq)
+
+		assert.Equal(t, http.StatusNotImplemented, rr.Code)
+
+		var respBody map[string]string
+		err := json.Unmarshal(rr.Body.Bytes(), &respBody)
+		require.NoError(t, err)
+
+		assert.Equal(t, "TODO: implement handler", respBody["message"])
+		assert.Equal(t, "/auth/token", respBody["endpoint"])
+	})
+
+	s.T().Run("Bad Request- missing session id", func(t *testing.T) {
+		_, router := s.newHandler(t)
+
+		httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, httpReq)
+
+		assert.Equal(t, http.StatusNotImplemented, rr.Code)
+
+		var respBody map[string]string
+		err := json.Unmarshal(rr.Body.Bytes(), &respBody)
+		require.NoError(t, err)
+
+		assert.Equal(t, "TODO: implement handler", respBody["message"])
+		assert.Equal(t, "/auth/token", respBody["endpoint"])
+	})
+
+	s.T().Run("Unauthorized - session expired", func(t *testing.T) {
+		_, router := s.newHandler(t)
+
+		httpReq := httptest.NewRequest(http.MethodPost, "/auth/token", nil)
+		rr := httptest.NewRecorder()
+
+		router.ServeHTTP(rr, httpReq)
+
+		assert.Equal(t, http.StatusNotImplemented, rr.Code)
+
+		var respBody map[string]string
+		err := json.Unmarshal(rr.Body.Bytes(), &respBody)
+		require.NoError(t, err)
+
+		assert.Equal(t, "TODO: implement handler", respBody["message"])
+		assert.Equal(t, "/auth/token", respBody["endpoint"])
 	})
 }
 
