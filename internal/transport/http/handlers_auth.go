@@ -2,206 +2,28 @@ package httptransport
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
-	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-
+	authHandlers "id-gateway/internal/auth/handlers"
 	authModel "id-gateway/internal/auth/models"
 	"id-gateway/internal/platform/metrics"
-	"id-gateway/internal/platform/middleware"
-	dErrors "id-gateway/pkg/domain-errors"
-	s "id-gateway/pkg/string"
-	"id-gateway/pkg/validation"
+
+	"github.com/google/uuid"
 )
 
-// AuthHandler handles authentication endpoints including authorize, token, and userinfo.
-// Implements the OIDC-lite flow described in PRD-001.
-type AuthHandler struct {
-	regulatedMode bool
-	auth          AuthService
-	logger        *slog.Logger
-	metrics       *metrics.Metrics
-}
-
-// AuthService defines the interface for authentication operations.grant_type must be one of
+// AuthService defines the interface for authentication operations.
 type AuthService interface {
 	Authorize(ctx context.Context, req *authModel.AuthorizationRequest) (*authModel.AuthorizationResult, error)
 	Token(ctx context.Context, req *authModel.TokenRequest) (*authModel.TokenResult, error)
 	UserInfo(ctx context.Context, sessionID uuid.UUID) (*authModel.UserInfoResult, error)
 }
 
-// NewAuthHandler creates a new AuthHandler with the given service and logger.
+// AuthHandler is deprecated: use authHandlers.Handler directly from auth/handlers package instead.
+// This type is kept for backward compatibility during migration.
+type AuthHandler = authHandlers.Handler
+
+// NewAuthHandler creates a new AuthHandler (deprecated wrapper).
+// Deprecated: Use authHandlers.New() from id-gateway/internal/auth/handlers directly.
 func NewAuthHandler(auth AuthService, logger *slog.Logger, regulatedMode bool, metrics *metrics.Metrics) *AuthHandler {
-	return &AuthHandler{
-		regulatedMode: regulatedMode,
-		auth:          auth,
-		logger:        logger,
-		metrics:       metrics,
-	}
-}
-
-// Register registers the auth routes with the chi router.
-// Note: Authentication middleware should be applied by the parent router to protected routes.
-func (h *AuthHandler) Register(r chi.Router) {
-	r.Post("/auth/authorize", h.HandleAuthorize)
-	r.Post("/auth/token", h.HandleToken)
-	r.Get("/auth/userinfo", h.HandleUserInfo)
-}
-
-// HandleAuthorize implements POST /auth/authorize per PRD-001 FR-1.
-// Initiates an authentication session for a user by email.
-// If the user doesn't exist, creates them automatically.
-//
-// Input: { "email": "user@example.com", "client_id": "demo-client", "scopes": [...], "redirect_uri": "...", "state": "..." }
-// Output: { "session_id": "sess_...", "redirect_uri": "https://..." }
-func (h *AuthHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-
-	var req *authModel.AuthorizationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode authorize request",
-			"error", err,
-			"request_id", requestID,
-		)
-		writeError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
-		return
-	}
-	s.Sanitize(req)
-	if err := validation.Validate(req); err != nil {
-		h.logger.WarnContext(ctx, "invalid authorize request",
-			"error", err,
-			"request_id", requestID,
-		)
-		writeError(w, err)
-		return
-	}
-
-	res, err := h.auth.Authorize(ctx, req)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "authorize failed",
-			"error", err,
-			"request_id", requestID,
-			"client_id", req.ClientID,
-		)
-		writeError(w, err)
-		return
-	}
-
-	h.logger.InfoContext(ctx, "authorize successful",
-		"request_id", requestID,
-		"client_id", req.ClientID,
-	)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	// Note: We ignore encoding errors here since the response has already started.
-	// Proper error handling would require buffering the response.
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"code":         res.Code,
-		"redirect_uri": res.RedirectURI,
-	})
-}
-
-func (h *AuthHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-
-	var req authModel.TokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode token request",
-			"error", err,
-			"request_id", requestID,
-		)
-		writeError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
-		return
-	}
-	s.Sanitize(&req)
-	if err := validation.Validate(&req); err != nil {
-		h.logger.WarnContext(ctx, "invalid token request",
-			"error", err,
-			"request_id", requestID,
-		)
-		writeError(w, err)
-		return
-	}
-
-	res, err := h.auth.Token(ctx, &req)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "token exchange failed",
-			"error", err,
-			"request_id", requestID,
-			"client_id", req.ClientID,
-		)
-		writeError(w, err)
-		return
-	}
-
-	h.logger.InfoContext(ctx, "token exchange successful",
-		"request_id", requestID,
-		"client_id", req.ClientID,
-	)
-	if h.metrics != nil { // allow tests to skip instrumentation
-		h.metrics.IncrementTokenRequests()
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	// Note: We ignore encoding errors here since the response has already started.
-	// Proper error handling would require buffering the response.
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"access_token": res.AccessToken,
-		"id_token":     res.IDToken,
-		"expires_in":   res.ExpiresIn,
-	})
-}
-
-func (h *AuthHandler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	sessionIDStr := middleware.GetSessionID(ctx)
-
-	if sessionIDStr == "" {
-		h.logger.WarnContext(ctx, "missing session ID in context",
-			"request_id", requestID,
-		)
-		writeError(w, dErrors.New(dErrors.CodeUnauthorized, "Missing or invalid session"))
-		return
-	}
-
-	sessionID, err := uuid.Parse(sessionIDStr)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid session ID format",
-			"error", err,
-			"request_id", requestID,
-			"session_id", sessionIDStr,
-		)
-		writeError(w, dErrors.New(dErrors.CodeUnauthorized, "Invalid session ID"))
-		return
-	}
-
-	userInfo, err := h.auth.UserInfo(ctx, sessionID)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "failed to get user info",
-			"error", err,
-			"request_id", requestID,
-			"session_id", sessionIDStr,
-		)
-		writeError(w, err)
-		return
-	}
-
-	h.logger.InfoContext(ctx, "user info retrieved successfully",
-		"request_id", requestID,
-		"session_id", sessionIDStr,
-	)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	// Note: We ignore encoding errors here since the response has already started.
-	// Proper error handling would require buffering the response.
-	_ = json.NewEncoder(w).Encode(userInfo)
-
+	return authHandlers.New(auth, logger, regulatedMode, metrics)
 }

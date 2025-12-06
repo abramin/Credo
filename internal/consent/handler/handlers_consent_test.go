@@ -1,4 +1,4 @@
-package httptransport
+package handler
 
 import (
 	"bytes"
@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"id-gateway/internal/consent/handler/mocks"
 	consentModel "id-gateway/internal/consent/models"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
-	"id-gateway/internal/transport/http/mocks"
 )
 
 //go:generate mockgen -source=handlers_consent.go -destination=mocks/consent-mocks.go -package=mocks ConsentService
@@ -36,12 +36,7 @@ func TestConsentHandler_handleGrantConsent_HappyPath(t *testing.T) {
 		}).
 		Times(1)
 
-	handler := &ConsentHandler{
-		logger:     nil,
-		consent:    mockConsent,
-		metrics:    &metrics.Metrics{},
-		consentTTL: consentTTL,
-	}
+	handler := New(mockConsent, &metrics.Metrics{}, consentTTL)
 
 	grantReq := consentModel.GrantConsentRequest{
 		Purposes: []consentModel.ConsentPurpose{consentModel.ConsentPurposeLogin},
