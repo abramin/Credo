@@ -1,4 +1,4 @@
-package handlers
+package handler
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
-        "id-gateway/internal/auth/handlers/mocks"
+	"id-gateway/internal/auth/handler/mocks"
 	authModel "id-gateway/internal/auth/models"
 	"id-gateway/internal/platform/middleware"
 	dErrors "id-gateway/pkg/domain-errors"
