@@ -50,9 +50,6 @@ python3 -m http.server 8000
 
 ## Demo UI
 
-The project includes two web interfaces:
-
-1. **User Portal** (`/index.html`) - Login, consent management, identity verification, VCs, decisions, GDPR data rights
-2. **Admin Dashboard** (`/admin.html`) - Real-time monitoring, audit logs, decision tracking, compliance overview
+The project includes demo web interfaces:
 
 See [Frontend Readme](frontend/README.md) for details.
