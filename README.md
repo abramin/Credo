@@ -1,4 +1,4 @@
-# ID Gateway
+# Credo
 
 Identity verification gateway built as a modular monolith. It simulates OIDC-style auth, consent, registry evidence, VC issuance/verification, decisions, and audit logging.
 
