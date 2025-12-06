@@ -9,12 +9,12 @@
 
 ## Philosophy
 
-V2 focuses on making the gateway **more realistic** and **more operationally credible** without trying to become a full OIDC provider or identity platform.
----
+## V2 focuses on making the gateway **more realistic** and **more operationally credible** without trying to become a full OIDC provider or identity platform.
 
 ## Prerequisites
 
 Before starting V2, complete:
+
 - ✅ All V1 PRDs implemented (11 HTTP endpoints functional)
 - ✅ `make test` passes with >80% coverage
 - ✅ Complete end-to-end flow works (auth → consent → registry → VC → decision → audit)
@@ -36,6 +36,8 @@ Before starting V2, complete:
 6. **Policy-Driven Decisions** (P2 - shows flexibility)
 7. **External OIDC Provider Integration Story** (P2 - shows architectural judgment)
 
+- Nonce support (OIDC hardening): Accept nonce on /auth/authorize, persist it with the session, echo it in the ID token nonce claim, and require clients to validate it when processing the ID token. (To prioritize)
+
 ---
 
 ## 1. Signed JWT Tokens + JWKS
@@ -47,6 +49,7 @@ Before starting V2, complete:
 ### What to Add
 
 **Token Signing:**
+
 - Replace "todo-access" and "todo-id" tokens with real **signed JWTs**
 - Use `github.com/golang-jwt/jwt/v5` or `github.com/lestrrat-go/jwx/v2`
 - Generate RSA 2048-bit keypair on server startup (or load from config)
@@ -54,6 +57,7 @@ Before starting V2, complete:
 - Include standard claims: `iss`, `sub`, `aud`, `exp`, `iat`, `jti`
 
 **JWKS Endpoint:**
+
 - Expose `GET /.well-known/jwks.json` endpoint
 - Return public key in JWK format with `kid` (key ID)
 - Support key rotation: old key kept for validation only
@@ -76,18 +80,21 @@ Before starting V2, complete:
 ### Implementation Steps
 
 1. **Phase 1: Key Management (1-2 hours)**
+
    - Add `internal/platform/crypto/keys.go`
    - Generate RSA keypair on startup
    - Store private key in memory (later: KMS integration)
    - Expose public key as JWK
 
 2. **Phase 2: Token Signing (2-3 hours)**
+
    - Update `auth/service.go` Token() method
    - Sign access token with private key
    - Create ID token with OIDC-specific claims
    - Set proper expiry (1 hour for access, 5 min for ID)
 
 3. **Phase 3: JWKS Endpoint (1 hour)**
+
    - Add `GET /.well-known/jwks.json` handler
    - Return public key in JWK format
    - Include `kid`, `kty`, `use`, `alg`, `n`, `e` fields
@@ -105,21 +112,6 @@ Before starting V2, complete:
 - [ ] Each token has unique `jti` (prevents replay)
 - [ ] Signing uses RS256 or ES256
 
-### Why It Matters for Interviews
-
-**Shows you understand:**
-- Real token-based auth patterns (not just opaque strings)
-- Public-key cryptography for distributed systems
-- JWKS for downstream service validation
-- Token structure and standard claims
-
-**Interview talking points:**
-- "We use RS256 for asymmetric signing so downstream services can validate tokens without secret sharing"
-- "JWKS endpoint enables zero-trust architecture - services fetch our public key independently"
-- "We include `jti` for replay attack prevention via token blacklisting"
-
----
-
 ## 2. Real Database for Core Stores
 
 **Priority:** P0 (Critical)
@@ -129,12 +121,14 @@ Before starting V2, complete:
 ### What to Add
 
 **Database:**
+
 - Migrate from in-memory stores to **PostgreSQL**
 - Use schema migrations with **golang-migrate/migrate** or **Atlas**
 - Write raw SQL queries with **sqlc** for type-safe query generation
 - Keep in-memory implementations for testing
 
 **Stores to Migrate:**
+
 - `UserStore` → `users` table
 - `SessionStore` → `sessions` table
 - `ConsentStore` → `consent_records` table
@@ -142,6 +136,7 @@ Before starting V2, complete:
 - `AuditStore` → `audit_events` table (append-only)
 
 **Registry Cache:**
+
 - Keep in-memory with TTL (5 min) - no persistence needed
 - Or use Redis for distributed caching
 
@@ -210,17 +205,20 @@ CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
 ### Implementation Steps
 
 1. **Phase 1: Setup (2-3 hours)**
+
    - Add Postgres dependency: `go get github.com/lib/pq`
    - Add migration tool: `go get -tags 'postgres' github.com/golang-migrate/migrate/v4`
    - Create `migrations/` directory
    - Add connection pool configuration
 
 2. **Phase 2: Migrations (2-3 hours)**
+
    - Write up/down migrations for each table
    - Test migrations locally with `make migrate-up`
    - Add `make migrate-down` for rollback
 
 3. **Phase 3: Postgres Implementations (4-6 hours)**
+
    - Create `internal/auth/store_postgres.go`
    - Create `internal/consent/store_postgres.go`
    - Create `internal/evidence/vc/store_postgres.go`
@@ -243,22 +241,6 @@ CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
 - [ ] Proper foreign key constraints
 - [ ] Indexes on lookup columns
 
-### Why It Matters for Interviews
-
-**Shows you understand:**
-- Database schema design for identity systems
-- Transaction boundaries and ACID guarantees
-- Migration strategies and rollback procedures
-- Connection pooling and resource management
-- Separation of test infrastructure
-
-**Interview talking points:**
-- "We use foreign key cascades for GDPR data deletion - delete user, all consents auto-delete"
-- "Audit table is append-only with no UPDATE/DELETE permissions - compliance requirement"
-- "We keep in-memory stores for tests to avoid DB dependencies in CI/CD"
-
----
-
 ## 3. Basic Observability
 
 **Priority:** P0 (Critical)
@@ -268,12 +250,14 @@ CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
 ### What to Add
 
 **Structured Logging:**
+
 - Replace `log.Printf` with structured logger: `github.com/rs/zerolog` or `go.uber.org/zap`
 - Include correlation ID in all logs
 - Log levels: DEBUG, INFO, WARN, ERROR
 - JSON format for production, pretty print for dev
 
 **Metrics:**
+
 - Add Prometheus metrics: `github.com/prometheus/client_golang`
 - Expose `GET /metrics` endpoint
 - Track:
@@ -284,6 +268,7 @@ CREATE INDEX idx_audit_timestamp ON audit_events(timestamp);
   - Audit queue lag (gauge)
 
 **Request Tracing (Optional):**
+
 - Add correlation ID to all requests
 - Include in logs, audit events, error responses
 - Use `X-Request-ID` header or generate UUID
@@ -321,11 +306,13 @@ var (
 ### Implementation Steps
 
 1. **Phase 1: Structured Logging (1-2 hours)**
+
    - Replace logger in `internal/platform/logger/`
    - Add correlation ID middleware
    - Update all log calls to use structured fields
 
 2. **Phase 2: Metrics (2-3 hours)**
+
    - Add Prometheus dependencies
    - Create metrics package
    - Instrument HTTP handlers
@@ -345,21 +332,6 @@ var (
 - [ ] Metrics include proper labels
 - [ ] No sensitive data in logs (no PII, no tokens)
 
-### Why It Matters for Interviews
-
-**Shows you understand:**
-- Operational visibility requirements
-- Monitoring and alerting patterns
-- Structured logging best practices
-- SLI/SLO foundations
-
-**Interview talking points:**
-- "We use histograms for latency to track p50/p95/p99 percentiles"
-- "Correlation IDs enable tracing requests across microservices"
-- "We never log PII - only user IDs and pseudonymous identifiers"
-
----
-
 ## 4. Queue-backed Audit Pipeline
 
 **Priority:** P1 (High)
@@ -369,6 +341,7 @@ var (
 ### What to Add
 
 **Queue:**
+
 - Replace synchronous audit writes with queue
 - Options:
   - **NATS** (lightweight, in-process option)
@@ -376,11 +349,13 @@ var (
   - **Buffered Go channel** (simplest, good enough for demo)
 
 **Worker:**
+
 - Background goroutine that consumes from queue
 - Writes batches to Postgres AuditStore
 - Handles errors with retry + dead-letter queue
 
 **Benefits:**
+
 - Decouples request latency from audit persistence
 - Survives temporary database outages
 - Demonstrates async processing patterns
@@ -400,11 +375,13 @@ Publisher.Emit() → [Queue] → Worker → Postgres
 ### Implementation Steps
 
 1. **Phase 1: Queue Abstraction (1-2 hours)**
+
    - Create `internal/audit/queue.go` interface
    - Implement buffered channel version
    - Add queue metrics (depth, lag)
 
 2. **Phase 2: Worker (2-3 hours)**
+
    - Create `internal/audit/worker.go`
    - Batch writes (flush every 100 events or 5 seconds)
    - Add retry logic with exponential backoff
@@ -424,21 +401,6 @@ Publisher.Emit() → [Queue] → Worker → Postgres
 - [ ] Graceful shutdown drains queue
 - [ ] No audit events lost during normal operation
 
-### Why It Matters for Interviews
-
-**Shows you understand:**
-- Asynchronous processing patterns
-- Reliability vs latency tradeoffs
-- Queue-based architectures
-- Graceful degradation
-
-**Interview talking points:**
-- "We queue audit events to avoid blocking user requests on slow database writes"
-- "DLQ captures malformed events for debugging without crashing the worker"
-- "We batch writes to reduce database load while maintaining low latency"
-
----
-
 ## 5. Stronger Session & Token Model
 
 **Priority:** P1 (High)
@@ -448,17 +410,20 @@ Publisher.Emit() → [Queue] → Worker → Postgres
 ### What to Add
 
 **Refresh Tokens:**
+
 - Long-lived refresh tokens (30 days)
 - Short-lived access tokens (1 hour)
 - Refresh token rotation on use
 - Store refresh tokens in database
 
 **Token Revocation:**
+
 - Revocation list or "last valid time" per user
 - Check on token validation
 - Support "revoke all sessions" for user
 
 **Enhanced Validation:**
+
 - Validate `aud` (audience) claim
 - Validate `exp` (expiry)
 - Check token not revoked
@@ -476,11 +441,13 @@ Publisher.Emit() → [Queue] → Worker → Postgres
 ### Implementation Steps
 
 1. **Phase 1: Refresh Token Model (2-3 hours)**
+
    - Add `refresh_tokens` table
    - Generate and store refresh tokens
    - Return in `/auth/token` response
 
 2. **Phase 2: Refresh Endpoint (1-2 hours)**
+
    - Add `POST /auth/refresh` endpoint
    - Validate refresh token
    - Issue new access + refresh token pair
@@ -500,21 +467,6 @@ Publisher.Emit() → [Queue] → Worker → Postgres
 - [ ] Revoke all sessions works
 - [ ] Proper error messages for expired/revoked tokens
 
-### Why It Matters for Interviews
-
-**Shows you understand:**
-- Token lifecycle management
-- Security hygiene (rotation, revocation)
-- Stateful vs stateless auth tradeoffs
-- Incident response (revoke compromised tokens)
-
-**Interview talking points:**
-- "We rotate refresh tokens to limit window of compromise"
-- "Revocation list enables immediate token invalidation for security incidents"
-- "Short-lived access tokens reduce blast radius of token theft"
-
----
-
 ## 6. Policy-Driven Decisions (Lightweight)
 
 **Priority:** P2 (Nice to Have)
@@ -524,6 +476,7 @@ Publisher.Emit() → [Queue] → Worker → Postgres
 ### What to Add
 
 **Policy Configuration:**
+
 - Extract decision rules to YAML/JSON config
 - Rules map `purpose` → required evidence + conditions
 - Support simple boolean logic (AND/OR)
@@ -564,11 +517,13 @@ purposes:
 ### Implementation Steps
 
 1. **Phase 1: Policy Model (2-3 hours)**
+
    - Define policy structure in Go
    - Load from YAML file
    - Validate policy on startup
 
 2. **Phase 2: Policy Engine (2-3 hours)**
+
    - Interpret policy rules
    - Evaluate conditions against evidence
    - Return decision outcome
@@ -585,21 +540,6 @@ purposes:
 - [ ] Policy validation on startup
 - [ ] Clear error messages for invalid policies
 
-### Why It Matters for Interviews
-
-**Shows you understand:**
-- Separation of policy and code
-- Flexibility for business rules
-- Collaboration with non-technical teams (risk, compliance)
-- Configuration as code
-
-**Interview talking points:**
-- "We externalize policy so risk teams can update rules without redeploying"
-- "Policy versioning enables A/B testing of risk postures"
-- "Declarative rules are easier to audit than imperative code"
-
----
-
 ## 7. External OIDC Provider Integration Story
 
 **Priority:** P2 (Documentation + Light Code)
@@ -609,11 +549,13 @@ purposes:
 ### What to Add
 
 **Documentation:**
+
 - Document integration patterns with real OIDC providers
 - Explain when to build vs integrate
 - Architecture diagram showing gateway behind Keycloak/Auth0
 
 **Light Implementation:**
+
 - Feature flag: `USE_EXTERNAL_OIDC=true`
 - If enabled, validate tokens from external provider
 - Skip internal user/session creation
@@ -622,11 +564,13 @@ purposes:
 ### Architecture Diagrams
 
 **Current (Self-Contained):**
+
 ```
 User → Gateway (auth+consent+evidence+decision)
 ```
 
 **Production (Integrated):**
+
 ```
 User → Keycloak (auth) → Gateway (consent+evidence+decision)
                            ↓
@@ -637,10 +581,11 @@ User → Keycloak (auth) → Gateway (consent+evidence+decision)
 
 Add `docs/EXTERNAL_OIDC_INTEGRATION.md`:
 
-```markdown
+````markdown
 # External OIDC Provider Integration
 
 ## Overview
+
 In production, the ID Gateway delegates authentication to a real OIDC provider (Keycloak, Auth0, Okta) and focuses on its core competencies: consent, evidence gathering, and decision making.
 
 ## Integration Pattern
@@ -661,6 +606,7 @@ auth:
   jwks_url: https://keycloak.example.com/realms/demo/protocol/openid-connect/certs
   audience: id-gateway
 ```
+````
 
 ## Why External OIDC?
 
@@ -674,6 +620,7 @@ auth:
 - **Demo/Testing:** Simplifies local development
 - **Specific Requirements:** Unusual auth flows not supported by providers
 - **Cost:** Very high scale where per-user fees matter
+
 ```
 
 ### Acceptance Criteria
@@ -729,3 +676,4 @@ After V1 + V2, your gateway will demonstrate:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-12-03 | Product Team | Initial V2 Roadmap |
+```
