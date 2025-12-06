@@ -146,7 +146,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 				assert.Equal(t, http.StatusBadRequest, status)
 				assert.Nil(t, got)
-				assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
+				assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
 			})
 		}
 	})
@@ -207,7 +207,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
 	})
 
 	// - 400 Bad Request: Unsupported grant_type (must be "authorization_code")
@@ -221,7 +221,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		assert.Equal(t, http.StatusBadRequest, status)
 		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeInvalidInput), errBody["error"])
+		assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
 	})
 	// - 401 Unauthorized: Invalid authorization code (not found)
 	// - 401 Unauthorized: Authorization code expired (> 10 minutes old)
