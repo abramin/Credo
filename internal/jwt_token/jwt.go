@@ -18,6 +18,14 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// IDTokenClaims represents OIDC-compliant ID token claims.
+// It keeps the standard subject while carrying session and client references.
+type IDTokenClaims struct {
+	SessionID string `json:"sid,omitempty"`
+	ClientID  string `json:"azp,omitempty"`
+	jwt.RegisteredClaims
+}
+
 // JWTService handles JWT creation and validation
 type JWTService struct {
 	signingKey []byte
@@ -63,13 +71,14 @@ func (s *JWTService) GenerateIDToken(
 	userID uuid.UUID,
 	sessionID uuid.UUID,
 	clientID string) (string, error) {
-	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
-		UserID:    userID.String(),
+	now := time.Now()
+	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, IDTokenClaims{
 		SessionID: sessionID.String(),
 		ClientID:  clientID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.tokenTTL)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   userID.String(), // OIDC sub
+			ExpiresAt: jwt.NewNumericDate(now.Add(s.tokenTTL)),
+			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    s.issuer,
 			Audience:  []string{s.audience},
 			ID:        uuid.NewString(),
@@ -104,6 +113,33 @@ func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
 	}
 
 	claims, ok := parsed.Claims.(*Claims)
+	if !ok {
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token claims")
+	}
+
+	return claims, nil
+}
+
+func (s *JWTService) ValidateIDToken(tokenString string) (*IDTokenClaims, error) {
+	parsed, err := jwt.ParseWithClaims(tokenString, &IDTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrTokenUnverifiable
+		}
+		return s.signingKey, nil
+	})
+
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, dErrors.New(dErrors.CodeUnauthorized, "token has expired")
+		}
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token")
+	}
+
+	if !parsed.Valid {
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token")
+	}
+
+	claims, ok := parsed.Claims.(*IDTokenClaims)
 	if !ok {
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token claims")
 	}
