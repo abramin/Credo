@@ -16,7 +16,7 @@ import (
 )
 
 type ConsentService interface {
-	Grant(ctx context.Context, userID string, purpose consentModel.ConsentPurpose, ttl time.Duration) error
+	Grant(ctx context.Context, userID string, purposes []consentModel.ConsentPurpose, ttl time.Duration) ([]*consentModel.ConsentRecord, error)
 	Revoke(ctx context.Context, userID string, purpose consentModel.ConsentPurpose) error
 	Require(ctx context.Context, userID string, purpose consentModel.ConsentPurpose, now time.Time) error
 	List(ctx context.Context, userID string) ([]*consentModel.ConsentRecord, error)
@@ -95,37 +95,23 @@ func (h *ConsentHandler) handleGrantConsent(w http.ResponseWriter, r *http.Reque
 		writeError(w, dErrors.New(dErrors.CodeBadRequest, "purposes array must not be empty"))
 		return
 	}
-	// Each purpose must match ConsentPurpose enum
-	for _, purpose := range grantReq.Purposes {
-		switch purpose {
-		case consentModel.ConsentPurposeLogin,
-			consentModel.ConsentPurposeRegistryCheck,
-			consentModel.ConsentPurposeVCIssuance,
-			consentModel.ConsentPurposeDecision,
-			consentModel.ConsentMarketing:
-			// valid purpose
-		default:
-			h.logger.WarnContext(ctx, "invalid purpose in grant consent request",
+	// Move validation and grant logic to service
+	_, err = h.consent.Grant(ctx, userID, grantReq.Purposes, h.consentTTL)
+	if err != nil {
+		if dErrors.Is(err, dErrors.CodeBadRequest) {
+			h.logger.WarnContext(ctx, "invalid grant consent request",
 				"request_id", requestID,
-				"purpose", purpose,
-			)
-			writeError(w, dErrors.New(dErrors.CodeBadRequest, "invalid purpose: "+string(purpose)))
-			return
-		}
-	}
-
-	// Grant consent for each purpose
-	for _, purpose := range grantReq.Purposes {
-		err := h.consent.Grant(ctx, userID, purpose, h.consentTTL)
-		if err != nil {
-			h.logger.ErrorContext(ctx, "failed to grant consent",
-				"request_id", requestID,
-				"purpose", purpose,
 				"error", err.Error(),
 			)
-			writeError(w, dErrors.New(dErrors.CodeInternal, "failed to grant consent"))
+			writeError(w, err)
 			return
 		}
+		h.logger.ErrorContext(ctx, "failed to grant consent",
+			"request_id", requestID,
+			"error", err.Error(),
+		)
+		writeError(w, dErrors.New(dErrors.CodeInternal, "failed to grant consent"))
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

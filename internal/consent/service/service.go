@@ -24,7 +24,35 @@ func NewService(store Store) *Service {
 	return &Service{store: store}
 }
 
-func (s *Service) Grant(ctx context.Context, userID string, purpose models.ConsentPurpose, ttl time.Duration) (*models.ConsentRecord, error) {
+// GrantMultiple validates and grants consent for multiple purposes.
+func (s *Service) Grant(ctx context.Context, userID string, purposes []models.ConsentPurpose, ttl time.Duration) ([]*models.ConsentRecord, error) {
+	if len(purposes) == 0 {
+		return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "purposes array must not be empty")
+	}
+	validPurposes := map[models.ConsentPurpose]bool{
+		models.ConsentPurposeLogin:         true,
+		models.ConsentPurposeRegistryCheck: true,
+		models.ConsentPurposeVCIssuance:    true,
+		models.ConsentPurposeDecision:      true,
+		models.ConsentMarketing:            true,
+	}
+	for _, purpose := range purposes {
+		if !validPurposes[purpose] {
+			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose: "+string(purpose))
+		}
+	}
+	var records []*models.ConsentRecord
+	for _, purpose := range purposes {
+		record, err := s.saveGrant(ctx, userID, purpose, ttl)
+		if err != nil {
+			return nil, pkgerrors.New(pkgerrors.CodeInternal, "failed to grant consent")
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+func (s *Service) saveGrant(ctx context.Context, userID string, purpose models.ConsentPurpose, ttl time.Duration) (*models.ConsentRecord, error) {
 	now := time.Now()
 	record := &models.ConsentRecord{
 		UserID:    userID,
