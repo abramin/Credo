@@ -27,3 +27,19 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+
+  karate-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run Karate tests
+        run: mvn -B -f karate-tests/pom.xml test
