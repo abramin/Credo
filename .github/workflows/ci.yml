@@ -34,6 +34,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
@@ -41,5 +47,32 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Start backend API
+        run: |
+          go run ./cmd/server > /tmp/id-gateway.log 2>&1 &
+          echo $! > /tmp/id-gateway.pid
+
+      - name: Wait for backend to be ready
+        run: |
+          timeout 60s bash -c 'until curl -sf http://localhost:8080/metrics >/dev/null; do sleep 1; done'
+
       - name: Run Karate tests
         run: mvn -B -f karate-tests/pom.xml test
+        env:
+          BASE_URL: http://localhost:8080
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f /tmp/id-gateway.pid ]; then kill "$(cat /tmp/id-gateway.pid)"; fi
+
+      - name: Backend logs (on failure)
+        if: failure()
+        run: |
+          if [ -s /tmp/id-gateway.log ]; then
+            echo "--- backend logs ---"
+            cat /tmp/id-gateway.log
+          fi

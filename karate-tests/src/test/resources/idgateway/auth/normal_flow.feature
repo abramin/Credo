@@ -8,7 +8,7 @@ Feature: OAuth2 Authorization Code Flow - Normal Path
   Scenario: Complete OAuth2 authorization code flow (POST /auth/authorize)
     # Step 1: Initiate authorization request with email
     # POST /auth/authorize creates a user (if not exists) and session
-    * def state = karate.uuid()
+    * def state = java.util.UUID.randomUUID().toString()
 
     Given path '/auth/authorize'
     And header Content-Type = 'application/json'
