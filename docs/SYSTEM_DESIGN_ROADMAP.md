@@ -4,17 +4,7 @@ This roadmap describes how the ID Gateway will evolve from a secure, correct cor
 
 ## Phase 1: Core Gateway (Security and Correctness)
 
-The foundation of the system is a minimal yet standards-aligned OAuth2.0 Authorization Code flow with PKCE. This phase focuses on correctness, defensive design and clarity.
-
-### Outcomes
-
-- Clean Go HTTP API structured around explicit flows
-- Secure token handling, session management, and CSRF protections
-- UI visualising the normal OAuth2 flow
-- Karate BDD test suite acting as black-box contract tests
-- Attack path simulations explaining threat models
-
-This establishes the security baseline on which all later system-design extensions rely.
+See main [Architecture document](architecture.md)
 
 ## Phase 2: Modular Service Boundaries
 
