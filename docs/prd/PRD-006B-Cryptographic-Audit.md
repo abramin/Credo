@@ -1,4 +1,4 @@
-# PRD-006B: Cryptographically Verifiable Audit Trail (Merkle Tree)
+# PRD-006B: Cryptographic Audit (Merkle Tree)
 
 **Status:** Not Started
 **Priority:** P1 (High - Showcase Feature)
