@@ -24,20 +24,13 @@ func NewService(store Store) *Service {
 	return &Service{store: store}
 }
 
-// GrantMultiple validates and grants consent for multiple purposes.
+// Grant validates and grants consent for multiple purposes.
 func (s *Service) Grant(ctx context.Context, userID string, purposes []models.ConsentPurpose, ttl time.Duration) ([]*models.ConsentRecord, error) {
 	if len(purposes) == 0 {
 		return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "purposes array must not be empty")
 	}
-	validPurposes := map[models.ConsentPurpose]bool{
-		models.ConsentPurposeLogin:         true,
-		models.ConsentPurposeRegistryCheck: true,
-		models.ConsentPurposeVCIssuance:    true,
-		models.ConsentPurposeDecision:      true,
-		models.ConsentMarketing:            true,
-	}
 	for _, purpose := range purposes {
-		if !validPurposes[purpose] {
+		if !models.ValidConsentPurposes[purpose] {
 			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose: "+string(purpose))
 		}
 	}

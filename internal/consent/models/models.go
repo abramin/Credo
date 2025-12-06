@@ -22,6 +22,15 @@ const (
 	ConsentMarketing            ConsentPurpose = "marketing"
 )
 
+// ValidConsentPurposes is the single source of truth for all valid consent purposes
+var ValidConsentPurposes = map[ConsentPurpose]bool{
+	ConsentPurposeLogin:         true,
+	ConsentPurposeRegistryCheck: true,
+	ConsentPurposeVCIssuance:    true,
+	ConsentPurposeDecision:      true,
+	ConsentMarketing:            true,
+}
+
 // ConsentRecord captures a user's decision for a specific purpose.
 type ConsentRecord struct {
 	UserID    string
