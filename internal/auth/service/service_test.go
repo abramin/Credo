@@ -74,6 +74,7 @@ func (s *ServiceSuite) TestAuthorize() {
 			assert.NotNil(s.T(), user.ID)
 			return user, nil
 		})
+
 		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, session *models.Session) error {
 				assert.NotNil(s.T(), session.UserID)
@@ -115,7 +116,7 @@ func (s *ServiceSuite) TestAuthorize() {
 
 	s.T().Run("user store error", func(t *testing.T) {
 		req := baseReq
-		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(nil, assert.AnError)
+		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(nil, assert.AnError)
 
 		result, err := s.service.Authorize(context.Background(), &req)
 		assert.Error(s.T(), err)
@@ -130,7 +131,7 @@ func (s *ServiceSuite) TestAuthorize() {
 			Email:       "email@test.com",
 		}
 
-		s.mockUserStore.EXPECT().FindByEmail(gomock.Any(), req.Email).Return(existingUser, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(existingUser, nil)
 		s.mockSessStore.EXPECT().Save(gomock.Any(), gomock.Any()).Return(assert.AnError)
 
 		result, err := s.service.Authorize(context.Background(), &req)
