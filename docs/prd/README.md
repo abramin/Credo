@@ -9,6 +9,7 @@ This directory contains technical product requirements for implementing the ID G
 ## Overview
 
 The ID Gateway is a **regulated identity and authorization system** that:
+
 - Authenticates users (OIDC-lite)
 - Manages purpose-based consent
 - Integrates with external registries (citizen data, sanctions)
@@ -16,77 +17,199 @@ The ID Gateway is a **regulated identity and authorization system** that:
 - Makes authorization decisions based on evidence
 - Maintains comprehensive audit trails
 - Supports GDPR data rights (export, deletion)
+- **NEW:** Advanced privacy-preserving features (ZK proofs, DIDs, ML risk scoring)
 
 ---
 
 ## PRD Index
 
-| PRD | Feature | Priority | Status | Est. Time |
-|-----|---------|----------|--------|-----------|
-| [PRD-001](./PRD-001-Authentication-Session-Management.md) | Authentication & Session Management | P0 | 🟢 Done | 13-14 hours |
-| [PRD-002](./PRD-002-Consent-Management.md) | Consent Management System | P0 | 🟡 To Implement | 5-7 hours |
-| [PRD-003](./PRD-003-Registry-Integration.md) | Registry Integration (Citizen & Sanctions) | P0 | 🟡 To Implement | 7-9 hours |
-| [PRD-004](./PRD-004-Verifiable-Credentials.md) | Verifiable Credentials | P0 | 🟡 To Implement | 6-8 hours |
-| [PRD-005](./PRD-005-Decision-Engine.md) | Decision Engine | P0 | 🟡 To Implement | 5-7 hours |
-| [PRD-006](./PRD-006-Audit-Compliance.md) | Audit & Compliance Logging | P0 | 🟡 To Implement | 8-10 hours |
-| [PRD-007](./PRD-007-User-Data-Rights.md) | User Data Rights (GDPR) | P1 | 🟡 To Implement | 4-6 hours |
+### Core Features (V1 - Baseline System)
 
-**Total Estimated Time:** ~48-61 hours (6-8 days for single developer)
+| PRD                                                       | Feature                                    | Priority | Status          | Est. Time   |
+| --------------------------------------------------------- | ------------------------------------------ | -------- | --------------- | ----------- |
+| [PRD-001](./PRD-001-Authentication-Session-Management.md) | Authentication & Session Management        | P0       | 🟢 Done         | 13-14 hours |
+| [PRD-002](./PRD-002-Consent-Management.md)                | Consent Management System                  | P0       | 🟡 In Progress  | 5-7 hours   |
+| [PRD-003](./PRD-003-Registry-Integration.md)              | Registry Integration (Citizen & Sanctions) | P0       | 🟡 To Implement | 7-9 hours   |
+| [PRD-004](./PRD-004-Verifiable-Credentials.md)            | Verifiable Credentials                     | P0       | 🟡 To Implement | 6-8 hours   |
+| [PRD-005](./PRD-005-Decision-Engine.md)                   | Decision Engine                            | P0       | 🟡 To Implement | 5-7 hours   |
+| [PRD-006](./PRD-006-Audit-Compliance.md)                  | Audit & Compliance Logging                 | P0       | 🟡 To Implement | 8-10 hours  |
+| [PRD-007](./PRD-007-User-Data-Rights.md)                  | User Data Rights (GDPR)                    | P1       | 🟡 To Implement | 4-6 hours   |
+
+**Core System Time:** ~48-61 hours (6-8 days)
+
+### Advanced Features (V2+ - Showcase & Production)
+
+| PRD                                                       | Feature                           | Priority | Status         | Est. Time   |
+| --------------------------------------------------------- | --------------------------------- | -------- | -------------- | ----------- |
+| [PRD-004B](./PRD-004B-Enhanced-Verifiable-Credentials.md) | Enhanced VCs (BBS+, Status List)  | P1       | 🔵 Not Started | 10-14 hours |
+| [PRD-005B](./PRD-005B-Cerbos-Authorization.md)            | Cerbos-Based Authorization        | P1       | 🔵 Not Started | 6-8 hours   |
+| [PRD-006B](./PRD-006B-Cryptographic-Audit.md)             | Cryptographic Audit (Merkle Tree) | P1       | 🔵 Not Started | 8-12 hours  |
+| [PRD-007B](./PRD-007B-ML-Risk-Scoring.md)                 | ML-Based Risk Scoring             | P2       | 🔵 Not Started | 14-18 hours |
+| [PRD-008](./PRD-008-GDPR-CCPA-Automation.md)              | Automated GDPR/CCPA Compliance    | P1       | 🔵 Not Started | 12-16 hours |
+| [PRD-009](./PRD-009-Decentralized-Identity-DIDs.md)       | Decentralized Identity (DIDs)     | P2       | 🔵 Not Started | 16-20 hours |
+| [PRD-010](./PRD-010-Zero-Knowledge-Proofs.md)             | Zero-Knowledge Proofs             | P3       | 🔵 Not Started | 20-24 hours |
+
+**Advanced Features Time:** ~86-112 hours (10-14 days)
+
+**Total System Time:** ~134-173 hours (17-22 days)
+
+---
+
+## Strategic Implementation Approach
+
+### Phase 1: Core System (6-8 days)
+
+**Goal:** Build functional identity gateway with basic features
+
+Implement PRDs 001-007 to establish:
+
+- User authentication and session management
+- Consent-based data processing
+- Registry integration for identity verification
+- Verifiable credential issuance
+- Authorization decision engine
+- Audit logging and GDPR compliance
+
+**Deliverable:** Working identity gateway with all baseline features
+
+### Phase 2: Production Readiness (3-5 days)
+
+**Goal:** Make system operationally credible (see V2_ROADMAP.md)
+
+- Signed JWT tokens + JWKS
+- PostgreSQL persistence
+- Structured logging & metrics
+- Queue-backed audit pipeline
+- Token refresh & revocation
+
+**Deliverable:** Production-ready gateway with operational maturity
+
+### Phase 3: Advanced Features - Showcase Track (10-14 days)
+
+**Goal:** Add distinctive features that differentiate from "another Auth0 clone"
+
+**Recommended Priority Order:**
+
+1. **PRD-006B: Cryptographic Audit Trail** (8-12 hours) - **START HERE**
+
+   - **Why first:** Easiest advanced feature, clear value
+   - **Impact:** Tamper-proof audit logs using Merkle trees
+   - **Resume line:** "Built cryptographically verifiable audit system"
+   - **Best for:** Fintech, healthcare, compliance-heavy domains
+
+2. **PRD-008: GDPR/CCPA Automation** (12-16 hours) - **DO SECOND**
+
+   - **Why second:** Practical, relevant to EU jobs, builds on audit
+   - **Impact:** Real-time compliance checking, automated data retention
+   - **Resume line:** "Implemented automated GDPR/CCPA compliance engine"
+   - **Best for:** European companies, privacy-focused organizations
+
+3. **PRD-007B: ML-Based Risk Scoring** (14-18 hours) - **DO THIRD**
+
+   - **Why third:** Shows polyglot skills (Go + Python), trendy (AI/ML)
+   - **Impact:** Learning fraud detection, adaptive risk assessment
+   - **Resume line:** "Integrated ML-based risk scoring into decision engine"
+   - **Best for:** Fintech, e-commerce, fraud prevention roles
+
+4. **PRD-009: Decentralized Identity (DIDs)** (16-20 hours) - **DO FOURTH**
+
+   - **Why fourth:** Emerging standard, shows forward thinking
+   - **Impact:** W3C-standard DIDs, user-controlled identity
+   - **Resume line:** "Built identity gateway using W3C Decentralized Identifiers"
+   - **Best for:** Blockchain/Web3 companies, identity startups (Digidentity)
+
+5. **PRD-010: Zero-Knowledge Proofs** (20-24 hours) - **DO LAST**
+   - **Why last:** Most technically impressive, requires solid foundation
+   - **Impact:** Privacy-preserving age verification (prove "over 18" without revealing birthdate)
+   - **Resume line:** "Implemented zero-knowledge proofs for privacy-preserving verification"
+   - **Best for:** Privacy-focused companies, cutting-edge identity solutions
+
+**Note:** Advanced features can be implemented in parallel tracks after core system is complete. Pick 2-3 that align with your target job market.
 
 ---
 
 ## Recommended Implementation Order
 
+### Core System (Must Complete First)
+
 Implement PRDs in this sequence to minimize dependencies and enable incremental testing:
 
-### Phase 1: Foundation (Days 1-2)
+#### Phase 1: Foundation (Days 1-2)
+
 **Goal:** Establish authentication and consent mechanisms
 
-1. **PRD-001: Authentication & Session Management** (4-6 hours)
+1. **PRD-001: Authentication & Session Management** ✅ COMPLETE
+
    - Why first: Everything depends on user authentication
    - Deliverable: Users can log in and get tokens
-   - Test: `curl POST /auth/authorize`, `POST /auth/token`, `GET /auth/userinfo`
 
-2. **PRD-002: Consent Management** (4-6 hours)
+2. **PRD-002: Consent Management** 🟡 IN PROGRESS
    - Why second: Required before processing any user data
    - Deliverable: Users can grant/revoke consent for purposes
-   - Test: `curl POST /auth/consent`, `POST /auth/consent/revoke`
 
-### Phase 2: Evidence Gathering (Day 2-3)
+#### Phase 2: Evidence Gathering (Day 2-3)
+
 **Goal:** Integrate with external data sources
 
 3. **PRD-003: Registry Integration** (4-6 hours)
+
    - Why third: Provides evidence for decisions
    - Deliverable: Lookup citizen and sanctions records
-   - Test: `curl POST /registry/citizen`, `POST /registry/sanctions`
-   - Note: Test both regulated and non-regulated modes
 
 4. **PRD-004: Verifiable Credentials** (3-5 hours)
    - Why fourth: Portable evidence that depends on registry data
    - Deliverable: Issue and verify credentials
-   - Test: `curl POST /vc/issue`, `POST /vc/verify`
 
-### Phase 3: Decision Logic (Day 3-4)
+#### Phase 3: Decision Logic (Day 3-4)
+
 **Goal:** Combine evidence and make authorization decisions
 
 5. **PRD-005: Decision Engine** (5-7 hours)
    - Why fifth: Orchestrates all previous components
    - Deliverable: Evaluate authorization decisions
-   - Test: `curl POST /decision/evaluate` with various scenarios
-   - Challenge: Most complex, involves all services
 
-### Phase 4: Compliance (Day 4-5)
+#### Phase 4: Compliance (Day 4-5)
+
 **Goal:** Audit trail and user data rights
 
 6. **PRD-006: Audit & Compliance** (3-4 hours)
+
    - Why sixth: Adds audit logging to all previous handlers
-   - Deliverable: All operations emit audit events, users can export logs
-   - Test: Perform flow, then `curl GET /me/data-export`
+   - Deliverable: All operations emit audit events
 
 7. **PRD-007: User Data Rights** (4-5 hours)
    - Why last: Depends on all stores being complete
    - Deliverable: Users can delete all their data
-   - Test: `curl DELETE /me`, verify deletion
+
+### Advanced Features (After Core Complete)
+
+#### Track A: Production Hardening (Priority)
+
+Follow V2_ROADMAP.md for operational maturity features
+
+#### Track B: Showcase Features (Differentiation)
+
+Implement 2-3 advanced PRDs based on job market:
+
+**For Backend/Distributed Systems Roles:**
+
+- Start with: PRD-006B (Merkle Tree Audit)
+- Then add: PRD-005B (Cerbos Authorization)
+
+**For Privacy/Compliance Roles:**
+
+- Start with: PRD-008 (GDPR Automation)
+- Then add: PRD-010 (Zero-Knowledge Proofs)
+
+**For Fintech/Security Roles:**
+
+- Start with: PRD-007B (ML Risk Scoring)
+- Then add: PRD-006B (Cryptographic Audit)
+
+**For Identity/Web3 Startups:**
+
+- Start with: PRD-009 (DIDs)
+- Then add: PRD-010 (Zero-Knowledge Proofs)
 
 ---
 
@@ -95,37 +218,44 @@ Implement PRDs in this sequence to minimize dependencies and enable incremental 
 Every PRD includes:
 
 ### 1. Overview
+
 - Problem statement
 - Goals and non-goals
 - User stories
 
 ### 2. Functional Requirements
+
 - API specifications (HTTP endpoints)
 - Input/output examples
 - Business logic step-by-step
 - Error cases
 
 ### 3. Technical Requirements
+
 - Data models (Go structs)
 - Storage interfaces
 - Service layer design
 - HTTP handler signatures
 
 ### 4. Implementation Steps
+
 - Phase-by-phase guide
 - Estimated time per phase
 - Dependencies between components
 
 ### 5. Acceptance Criteria
+
 - Checklist of what "done" means
 - Must pass before moving to next PRD
 
 ### 6. Testing Guide
+
 - Unit test scenarios
 - Integration test flows
 - Manual curl commands for testing
 
 ### 7. Future Enhancements
+
 - Out-of-scope features for later
 - Production-ready improvements
 
@@ -134,12 +264,14 @@ Every PRD includes:
 ## How to Use These PRDs
 
 ### For Product Managers:
+
 - Review functional requirements to understand features
 - Validate API contracts match business needs
 - Adjust acceptance criteria as needed
 - Track implementation progress via checklist
 
 ### For Developers:
+
 1. **Read PRD completely** before coding
 2. **Understand dependencies** - implement in order above
 3. **Follow Technical Requirements** exactly (data models, interfaces)
@@ -148,6 +280,7 @@ Every PRD includes:
 6. **Check Acceptance Criteria** before marking as done
 
 ### For QA Engineers:
+
 - Use Testing sections to create test plans
 - Validate all acceptance criteria are testable
 - Create automated tests based on examples
@@ -160,6 +293,7 @@ Every PRD includes:
 These patterns apply across ALL PRDs:
 
 ### Error Handling
+
 ```go
 // Use typed errors from pkg/errors
 return errors.NewGatewayError(errors.CodeMissingConsent, "...", nil)
@@ -169,6 +303,7 @@ writeError(w, err) // Automatically maps to 400/401/403/404/500
 ```
 
 ### Regulated Mode
+
 ```go
 // Check regulatedMode flag before returning data
 if h.regulatedMode {
@@ -177,6 +312,7 @@ if h.regulatedMode {
 ```
 
 ### Consent Enforcement
+
 ```go
 // Before processing user data
 err := h.consentService.Require(ctx, userID, consent.ConsentPurposeRegistryCheck)
@@ -187,6 +323,7 @@ if err != nil {
 ```
 
 ### Audit Logging
+
 ```go
 // After every sensitive operation
 _ = h.auditPublisher.Emit(ctx, audit.Event{
@@ -200,46 +337,33 @@ _ = h.auditPublisher.Emit(ctx, audit.Event{
 })
 ```
 
-### User Extraction from Token
-```go
-// Standard pattern for all handlers
-authHeader := r.Header.Get("Authorization")
-if authHeader == "" {
-    writeError(w, errors.NewGatewayError(errors.CodeUnauthorized, "Missing authorization header", nil))
-    return
-}
-
-token := strings.TrimPrefix(authHeader, "Bearer ")
-user, err := h.authService.UserInfo(ctx, token)
-if err != nil {
-    writeError(w, err)
-    return
-}
-```
-
 ---
 
 ## Testing Strategy
 
 ### Unit Tests
+
 - Test service methods in isolation
 - Mock store dependencies
 - Test business logic edge cases
 - Located in: `internal/<package>/<file>_test.go`
 
 ### Integration Tests
+
 - Test complete HTTP flows
 - Use in-memory stores (no mocks needed)
 - Test error paths (missing consent, invalid data)
 - Located in: `test/integration_test.go`
 
 ### Manual Testing
+
 - Use curl commands from PRDs
 - Test in both regular and regulated mode
 - Verify audit events emitted
 - Follow testing sections in each PRD
 
 ### End-to-End Flow Test
+
 ```bash
 # Complete happy path
 ./test/e2e_test.sh
@@ -258,7 +382,8 @@ if err != nil {
 
 ## Success Metrics
 
-Implementation is complete when:
+### Core System Complete When:
+
 - [ ] All 11 HTTP endpoints return 200/201 (not 501)
 - [ ] `make test` passes with >80% coverage
 - [ ] `make lint` passes with no errors
@@ -266,13 +391,30 @@ Implementation is complete when:
 - [ ] All acceptance criteria checked off
 - [ ] Regulated mode minimizes PII correctly
 - [ ] Audit logs capture all sensitive operations
-- [ ] Documentation updated (if needed)
+
+### Production Ready When (V2):
+
+- [ ] JWT tokens signed and verifiable
+- [ ] PostgreSQL persistence working
+- [ ] Structured logging with correlation IDs
+- [ ] Prometheus metrics exposed
+- [ ] Queue-backed audit pipeline
+- [ ] Token refresh and revocation
+
+### Showcase Complete When:
+
+- [ ] 2-3 advanced features implemented
+- [ ] Each feature has distinctive resume line
+- [ ] Documentation explains cryptographic/technical details
+- [ ] Live demo available
+- [ ] Performance benchmarks documented
 
 ---
 
 ## Dependencies
 
 ### Already Implemented ✅
+
 - Domain models (User, Session, ConsentRecord, etc.)
 - Store interfaces (UserStore, SessionStore, etc.)
 - In-memory store implementations
@@ -281,42 +423,86 @@ Implementation is complete when:
 - HTTP router scaffolding
 - Makefile (build, test, run)
 
-### To Implement 🟡
+### Core Features To Implement 🟡
+
 - All HTTP handler logic (11 endpoints)
 - Service method implementations
 - Evidence orchestration in decision engine
 - Audit event emission across handlers
 - Data deletion logic
 
+### Advanced Features To Implement 🔵
+
+- Merkle tree audit trail
+- ML risk scoring engine
+- GDPR compliance automation
+- W3C DID implementation
+- Zero-knowledge proof circuits
+- Cerbos policy engine integration
+
+---
+
+## Resume Impact
+
+### Core System (Baseline)
+
+"Built identity verification gateway with OIDC auth, consent management, verifiable credentials, and decision engine. Go, PostgreSQL, Docker, 80%+ test coverage."
+
+### With Merkle Tree Audit
+
+"...with **cryptographically verifiable audit system using Merkle trees** for tamper-proof logging."
+
+### With GDPR Automation
+
+"...with **automated GDPR/CCPA compliance checking** and real-time policy enforcement."
+
+### With ML Risk Scoring
+
+"...with **ML-based fraud detection** and adaptive risk scoring (Go + Python)."
+
+### With DIDs
+
+"...using **W3C Decentralized Identifiers (DIDs)** for user-controlled identity."
+
+### With Zero-Knowledge Proofs
+
+"...with **zero-knowledge proofs** for privacy-preserving age verification (Bulletproofs/Rust)."
+
+Each advanced feature addition makes the project more distinctive for technical interviews.
+
 ---
 
 ## Getting Help
 
 ### Resources:
+
 - **Tutorial:** `docs/TUTORIAL.md` - Step-by-step learning guide
 - **Architecture:** `docs/architecture.md` - System design and patterns
+- **V2 Roadmap:** `docs/V2_ROADMAP.md` - Production readiness features
+- **System Design:** `docs/SYSTEM_DESIGN_ROADMAP.md` - Scalability and observability
 
 ### Common Questions:
 
 **Q: Do I need to implement PRDs in exact order?**
-A: Yes, follow the dependency order. Auth → Consent → Registry → VC → Decision → Audit → Data Rights.
+A: Yes for core features (001-007). Advanced features can be done in any order after core complete.
 
-**Q: Can I skip testing?**
-A: No. Test each PRD before moving to next. Bugs compound quickly.
+**Q: Should I implement all advanced features?**
+A: No. Pick 2-3 that align with your job search. Quality over quantity.
 
-**Q: Should I implement all features in a PRD?**
-A: Implement functional requirements. Future enhancements are optional.
+**Q: Which advanced features should I prioritize?**
+A: Start with PRD-006B (Merkle audit) - easiest and most impactful. Then choose based on target companies.
 
-**Q: What if I find an issue in a PRD?**
-A: Document it in code comments and proceed with best judgment. PRDs are guidelines.
+**Q: Can I skip production readiness (V2)?**
+A: Core system first, then V2 (JWT, Postgres, metrics), then advanced features. Don't skip V2.
 
-**Q: How do I handle errors not listed in PRD?**
-A: Use appropriate error code from `pkg/errors` and return clear message.
+**Q: How long will this take?**
+A: Core: 6-8 days. V2: 3-5 days. Each advanced feature: 1-3 days. Total: 3-4 weeks for complete system with 2-3 showcase features.
 
 ---
 
 ## Revision History
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 1.0 | 2025-12-03 | Product Team | Initial PRD suite |
+| Version | Date       | Author       | Changes                                                        |
+| ------- | ---------- | ------------ | -------------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD suite                                              |
+| 2.0     | 2025-12-06 | Product Team | Added advanced features (DIDs, ZK proofs, ML, GDPR automation) |
