@@ -4,6 +4,11 @@
 
 The ID Gateway frontend is a **zero-build, CDN-based single-page application** built with Alpine.js and Tailwind CSS. It demonstrates the capabilities of the identity verification gateway through two distinct interfaces.
 
+Related docs:
+- Project README (frontend overview): [README.md](README.md)
+- OAuth2 attack paths (educational module): [ATTACK_PATHS.md](ATTACK_PATHS.md)
+- Attack module implementation notes: [ATTACK_MODULE_SUMMARY.md](ATTACK_MODULE_SUMMARY.md)
+
 ## Design Principles
 
 ### 1. Zero Build Complexity

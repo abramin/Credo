@@ -7,8 +7,9 @@ Demo UI for the ID Gateway identity verification system. Features two views:
 
 ## Documentation
 
-- Detailed Architecture - [ARCHITECTURE.MD](ARCHITECTURE.MD)
-- Explanation of Attacker Routes and flows - [ATTACK_PATHS.MD](ATTACK_PATHS.MD)
+- App architecture & frontend stack: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Attack paths (OAuth2 threats): [ATTACK_PATHS.md](ATTACK_PATHS.md)
+- Attack module implementation summary: [ATTACK_MODULE_SUMMARY.md](ATTACK_MODULE_SUMMARY.md)
 
 ## Technology Stack
 

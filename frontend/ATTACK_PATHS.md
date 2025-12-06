@@ -4,6 +4,11 @@
 
 The Attack Paths module is an interactive educational tool that demonstrates common security vulnerabilities in OAuth 2.0 Authorization Code Flow. It uses visual diagram animations and step-by-step narratives to show how attacks work and how to prevent them.
 
+Related docs:
+- Frontend overview and entry points: [README.md](README.md)
+- Frontend architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Implementation summary: [ATTACK_MODULE_SUMMARY.md](ATTACK_MODULE_SUMMARY.md)
+
 ## Features
 
 - **6 Attack Scenarios**: Covers critical OAuth 2.0 vulnerabilities specific to the Authorization Code Flow
