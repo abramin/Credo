@@ -1,5 +1,8 @@
 # Credo
 
+<img width="120" height="120" alt="credo" src="https://github.com/user-attachments/assets/cc9f2d5a-6b70-4f92-a9e7-8f3ab1315181" />
+
+
 Identity verification gateway built as a modular monolith. It simulates OIDC-style auth, consent, registry evidence, VC issuance/verification, decisions, and audit logging.
 
 ## What’s inside
@@ -53,10 +56,7 @@ python3 -m http.server 8000
 
 ## Demo UI
 
-The project includes two web interfaces:
-
-1. **User Portal** (`/index.html`) - Login, consent management, identity verification, VCs, decisions, GDPR data rights
-2. **Admin Dashboard** (`/admin.html`) - Real-time monitoring, audit logs, decision tracking, compliance overview
+The project includes demo web interfaces:
 
 See [Frontend Readme](frontend/README.md) for details.
 
