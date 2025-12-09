@@ -144,15 +144,15 @@ func (s *Service) Revoke(ctx context.Context, userID string, purpose models.Cons
 	return nil
 }
 
-func (s *Service) List(ctx context.Context, userID string) ([]*models.ConsentRecord, error) {
+func (s *Service) List(ctx context.Context, userID string, filter *models.ConsentRecordFilter) ([]*models.ConsentRecordWithStatus, error) {
 	if userID == "" {
 		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
 	}
-	consents, err := s.store.ListByUser(ctx, userID)
+	_, err := s.store.ListByUser(ctx, userID)
 	if err != nil {
 		return nil, pkgerrors.Wrap(pkgerrors.CodeInternal, "failed to list consents", err)
 	}
-	return consents, nil
+	return nil, nil
 }
 
 func (s *Service) Require(ctx context.Context, userID string, purpose models.ConsentPurpose) error {

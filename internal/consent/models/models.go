@@ -14,11 +14,6 @@ type GrantConsentRequest struct {
 	Purposes []ConsentPurpose `json:"purposes" validate:"required,min=1,dive,oneof=login registry_check vc_issuance decision_evaluation"`
 }
 
-// response := map[string]any{
-// 	"granted": formatConsentResponses(granted, time.Now()),
-// 	"message": formatActionMessage("Consent granted for %d purposes", len(granted)),
-// }
-
 type ConsentActionResponse struct {
 	Granted []ConsentGrant `json:"granted"`
 	Message string         `json:"message,omitempty"`
@@ -34,6 +29,33 @@ type ConsentGrant struct {
 // RevokeConsentRequest specifies which purposes to revoke.
 type RevokeConsentRequest struct {
 	Purposes []ConsentPurpose `json:"purposes" validate:"required,min=1,dive,oneof=login registry_check vc_issuance decision_evaluation"`
+}
+
+type ConsentRecordsResponse struct {
+	ConsentRecords []*ConsentRecordWithStatus `json:"consent_records"`
+}
+
+type ConsentRecordWithStatus struct {
+	ID        string         `json:"id"`
+	Purpose   ConsentPurpose `json:"purpose"`
+	GrantedAt time.Time      `json:"granted_at"`
+	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
+	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
+	Status    ConsentStatus  `json:"status"` // "active", "expired", "revoked"
+}
+
+type ConsentStatus string
+
+const (
+	ConsentStatusActive  ConsentStatus = "active"
+	ConsentStatusExpired ConsentStatus = "expired"
+	ConsentStatusRevoked ConsentStatus = "revoked"
+)
+
+// ConsentRecordFilter allows filtering consent records by purpose and status.
+type ConsentRecordFilter struct {
+	Purpose string
+	Status  string
 }
 
 const (

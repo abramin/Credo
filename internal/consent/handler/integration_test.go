@@ -58,7 +58,7 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	bodyBytes, _ := io.ReadAll(listResp.Body)
 	var listData map[string]any
 	require.NoError(t, json.Unmarshal(bodyBytes, &listData))
-	consents := listData["consents"].([]any)
+	consents := listData["consent_records"].([]any)
 	require.Len(t, consents, 2)
 
 	// Revoke one consent
@@ -75,7 +75,7 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	bodyBytes2, _ := io.ReadAll(listResp2.Body)
 	var listData2 map[string]any
 	require.NoError(t, json.Unmarshal(bodyBytes2, &listData2))
-	consents2 := listData2["consents"].([]any)
+	consents2 := listData2["consent_records"].([]any)
 
 	revokedCount := 0
 	for _, raw := range consents2 {
