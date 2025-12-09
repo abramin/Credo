@@ -48,10 +48,11 @@ The ID Gateway is a **regulated identity and authorization system** that:
 | [PRD-008](./PRD-008-GDPR-CCPA-Automation.md)              | Automated GDPR/CCPA Compliance    | P1       | 🔵 Not Started | 12-16 hours |
 | [PRD-009](./PRD-009-Decentralized-Identity-DIDs.md)       | Decentralized Identity (DIDs)     | P2       | 🔵 Not Started | 16-20 hours |
 | [PRD-010](./PRD-010-Zero-Knowledge-Proofs.md)             | Zero-Knowledge Proofs             | P3       | 🔵 Not Started | 20-24 hours |
+| [PRD-011](./PRD-011-Internal-TCP-Event-Ingester.md)       | Internal TCP Event Ingester       | P1       | 🔵 Not Started | 8-12 hours  |
 
-**Advanced Features Time:** ~86-112 hours (10-14 days)
+**Advanced Features Time:** ~94-124 hours (11-15 days)
 
-**Total System Time:** ~134-173 hours (17-22 days)
+**Total System Time:** ~142-185 hours (18-23 days)
 
 ---
 
