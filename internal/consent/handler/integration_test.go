@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"id-gateway/internal/audit"
+	consentModel "id-gateway/internal/consent/models"
 	"id-gateway/internal/consent/service"
 	"id-gateway/internal/consent/store"
 	"id-gateway/internal/platform/middleware"
@@ -56,9 +57,9 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	require.NoError(t, err)
 	defer listResp.Body.Close()
 	bodyBytes, _ := io.ReadAll(listResp.Body)
-	var listData map[string]any
+	var listData consentModel.ConsentRecordsResponse
 	require.NoError(t, json.Unmarshal(bodyBytes, &listData))
-	consents := listData["consent_records"].([]any)
+	consents := listData.ConsentRecords
 	require.Len(t, consents, 2)
 
 	// Revoke one consent
@@ -73,15 +74,14 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	require.NoError(t, err)
 	defer listResp2.Body.Close()
 	bodyBytes2, _ := io.ReadAll(listResp2.Body)
-	var listData2 map[string]any
+	var listData2 consentModel.ConsentRecordsResponse
 	require.NoError(t, json.Unmarshal(bodyBytes2, &listData2))
-	consents2 := listData2["consent_records"].([]any)
+	consents2 := listData2.ConsentRecords
 
 	revokedCount := 0
-	for _, raw := range consents2 {
-		consent := raw.(map[string]any)
-		if consent["purpose"] == "registry_check" {
-			assert.Equal(t, "revoked", consent["status"])
+	for _, consent := range consents2 {
+		if consent.Purpose == "registry_check" {
+			assert.Equal(t, "revoked", consent.Status)
 			revokedCount++
 		}
 	}
