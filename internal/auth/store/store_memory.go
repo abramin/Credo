@@ -2,11 +2,15 @@ package store
 
 import (
 	"context"
-	"id-gateway/internal/auth/models"
 	"sync"
 
 	"github.com/google/uuid"
+
+	"id-gateway/internal/auth/models"
+	dErrors "id-gateway/pkg/domain-errors"
 )
+
+var ErrNotFound = dErrors.New(dErrors.CodeNotFound, "record not found")
 
 // In-memory stores keep the initial implementation lightweight and testable.
 // They intentionally favor clarity over performance.

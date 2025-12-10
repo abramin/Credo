@@ -61,6 +61,17 @@ func TestConsentIntegrationFlow(t *testing.T) {
 		assert.NotNil(t, g.ExpiresAt)
 	}
 
+	// Verify audit events for grants
+	auditEvents, err := auditStore.ListByUser(context.Background(), "user123")
+	require.NoError(t, err)
+	assert.Len(t, auditEvents, 2, "expected 2 grant audit events")
+	for _, event := range auditEvents {
+		assert.Equal(t, "user123", event.UserID)
+		assert.Equal(t, "consent_granted", event.Action)
+		assert.Equal(t, "granted", event.Decision)
+		assert.Contains(t, []string{"login", "registry_check"}, event.Purpose)
+	}
+
 	// 2. List consents and verify both are active
 	listResp, err := http.Get(server.URL + "/auth/consent")
 	require.NoError(t, err)
@@ -93,6 +104,23 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	require.NoError(t, json.Unmarshal(revokeRespBody, &revokeData))
 	assert.Len(t, revokeData.Granted, 1) // Revoke response uses "Granted" field (see handler)
 	assert.Contains(t, revokeData.Message, "Consent revoked for 1 purpose")
+
+	// Verify audit events after revoke
+	auditEvents2, err := auditStore.ListByUser(context.Background(), "user123")
+	require.NoError(t, err)
+	assert.Len(t, auditEvents2, 3, "expected 3 audit events total (2 grants + 1 revoke)")
+	
+	// Find the revoke event
+	revokeEventFound := false
+	for _, event := range auditEvents2 {
+		if event.Action == "consent_revoked" {
+			revokeEventFound = true
+			assert.Equal(t, "user123", event.UserID)
+			assert.Equal(t, "revoked", event.Decision)
+			assert.Equal(t, "registry_check", event.Purpose)
+		}
+	}
+	assert.True(t, revokeEventFound, "revoke audit event not found")
 
 	// 4. List consents again and verify revoked status
 	listResp2, err := http.Get(server.URL + "/auth/consent")

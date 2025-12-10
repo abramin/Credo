@@ -23,7 +23,7 @@ type Grant struct {
 	Purpose   Purpose    `json:"purpose" validate:"required,oneof=login registry_check vc_issuance decision_evaluation"`
 	GrantedAt time.Time  `json:"granted_at" validate:"required"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty" validate:"omitempty"`
-	Status    string     `json:"status"` // "active" for new grant
+	Status    Status     `json:"status" validate:"required,oneof=active expired revoked"` // "active" for new grant
 }
 
 // RevokeRequest specifies which purposes to revoke.
@@ -95,14 +95,14 @@ func (c Record) IsActive(now time.Time) bool {
 }
 
 // Status reports the consent lifecycle state at the provided time.
-func (c Record) ComputeStatus(now time.Time) string {
+func (c Record) ComputeStatus(now time.Time) Status {
 	if c.RevokedAt != nil {
-		return "revoked"
+		return StatusRevoked
 	}
 	if c.ExpiresAt != nil && c.ExpiresAt.Before(now) {
-		return "expired"
+		return StatusExpired
 	}
-	return "active"
+	return StatusActive
 }
 
 // Ensure enforces that consent exists and is active for the given purpose.

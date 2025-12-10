@@ -36,14 +36,14 @@ func TestInMemoryStoreOperations(t *testing.T) {
 
 	// Revoke
 	revokeTime := now.Add(30 * time.Minute)
-	require.NoError(t, store.RevokeByUserAndPurpose(ctx, "user1", models.PurposeLogin, revokeTime))
-	fetched, err = store.FindByUserAndPurpose(ctx, "user1", models.PurposeLogin)
+	res, err := store.RevokeByUserAndPurpose(ctx, "user1", models.PurposeLogin, revokeTime)
 	require.NoError(t, err)
-	require.NotNil(t, fetched.RevokedAt)
-	assert.Equal(t, revokeTime, *fetched.RevokedAt)
+	assert.Equal(t, record.ID, res.ID)
+	require.NotNil(t, res.RevokedAt)
+	assert.Equal(t, revokeTime, *res.RevokedAt)
 
 	// List copy integrity
-	list, err := store.ListByUser(ctx, "user1")
+	list, err := store.ListByUser(ctx, "user1", nil)
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	list[0].UserID = "mutated"

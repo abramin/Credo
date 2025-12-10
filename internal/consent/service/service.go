@@ -9,13 +9,14 @@ import (
 
 	"id-gateway/internal/audit"
 	"id-gateway/internal/consent/models"
+	"id-gateway/internal/platform/metrics"
 	pkgerrors "id-gateway/pkg/domain-errors"
 )
 
 type Store interface {
 	Save(ctx context.Context, consent *models.Record) error
 	FindByUserAndPurpose(ctx context.Context, userID string, purpose models.Purpose) (*models.Record, error)
-	ListByUser(ctx context.Context, userID string) ([]*models.Record, error)
+	ListByUser(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.Record, error)
 	Update(ctx context.Context, consent *models.Record) error
 	RevokeByUserAndPurpose(ctx context.Context, userID string, purpose models.Purpose, revokedAt time.Time) (*models.Record, error)
 	DeleteByUser(ctx context.Context, userID string) error
@@ -25,15 +26,24 @@ type Store interface {
 type Service struct {
 	store   Store
 	auditor *audit.Publisher
+	metrics *metrics.Metrics
 	ttl     time.Duration
 }
 
 func NewService(store Store, auditor *audit.Publisher) *Service {
 	svc := &Service{
-		store: store,
-		ttl:   365 * 24 * time.Hour, // TODO: add to config
+		store:   store,
+		auditor: auditor,
+		ttl:     365 * 24 * time.Hour, // TODO: add to config
 	}
 	return svc
+}
+
+// WithMetrics sets the metrics instance for the service
+func WithMetrics(m *metrics.Metrics) func(*Service) {
+	return func(s *Service) {
+		s.metrics = m
+	}
 }
 
 func (s *Service) Grant(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error) {
@@ -76,6 +86,7 @@ func (s *Service) upsertGrant(ctx context.Context, userID string, purpose models
 			return nil, pkgerrors.Wrap(pkgerrors.CodeInternal, "failed to renew consent", err)
 		}
 		s.emitAudit(ctx, userID, purpose, "granted", "consent_granted")
+		s.incrementConsentsGranted(purpose)
 		return existing, nil
 	}
 
@@ -90,6 +101,7 @@ func (s *Service) upsertGrant(ctx context.Context, userID string, purpose models
 		return nil, pkgerrors.Wrap(pkgerrors.CodeInternal, "failed to save consent", err)
 	}
 	s.emitAudit(ctx, userID, purpose, "granted", "consent_granted")
+	s.incrementConsentsGranted(purpose)
 	return record, nil
 }
 
@@ -120,6 +132,7 @@ func (s *Service) Revoke(ctx context.Context, userID string, purposes []models.P
 			return nil, pkgerrors.Wrap(pkgerrors.CodeInternal, "failed to revoke consent", err)
 		}
 		s.emitAudit(ctx, userID, record.Purpose, "revoked", "consent_revoked")
+		s.incrementConsentsRevoked(record.Purpose)
 		revoked = append(revoked, record)
 	}
 	return revoked, nil
@@ -129,11 +142,27 @@ func (s *Service) List(ctx context.Context, userID string, filter *models.Record
 	if userID == "" {
 		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
 	}
-	_, err := s.store.ListByUser(ctx, userID)
+
+	records, err := s.store.ListByUser(ctx, userID, filter)
 	if err != nil {
 		return nil, pkgerrors.Wrap(pkgerrors.CodeInternal, "failed to list consents", err)
 	}
-	return nil, nil
+
+	now := time.Now()
+	var result []*models.RecordWithStatus
+
+	for _, record := range records {
+		result = append(result, &models.RecordWithStatus{
+			ID:        record.ID,
+			Purpose:   record.Purpose,
+			GrantedAt: record.GrantedAt,
+			ExpiresAt: record.ExpiresAt,
+			RevokedAt: record.RevokedAt,
+			Status:    record.ComputeStatus(now),
+		})
+	}
+
+	return result, nil
 }
 
 func (s *Service) Require(ctx context.Context, userID string, purpose models.Purpose) error {
@@ -150,17 +179,21 @@ func (s *Service) Require(ctx context.Context, userID string, purpose models.Pur
 	}
 	if record == nil {
 		s.emitAudit(ctx, userID, purpose, "denied", "consent_check_failed")
+		s.incrementConsentCheckFailed(purpose)
 		return pkgerrors.New(pkgerrors.CodeMissingConsent, "consent not granted for required purpose")
 	}
 	if record.RevokedAt != nil {
 		s.emitAudit(ctx, userID, purpose, "denied", "consent_check_failed")
+		s.incrementConsentCheckFailed(purpose)
 		return pkgerrors.New(pkgerrors.CodeInvalidConsent, "consent revoked")
 	}
 	if record.ExpiresAt != nil && record.ExpiresAt.Before(time.Now()) {
 		s.emitAudit(ctx, userID, purpose, "denied", "consent_check_failed")
+		s.incrementConsentCheckFailed(purpose)
 		return pkgerrors.New(pkgerrors.CodeInvalidConsent, "consent expired")
 	}
 	s.emitAudit(ctx, userID, purpose, "granted", "consent_check_passed")
+	s.incrementConsentCheckPassed(purpose)
 	return nil
 }
 
@@ -175,4 +208,32 @@ func (s *Service) emitAudit(ctx context.Context, userID string, purpose models.P
 		Decision:  decision,
 		Timestamp: time.Now(),
 	})
+}
+
+// incrementConsentsGranted increments the consents granted metric if metrics are enabled
+func (s *Service) incrementConsentsGranted(purpose models.Purpose) {
+	if s.metrics != nil {
+		s.metrics.IncrementConsentsGranted(string(purpose))
+	}
+}
+
+// incrementConsentsRevoked increments the consents revoked metric if metrics are enabled
+func (s *Service) incrementConsentsRevoked(purpose models.Purpose) {
+	if s.metrics != nil {
+		s.metrics.IncrementConsentsRevoked(string(purpose))
+	}
+}
+
+// incrementConsentCheckPassed increments the consent check passed metric if metrics are enabled
+func (s *Service) incrementConsentCheckPassed(purpose models.Purpose) {
+	if s.metrics != nil {
+		s.metrics.IncrementConsentCheckPassed(string(purpose))
+	}
+}
+
+// incrementConsentCheckFailed increments the consent check failed metric if metrics are enabled
+func (s *Service) incrementConsentCheckFailed(purpose models.Purpose) {
+	if s.metrics != nil {
+		s.metrics.IncrementConsentCheckFailed(string(purpose))
+	}
 }

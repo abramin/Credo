@@ -72,18 +72,18 @@ func (mr *MockStoreMockRecorder) FindByUserAndPurpose(ctx, userID, purpose any) 
 }
 
 // ListByUser mocks base method.
-func (m *MockStore) ListByUser(ctx context.Context, userID string) ([]*models.Record, error) {
+func (m *MockStore) ListByUser(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.Record, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListByUser", ctx, userID)
+	ret := m.ctrl.Call(m, "ListByUser", ctx, userID, filter)
 	ret0, _ := ret[0].([]*models.Record)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListByUser indicates an expected call of ListByUser.
-func (mr *MockStoreMockRecorder) ListByUser(ctx, userID any) *gomock.Call {
+func (mr *MockStoreMockRecorder) ListByUser(ctx, userID, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByUser", reflect.TypeOf((*MockStore)(nil).ListByUser), ctx, userID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByUser", reflect.TypeOf((*MockStore)(nil).ListByUser), ctx, userID, filter)
 }
 
 // RevokeByUserAndPurpose mocks base method.

@@ -66,7 +66,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent() {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		granted := resp.Granted[0]
 		assert.Equal(t, consentModel.PurposeLogin, granted.Purpose)
-		assert.Equal(t, "active", granted.Status)
+		assert.Equal(t, consentModel.StatusActive, granted.Status)
 		assert.Equal(t, grantTime, granted.GrantedAt)
 		assert.Equal(t, expiry, *granted.ExpiresAt)
 	})
@@ -167,8 +167,8 @@ func (s *ConsentHandlerSuite) TestHandleGetConsent_WithFilters() {
 			gomock.Any(),
 			"user123",
 			&consentModel.RecordFilter{
-				Purpose: "login",
-				Status:  "active",
+				Purpose: string(consentModel.PurposeLogin),
+				Status:  string(consentModel.StatusActive),
 			},
 		).Return([]*consentModel.RecordWithStatus{
 			newMockRecord(consentModel.PurposeLogin, consentModel.StatusActive, nil),

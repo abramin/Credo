@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	consentModel "id-gateway/internal/consent/models"
+	"id-gateway/internal/consent/models"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
 	"id-gateway/internal/transport/http/shared"
@@ -22,9 +22,9 @@ import (
 
 // Service defines the interface for consent operations.
 type Service interface {
-	Grant(ctx context.Context, userID string, purposes []consentModel.Purpose) ([]*consentModel.Record, error)
-	Revoke(ctx context.Context, userID string, purposes []consentModel.Purpose) ([]*consentModel.Record, error)
-	List(ctx context.Context, userID string, filter *consentModel.RecordFilter) ([]*consentModel.RecordWithStatus, error)
+	Grant(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error)
+	Revoke(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error)
+	List(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.RecordWithStatus, error)
 }
 
 // Handler handles consent-related endpoints.
@@ -64,7 +64,7 @@ func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var grantReq consentModel.GrantRequest
+	var grantReq models.GrantRequest
 	if err := json.NewDecoder(r.Body).Decode(&grantReq); err != nil {
 		h.logger.WarnContext(ctx, "failed to decode grant consent request",
 			"request_id", requestID,
@@ -93,7 +93,7 @@ func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := &consentModel.ActionResponse{
+	res := &models.ActionResponse{
 		Granted: formatConsentResponses(granted, time.Now()),
 		Message: formatActionMessage("Consent granted for %d purpose", len(granted)),
 	}
@@ -114,7 +114,7 @@ func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var revokeReq consentModel.RevokeRequest
+	var revokeReq models.RevokeRequest
 	if err := json.NewDecoder(r.Body).Decode(&revokeReq); err != nil {
 		h.logger.WarnContext(ctx, "failed to decode revoke consent request",
 			"request_id", requestID,
@@ -143,7 +143,7 @@ func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := &consentModel.ActionResponse{
+	res := &models.ActionResponse{
 		Granted: formatConsentResponses(revoked, time.Now()),
 		Message: formatActionMessage("Consent revoked for %d purpose", len(revoked)),
 	}
@@ -168,12 +168,12 @@ func (h *Handler) handleGetConsents(w http.ResponseWriter, r *http.Request) {
 	statusFilter := r.URL.Query().Get("status")
 	purposeFilter := r.URL.Query().Get("purpose")
 
-	if statusFilter != "" && statusFilter != "active" && statusFilter != "expired" && statusFilter != "revoked" {
+	if statusFilter != "" && statusFilter != string(models.StatusActive) && statusFilter != string(models.StatusExpired) && statusFilter != string(models.StatusRevoked) {
 		shared.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid status filter"))
 		return
 	}
 
-	res, err := h.consent.List(ctx, userID, &consentModel.RecordFilter{
+	res, err := h.consent.List(ctx, userID, &models.RecordFilter{
 		Purpose: purposeFilter,
 		Status:  statusFilter,
 	})
@@ -186,16 +186,16 @@ func (h *Handler) handleGetConsents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.WriteJSON(w, http.StatusOK, consentModel.RecordsResponse{
+	respond.WriteJSON(w, http.StatusOK, models.RecordsResponse{
 		Records: res,
 	})
 }
 
 // TODO: move to models or service package
-func formatConsentResponses(records []*consentModel.Record, now time.Time) []consentModel.Grant {
-	var resp []consentModel.Grant
+func formatConsentResponses(records []*models.Record, now time.Time) []models.Grant {
+	var resp []models.Grant
 	for _, record := range records {
-		resp = append(resp, consentModel.Grant{
+		resp = append(resp, models.Grant{
 			Purpose:   record.Purpose,
 			GrantedAt: record.GrantedAt,
 			ExpiresAt: record.ExpiresAt,
