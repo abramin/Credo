@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"id-gateway/internal/audit"
+	auth "id-gateway/internal/auth/handler"
 	"id-gateway/internal/auth/models"
 	"id-gateway/internal/auth/service"
 	"id-gateway/internal/auth/store"
 	jwttoken "id-gateway/internal/jwt_token"
 	"id-gateway/internal/platform/middleware"
-	httptransport "id-gateway/internal/transport/http"
 	dErrors "id-gateway/pkg/domain-errors"
 
 	"github.com/go-chi/chi/v5"
@@ -26,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemorySessionStore, *jwttoken.JWTService) {
+func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemorySessionStore, *jwttoken.JWTService, *audit.InMemoryStore) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	userStore := store.NewInMemoryUserStore()
@@ -37,14 +38,16 @@ func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemo
 		"id-gateway-client",
 		15*time.Minute,
 	)
+	auditStore := audit.NewInMemoryStore()
 	jwtValidator := jwttoken.NewJWTServiceAdapter(jwtService)
 	authService := service.NewService(userStore, sessionStore, 5*time.Minute,
 		service.WithLogger(logger),
 		service.WithJWTService(jwtService),
+		service.WithAuditPublisher(audit.NewPublisher(auditStore)),
 	)
 
 	router := chi.NewRouter()
-	authHandler := httptransport.NewAuthHandler(authService, logger, false, nil)
+	authHandler := auth.New(authService, logger, false, nil)
 
 	// Public endpoints (no auth required) - mirrors production setup
 	router.Post("/auth/authorize", authHandler.HandleAuthorize)
@@ -56,11 +59,11 @@ func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemo
 		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
 	})
 
-	return router, userStore, sessionStore, jwtService
+	return router, userStore, sessionStore, jwtService, auditStore
 }
 
 func TestCompleteAuthFlow(t *testing.T) {
-	r, userStore, sessionStore, _ := SetupSuite(t)
+	r, userStore, sessionStore, _, auditStore := SetupSuite(t)
 	reqBody := models.AuthorizationRequest{
 		Email:       "jane.doe@example.com",
 		ClientID:    "client-123",
@@ -79,7 +82,7 @@ func TestCompleteAuthFlow(t *testing.T) {
 	res := rec.Result()
 	defer res.Body.Close()
 
-	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Equal(t, http.StatusOK, res.StatusCode)
 
 	var body map[string]string
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
@@ -87,17 +90,17 @@ func TestCompleteAuthFlow(t *testing.T) {
 	code := body["code"]
 	redirectURI := body["redirect_uri"]
 	require.NotEmpty(t, code)
-	require.Contains(t, redirectURI, "code="+code)
-	require.Contains(t, redirectURI, "state=state-xyz")
+	assert.Contains(t, redirectURI, "code="+code)
+	assert.Contains(t, redirectURI, "state=state-xyz")
 
 	session, err := sessionStore.FindByCode(context.Background(), code)
 	require.NoError(t, err)
-	require.Equal(t, service.StatusPendingConsent, session.Status)
-	require.Equal(t, reqBody.Scopes, session.RequestedScope)
+	assert.Equal(t, service.StatusPendingConsent, session.Status)
+	assert.Equal(t, reqBody.Scopes, session.RequestedScope)
 
 	user, err := userStore.FindByEmail(context.Background(), reqBody.Email)
 	require.NoError(t, err)
-	require.Equal(t, user.ID, session.UserID)
+	assert.Equal(t, user.ID, session.UserID)
 
 	// Exchange code for token
 	tokenRequest := &models.TokenRequest{
@@ -117,13 +120,13 @@ func TestCompleteAuthFlow(t *testing.T) {
 	tokenRes := tokenRec.Result()
 	defer tokenRes.Body.Close()
 
-	require.Equal(t, http.StatusOK, tokenRes.StatusCode)
+	assert.Equal(t, http.StatusOK, tokenRes.StatusCode)
 
 	var tokenBody map[string]any
 	require.NoError(t, json.NewDecoder(tokenRes.Body).Decode(&tokenBody))
 
 	accessToken := tokenBody["access_token"]
-	require.NotEmpty(t, accessToken)
+	assert.NotEmpty(t, accessToken)
 
 	// Use token to get user info
 	userInfoReq := httptest.NewRequest(http.MethodGet, "/auth/userinfo", nil)
@@ -135,22 +138,50 @@ func TestCompleteAuthFlow(t *testing.T) {
 	userInfoRes := userInfoRec.Result()
 	defer userInfoRes.Body.Close()
 
-	require.Equal(t, http.StatusOK, userInfoRes.StatusCode)
+	assert.Equal(t, http.StatusOK, userInfoRes.StatusCode)
 
 	var userInfo models.UserInfoResult
 	require.NoError(t, json.NewDecoder(userInfoRes.Body).Decode(&userInfo))
 
-	require.Equal(t, user.Email, userInfo.Email)
-	require.Equal(t, user.FirstName, userInfo.GivenName)
-	require.Equal(t, user.LastName, userInfo.FamilyName)
+	assert.Equal(t, user.Email, userInfo.Email)
+	assert.Equal(t, user.FirstName, userInfo.GivenName)
+	assert.Equal(t, user.LastName, userInfo.FamilyName)
+	assert.Equal(t, user.ID.String(), userInfo.Sub)
+
+	// Verify session is updated to active status
+	session, err = sessionStore.FindByCode(context.Background(), code)
+	require.NoError(t, err)
+	assert.Equal(t, service.StatusActive, session.Status)
+
+	// Verify user store has the user
+	users, err := userStore.ListAll(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, users, 1)
+	assert.Equal(t, user.ID, users[user.ID.String()].ID)
+
+	// Verify audit events recorded throughout the flow
+	auditEvents, err := auditStore.ListByUser(context.Background(), user.ID.String())
+	require.NoError(t, err)
+	assert.Len(t, auditEvents, 4) // user created, session created, tokens issued, userinfo accessed
+
+	actions := make([]string, 0, len(auditEvents))
+	for _, event := range auditEvents {
+		assert.Equal(t, user.ID.String(), event.UserID)
+		actions = append(actions, event.Action)
+	}
+	assert.ElementsMatch(t, []string{
+		"user_created",
+		"session_created",
+		"token_issued",
+		"userinfo_accessed",
+	}, actions)
 }
 
-// - [ ] Test concurrent user creation (race conditions)
 func TestConcurrentUserCreation(t *testing.T) {
 	// This test would simulate multiple concurrent requests to create
 	// the same user and ensure that the user store handles it correctly
 	// without creating duplicate users.
-	r, userStore, _, _ := SetupSuite(t)
+	r, userStore, _, _, _ := SetupSuite(t)
 	concurrentRequests := 10
 	errCh := make(chan error, concurrentRequests)
 
@@ -192,12 +223,11 @@ func TestConcurrentUserCreation(t *testing.T) {
 
 	users, err := userStore.ListAll(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 1, len(users), "expected only one user to be created")
+	assert.Equal(t, 1, len(users), "expected only one user to be created")
 }
 
-// - [ ] Test session expiry handling
 func TestSessionExpiryHandling(t *testing.T) {
-	r, _, sessionStore, _ := SetupSuite(t)
+	r, _, sessionStore, _, _ := SetupSuite(t)
 	session := &models.Session{
 		ID:            uuid.New(),
 		UserID:        uuid.New(),
@@ -231,7 +261,7 @@ func TestSessionExpiryHandling(t *testing.T) {
 	tokenRes := tokenRec.Result()
 	defer tokenRes.Body.Close()
 
-	require.Equal(t, http.StatusUnauthorized, tokenRes.StatusCode)
+	assert.Equal(t, http.StatusUnauthorized, tokenRes.StatusCode)
 
 	var tokenBody map[string]string
 	require.NoError(t, json.NewDecoder(tokenRes.Body).Decode(&tokenBody))
@@ -240,7 +270,7 @@ func TestSessionExpiryHandling(t *testing.T) {
 }
 
 func TestInvalidBearerTokenRejection(t *testing.T) {
-	r, _, _, _ := SetupSuite(t)
+	r, _, _, _, _ := SetupSuite(t)
 	invalidTokens := []string{
 		"",                   // Empty token
 		"invalidtoken",       // Random string

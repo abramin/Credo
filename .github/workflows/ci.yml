@@ -28,7 +28,8 @@ jobs:
       - name: Run tests
         run: go test ./...
 
-  karate-tests:
+  e2e:
+    name: E2E Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -40,39 +41,71 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: maven
+      - name: Build Go application
+        run: go build -o bin/id-gateway ./cmd/server/main.go
 
-      - name: Download Go dependencies
-        run: go mod download
-
-      - name: Start backend API
+      - name: Start backend server
         run: |
-          go run ./cmd/server > /tmp/id-gateway.log 2>&1 &
-          echo $! > /tmp/id-gateway.pid
+          ./bin/id-gateway &
+          echo $! > server.pid
+        env:
+          PORT: 8080
 
-      - name: Wait for backend to be ready
+      - name: Wait for server to be ready
         run: |
-          timeout 60s bash -c 'until curl -sf http://localhost:8080/metrics >/dev/null; do sleep 1; done'
+          timeout 30 bash -c 'until curl -f http://localhost:8080/health 2>/dev/null; do sleep 1; done' || true
+          sleep 2
 
-      - name: Run Karate tests
-        run: mvn -B -f karate-tests/pom.xml test
+      - name: Run E2E tests
+        working-directory: e2e
+        run: go test -v
         env:
           BASE_URL: http://localhost:8080
 
-      - name: Stop backend
+      - name: Stop backend server
         if: always()
         run: |
-          if [ -f /tmp/id-gateway.pid ]; then kill "$(cat /tmp/id-gateway.pid)"; fi
-
-      - name: Backend logs (on failure)
-        if: failure()
-        run: |
-          if [ -s /tmp/id-gateway.log ]; then
-            echo "--- backend logs ---"
-            cat /tmp/id-gateway.log
+          if [ -f server.pid ]; then
+            kill $(cat server.pid) || true
+            rm server.pid
           fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: e2e/reports/
+          retention-days: 7
+
+  openapi-docs:
+    name: Build OpenAPI docs
+    runs-on: ubuntu-latest
+    # Always lint/build on PRs; build artifacts on push to main after merge
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Redocly CLI
+        run: npm install --no-package-lock --no-save @redocly/cli@1.12.0
+
+      - name: Lint OpenAPI specs
+        run: npx @redocly/cli@1.12.0 lint 'docs/openapi/*.yaml'
+
+      - name: Build OpenAPI docs
+        run: |
+          npx @redocly/cli@1.12.0 build-docs docs/openapi/auth.yaml -o docs/openapi/auth.html
+          npx @redocly/cli@1.12.0 build-docs docs/openapi/consent.yaml -o docs/openapi/consent.html
+
+      - name: Upload OpenAPI artifacts
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-docs
+          path: docs/openapi/*.html

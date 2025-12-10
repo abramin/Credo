@@ -12,6 +12,13 @@ type Metrics struct {
 	TokenRequests   prometheus.Counter
 	AuthFailures    prometheus.Counter
 	EndpointLatency *prometheus.HistogramVec
+	// Consent metrics
+	ConsentsGranted       *prometheus.CounterVec
+	ConsentsRevoked       *prometheus.CounterVec
+	ActiveConsentsPerUser prometheus.Gauge
+	ConsentCheckPassed    *prometheus.CounterVec
+	ConsentCheckFailed    *prometheus.CounterVec
+	ConsentGrantLatency   prometheus.Histogram
 }
 
 // New creates and registers all Prometheus metrics
@@ -41,6 +48,32 @@ func New() *Metrics {
 			Help:    "Latency of endpoints in seconds",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"endpoint"}),
+		// Consent metrics
+		ConsentsGranted: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "id_gateway_consents_granted_total",
+			Help: "Total number of consents granted, labeled by purpose",
+		}, []string{"purpose"}),
+		ConsentsRevoked: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "id_gateway_consents_revoked_total",
+			Help: "Total number of consents revoked, labeled by purpose",
+		}, []string{"purpose"}),
+		ActiveConsentsPerUser: promauto.NewGauge(prometheus.GaugeOpts{
+			Name: "id_gateway_active_consents_per_user",
+			Help: "Current number of active consents per user",
+		}),
+		ConsentCheckPassed: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "id_gateway_consent_checks_passed_total",
+			Help: "Total number of consent checks that passed, labeled by purpose",
+		}, []string{"purpose"}),
+		ConsentCheckFailed: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "id_gateway_consent_checks_failed_total",
+			Help: "Total number of consent checks that failed, labeled by purpose",
+		}, []string{"purpose"}),
+		ConsentGrantLatency: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "id_gateway_consent_grant_latency_seconds",
+			Help:    "Latency of consent grant operations in seconds",
+			Buckets: prometheus.DefBuckets,
+		}),
 	}
 }
 
@@ -66,4 +99,39 @@ func (m *Metrics) IncrementAuthFailures() {
 
 func (m *Metrics) ObserveEndpointLatency(endpoint string, durationSeconds float64) {
 	m.EndpointLatency.WithLabelValues(endpoint).Observe(durationSeconds)
+}
+
+// IncrementConsentsGranted increments the consents granted counter with purpose label
+func (m *Metrics) IncrementConsentsGranted(purpose string) {
+	m.ConsentsGranted.WithLabelValues(purpose).Inc()
+}
+
+// IncrementConsentsRevoked increments the consents revoked counter with purpose label
+func (m *Metrics) IncrementConsentsRevoked(purpose string) {
+	m.ConsentsRevoked.WithLabelValues(purpose).Inc()
+}
+
+// IncrementConsentCheckPassed increments the consent check passed counter with purpose label
+func (m *Metrics) IncrementConsentCheckPassed(purpose string) {
+	m.ConsentCheckPassed.WithLabelValues(purpose).Inc()
+}
+
+// IncrementConsentCheckFailed increments the consent check failed counter with purpose label
+func (m *Metrics) IncrementConsentCheckFailed(purpose string) {
+	m.ConsentCheckFailed.WithLabelValues(purpose).Inc()
+}
+
+// IncrementActiveConsentsPerUser increments the active consents per user gauge
+func (m *Metrics) IncrementActiveConsentsPerUser(count float64) {
+	m.ActiveConsentsPerUser.Add(count)
+}
+
+// DecrementActiveConsentsPerUser decrements the active consents per user gauge
+func (m *Metrics) DecrementActiveConsentsPerUser(count float64) {
+	m.ActiveConsentsPerUser.Sub(count)
+}
+
+// ObserveConsentGrantLatency records the latency for consent grant operations
+func (m *Metrics) ObserveConsentGrantLatency(durationSeconds float64) {
+	m.ConsentGrantLatency.Observe(durationSeconds)
 }

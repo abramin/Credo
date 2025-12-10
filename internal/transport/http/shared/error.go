@@ -8,6 +8,8 @@ import (
 	dErrors "id-gateway/pkg/domain-errors"
 )
 
+// TODO: combine with shared json package?
+
 // WriteError centralizes domain error translation to HTTP responses.
 // It translates transport-agnostic domain errors into HTTP status codes and error responses.
 func WriteError(w http.ResponseWriter, err error) {

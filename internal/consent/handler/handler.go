@@ -3,76 +3,67 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
-	consentModel "id-gateway/internal/consent/models"
+	"id-gateway/internal/consent/models"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
 	"id-gateway/internal/transport/http/shared"
+	respond "id-gateway/internal/transport/http/shared/json"
 	dErrors "id-gateway/pkg/domain-errors"
+	s "id-gateway/pkg/string"
+	"id-gateway/pkg/validation"
 )
 
 // Service defines the interface for consent operations.
 type Service interface {
-	Grant(ctx context.Context, userID string, purposes []consentModel.ConsentPurpose, ttl time.Duration) ([]*consentModel.ConsentRecord, error)
-	Revoke(ctx context.Context, userID string, purpose consentModel.ConsentPurpose) error
-	Require(ctx context.Context, userID string, purpose consentModel.ConsentPurpose, now time.Time) error
-	List(ctx context.Context, userID string) ([]*consentModel.ConsentRecord, error)
+	Grant(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error)
+	Revoke(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error)
+	List(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.ConsentWithStatus, error)
 }
 
 // Handler handles consent-related endpoints.
 type Handler struct {
-	logger       *slog.Logger
-	consent      Service
-	metrics      *metrics.Metrics
-	consentTTL   time.Duration
-	jwtValidator middleware.JWTValidator
+	logger  *slog.Logger
+	consent Service
+	metrics *metrics.Metrics
 }
 
 // New creates a new consent Handler.
-func New(
-	consent Service,
-	logger *slog.Logger,
-	metrics *metrics.Metrics,
-	jwtValidator middleware.JWTValidator) *Handler {
+func New(consent Service, logger *slog.Logger, metrics *metrics.Metrics) *Handler {
 	return &Handler{
-		logger:       logger,
-		consent:      consent,
-		metrics:      metrics,
-		jwtValidator: jwtValidator,
+		logger:  logger,
+		consent: consent,
+		metrics: metrics,
 	}
 }
 
 // Register registers the consent routes with the chi router.
 func (h *Handler) Register(r chi.Router) {
-	consentRouter := chi.NewRouter()
-	consentRouter.Use(middleware.Recovery(h.logger))
-	consentRouter.Use(middleware.RequestID)
-	consentRouter.Use(middleware.Logger(h.logger))
-	consentRouter.Use(middleware.Timeout(30 * time.Second))
-	consentRouter.Use(middleware.ContentTypeJSON)
-	consentRouter.Use(middleware.LatencyMiddleware(h.metrics))
-	consentRouter.Use(middleware.RequireAuth(h.jwtValidator, h.logger))
-	consentRouter.Post("/auth/consent", h.handleGrantConsent)
-	consentRouter.Post("/auth/consent/revoke", h.handleRevokeConsent)
-	consentRouter.Get("/auth/consent", h.handleGetConsent)
-
-	r.Mount("/", consentRouter)
+	r.Post("/auth/consent", h.handleGrantConsent)
+	r.Post("/auth/consent/revoke", h.handleRevokeConsent)
+	r.Get("/auth/consent", h.handleGetConsents)
 }
 
-// handleGrantConsent grants consent for the authenticated user.
+// handleGrantConsent grants consent for the authenticated user per PRD-002 FR-1.
 func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	start := time.Now()
+	defer func() {
+		if h.metrics != nil {
+			h.metrics.ObserveConsentGrantLatency(time.Since(start).Seconds())
+		}
+	}()
 
-	// The middleware has already validated the JWT and set the userID in context
+	requestID := middleware.GetRequestID(ctx)
 	userID := middleware.GetUserID(ctx)
+
 	if userID == "" {
-		// This should never happen if RequireAuth middleware is configured correctly
 		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
 			"request_id", requestID,
 		)
@@ -80,48 +71,166 @@ func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var grantReq consentModel.GrantConsentRequest
-	err := json.NewDecoder(r.Body).Decode(&grantReq)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid grant consent request",
+	var grantReq models.GrantRequest
+	if err := json.NewDecoder(r.Body).Decode(&grantReq); err != nil {
+		h.logger.WarnContext(ctx, "failed to decode grant consent request",
 			"request_id", requestID,
-			"error", err.Error(),
+			"error", err,
 		)
 		shared.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
 		return
 	}
-
-	// Validate and grant consent for all purposes
-	_, err = h.consent.Grant(ctx, userID, grantReq.Purposes, h.consentTTL)
-	if err != nil {
-		if dErrors.Is(err, dErrors.CodeBadRequest) {
-			h.logger.WarnContext(ctx, "invalid grant consent request",
-				"request_id", requestID,
-				"error", err.Error(),
-			)
-			shared.WriteError(w, err)
-			return
-		}
-		h.logger.ErrorContext(ctx, "failed to grant consent",
+	s.Sanitize(&grantReq)
+	if err := validation.Validate(&grantReq); err != nil {
+		h.logger.WarnContext(ctx, "invalid grant consent request",
 			"request_id", requestID,
-			"error", err.Error(),
+			"error", err,
 		)
-		shared.WriteError(w, dErrors.New(dErrors.CodeInternal, "failed to grant consent"))
+		shared.WriteError(w, err)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	granted, err := h.consent.Grant(ctx, userID, grantReq.Purposes)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "failed to grant consent",
+			"request_id", requestID,
+			"error", err,
+		)
+		shared.WriteError(w, err)
+		return
+	}
+
+	res := &models.GrantResponse{
+		Granted: formatGrantResponses(granted, time.Now()),
+		Message: formatActionMessage("Consent granted for %d purpose", len(granted)),
+	}
+
+	respond.WriteJSON(w, http.StatusOK, res)
 }
 
 func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, "/auth/consent/revoke")
+	ctx := r.Context()
+	requestID := middleware.GetRequestID(ctx)
+	userID := middleware.GetUserID(ctx)
+
+	if userID == "" {
+		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
+			"request_id", requestID,
+		)
+		shared.WriteError(w, dErrors.New(dErrors.CodeInternal, "authentication context error"))
+		return
+	}
+
+	var revokeReq models.RevokeRequest
+	if err := json.NewDecoder(r.Body).Decode(&revokeReq); err != nil {
+		h.logger.WarnContext(ctx, "failed to decode revoke consent request",
+			"request_id", requestID,
+			"error", err,
+		)
+		shared.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
+		return
+	}
+	s.Sanitize(&revokeReq)
+	if err := validation.Validate(&revokeReq); err != nil {
+		h.logger.WarnContext(ctx, "invalid revoke consent request",
+			"request_id", requestID,
+			"error", err,
+		)
+		shared.WriteError(w, err)
+		return
+	}
+
+	revoked, err := h.consent.Revoke(ctx, userID, revokeReq.Purposes)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "failed to revoke consent",
+			"request_id", requestID,
+			"error", err,
+		)
+		shared.WriteError(w, err)
+		return
+	}
+
+	respond.WriteJSON(w, http.StatusOK, models.RevokeResponse{
+		Revoked: formatRevokeResponses(revoked),
+		Message: formatActionMessage("Consent revoked for %d purpose", len(revoked)),
+	})
 }
 
-func (h *Handler) handleGetConsent(w http.ResponseWriter, r *http.Request) {
-	h.notImplemented(w, "/auth/consent")
+func formatRevokeResponses(revoked []*models.Record) []*models.Revoked {
+	var resp []*models.Revoked
+	for _, record := range revoked {
+		resp = append(resp, &models.Revoked{
+			Purpose:   record.Purpose,
+			RevokedAt: *record.RevokedAt,
+			Status:    record.ComputeStatus(time.Now()),
+		})
+	}
+	return resp
 }
 
-func (h *Handler) notImplemented(w http.ResponseWriter, path string) {
-	h.logger.Warn("Not implemented", slog.String("path", path))
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+func (h *Handler) handleGetConsents(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := middleware.GetRequestID(ctx)
+	userID := middleware.GetUserID(ctx)
+
+	if userID == "" {
+		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
+			"request_id", requestID,
+		)
+		shared.WriteError(w, dErrors.New(dErrors.CodeInternal, "authentication context error"))
+		return
+	}
+
+	// TODO: consider using DTO here
+	statusFilter := r.URL.Query().Get("status")
+	purposeFilter := r.URL.Query().Get("purpose")
+
+	if statusFilter != "" && statusFilter != string(models.StatusActive) && statusFilter != string(models.StatusExpired) && statusFilter != string(models.StatusRevoked) {
+		shared.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid status filter"))
+		return
+	}
+
+	res, err := h.consent.List(ctx, userID, &models.RecordFilter{
+		Purpose: purposeFilter,
+		Status:  statusFilter,
+	})
+	if err != nil {
+		h.logger.ErrorContext(ctx, "failed to list consent",
+			"request_id", requestID,
+			"error", err,
+		)
+		shared.WriteError(w, err)
+		return
+	}
+
+	respond.WriteJSON(w, http.StatusOK, models.ListResponse{Consents: res})
+}
+
+// TODO: move to models or service package
+func formatGrantResponses(records []*models.Record, now time.Time) []*models.Grant {
+	var resp []*models.Grant
+	for _, record := range records {
+		resp = append(resp, &models.Grant{
+			Purpose:   record.Purpose,
+			GrantedAt: record.GrantedAt,
+			ExpiresAt: record.ExpiresAt,
+			Status:    record.ComputeStatus(now),
+		})
+	}
+	return resp
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
+}
+
+func formatActionMessage(template string, count int) string {
+	return fmt.Sprintf(template+"%s", count, pluralSuffix(count))
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }

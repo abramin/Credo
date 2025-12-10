@@ -8,15 +8,19 @@ import (
 	"os/signal"
 	"time"
 
+	"id-gateway/internal/audit"
+	authHandler "id-gateway/internal/auth/handler"
 	authService "id-gateway/internal/auth/service"
 	authStore "id-gateway/internal/auth/store"
+	consentHandler "id-gateway/internal/consent/handler"
+	consentService "id-gateway/internal/consent/service"
+	consentStore "id-gateway/internal/consent/store"
 	jwttoken "id-gateway/internal/jwt_token"
 	"id-gateway/internal/platform/config"
 	"id-gateway/internal/platform/httpserver"
 	"id-gateway/internal/platform/logger"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
-	httptransport "id-gateway/internal/transport/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -94,7 +98,14 @@ func registerRoutes(
 	cfg *config.Server,
 	m *metrics.Metrics,
 ) {
-	authHandler := httptransport.NewAuthHandler(authSvc, log, cfg.RegulatedMode, m)
+	authHandler := authHandler.New(authSvc, log, cfg.RegulatedMode, m)
+	consentSvc := consentService.NewService(
+		consentStore.NewInMemoryStore(),
+		audit.NewPublisher(audit.NewInMemoryStore()),
+		log,
+		cfg.ConsentTTL,
+	)
+	consentHTTPHandler := consentHandler.New(consentSvc, log, m)
 
 	// Public auth endpoints (no JWT required)
 	r.Post("/auth/authorize", authHandler.HandleAuthorize)
@@ -104,6 +115,7 @@ func registerRoutes(
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth(jwtValidator, log))
 		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
+		consentHTTPHandler.Register(r)
 	})
 }
 

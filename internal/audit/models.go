@@ -14,3 +14,13 @@ type Event struct {
 	Decision        string
 	Reason          string
 }
+
+type AuditEvent string
+
+const (
+	EventUserCreated      AuditEvent = "user_created"
+	EventSessionCreated   AuditEvent = "session_created"
+	EventTokenIssued      AuditEvent = "token_issued"
+	EventUserInfoAccessed AuditEvent = "userinfo_accessed"
+	EventAuthFailed       AuditEvent = "auth_failed"
+)

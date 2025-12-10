@@ -1,14 +1,14 @@
 # Product Requirements Documents (PRDs)
 
-**ID Gateway Implementation Specifications**
+**Credo Implementation Specifications**
 
-This directory contains technical product requirements for implementing the ID Gateway system. Each PRD is written for developers and provides detailed specifications, API contracts, data models, and acceptance criteria.
+This directory contains technical product requirements for implementing Credo system. Each PRD is written for developers and provides detailed specifications, API contracts, data models, and acceptance criteria.
 
 ---
 
 ## Overview
 
-The ID Gateway is a **regulated identity and authorization system** that:
+Credo is a **regulated identity and authorization system** that:
 
 - Authenticates users (OIDC-lite)
 - Manages purpose-based consent
@@ -101,7 +101,7 @@ Implement PRDs 001-007 to establish:
 
 2. **PRD-008: GDPR/CCPA Automation** (12-16 hours) - **DO SECOND**
 
-   - **Why second:** Practical, relevant to EU jobs, builds on audit
+   - **Why second:** Practical, relevant to EU, builds on audit
    - **Impact:** Real-time compliance checking, automated data retention
    - **Resume line:** "Implemented automated GDPR/CCPA compliance engine"
    - **Best for:** European companies, privacy-focused organizations
@@ -125,8 +125,6 @@ Implement PRDs 001-007 to establish:
    - **Impact:** Privacy-preserving age verification (prove "over 18" without revealing birthdate)
    - **Resume line:** "Implemented zero-knowledge proofs for privacy-preserving verification"
    - **Best for:** Privacy-focused companies, cutting-edge identity solutions
-
-**Note:** Advanced features can be implemented in parallel tracks after core system is complete. Pick 2-3 that align with your target job market.
 
 ---
 
@@ -190,8 +188,6 @@ Implement PRDs in this sequence to minimize dependencies and enable incremental 
 Follow V2_ROADMAP.md for operational maturity features
 
 #### Track B: Showcase Features (Differentiation)
-
-Implement 2-3 advanced PRDs based on job market:
 
 **For Backend/Distributed Systems Roles:**
 
@@ -470,37 +466,15 @@ _ = h.auditPublisher.Emit(ctx, audit.Event{
 
 "...with **zero-knowledge proofs** for privacy-preserving age verification (Bulletproofs/Rust)."
 
-Each advanced feature addition makes the project more distinctive for technical interviews.
-
 ---
 
 ## Getting Help
 
 ### Resources:
 
-- **Tutorial:** `docs/TUTORIAL.md` - Step-by-step learning guide
 - **Architecture:** `docs/architecture.md` - System design and patterns
 - **V2 Roadmap:** `docs/V2_ROADMAP.md` - Production readiness features
 - **System Design:** `docs/SYSTEM_DESIGN_ROADMAP.md` - Scalability and observability
-
-### Common Questions:
-
-**Q: Do I need to implement PRDs in exact order?**
-A: Yes for core features (001-007). Advanced features can be done in any order after core complete.
-
-**Q: Should I implement all advanced features?**
-A: No. Pick 2-3 that align with your job search. Quality over quantity.
-
-**Q: Which advanced features should I prioritize?**
-A: Start with PRD-006B (Merkle audit) - easiest and most impactful. Then choose based on target companies.
-
-**Q: Can I skip production readiness (V2)?**
-A: Core system first, then V2 (JWT, Postgres, metrics), then advanced features. Don't skip V2.
-
-**Q: How long will this take?**
-A: Core: 6-8 days. V2: 3-5 days. Each advanced feature: 1-3 days. Total: 3-4 weeks for complete system with 2-3 showcase features.
-
----
 
 ## Revision History
 

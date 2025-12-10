@@ -1,4 +1,4 @@
-package handlers
+package handler
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
 	"id-gateway/internal/transport/http/shared"
+	respond "id-gateway/internal/transport/http/shared/json"
 	dErrors "id-gateway/pkg/domain-errors"
 	s "id-gateway/pkg/string"
 	"id-gateway/pkg/validation"
@@ -97,12 +98,7 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		"client_id", req.ClientID,
 	)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"code":         res.Code,
-		"redirect_uri": res.RedirectURI,
-	})
+	respond.WriteJSON(w, http.StatusOK, res)
 }
 
 // HandleToken exchanges authorization code for tokens
@@ -147,13 +143,8 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	if h.metrics != nil {
 		h.metrics.IncrementTokenRequests()
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"access_token": res.AccessToken,
-		"id_token":     res.IDToken,
-		"expires_in":   res.ExpiresIn,
-	})
+
+	respond.WriteJSON(w, http.StatusOK, res)
 }
 
 // HandleUserInfo returns authenticated user information
@@ -181,7 +172,7 @@ func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userInfo, err := h.auth.UserInfo(ctx, sessionID)
+	res, err := h.auth.UserInfo(ctx, sessionID)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to get user info",
 			"error", err,
@@ -197,7 +188,5 @@ func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 		"session_id", sessionIDStr,
 	)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(userInfo)
+	respond.WriteJSON(w, http.StatusOK, res)
 }
