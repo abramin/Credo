@@ -92,6 +92,14 @@ func (s *Service) upsertGrant(ctx context.Context, userID string, purpose models
 	// History is tracked via audit log
 	if existing != nil {
 		wasActive := existing.IsActive(now)
+
+		// Idempotent within 5-minute window: skip update if recently granted
+		// This prevents audit noise from rapid repeated requests while still allowing periodic TTL extension
+		// TODO: Make window configurable if needed
+		if wasActive && now.Sub(existing.GrantedAt) < 5*time.Minute {
+			return existing, nil
+		}
+
 		existing.GrantedAt = now
 		existing.ExpiresAt = &expiry
 		existing.RevokedAt = nil
