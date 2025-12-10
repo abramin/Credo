@@ -23,36 +23,57 @@ type Store interface {
 	DeleteByUser(ctx context.Context, userID string) error
 }
 
+type Option func(*Service)
+
+const defaultGrantIdempotencyWindow = 5 * time.Minute
+
 // Service persists consent decisions and enforces lifecycle rules per PRD-002.
 type Service struct {
-	store   Store
-	auditor *audit.Publisher
-	metrics *metrics.Metrics
-	logger  *slog.Logger
-	ttl     time.Duration
+	store                  Store
+	auditor                *audit.Publisher
+	metrics                *metrics.Metrics
+	logger                 *slog.Logger
+	consentTTL             time.Duration
+	grantIdempotencyWindow time.Duration
 }
 
-func NewService(store Store, auditor *audit.Publisher, logger *slog.Logger, ttl time.Duration) *Service {
+func NewService(store Store, auditor *audit.Publisher, logger *slog.Logger, ttl time.Duration, opts ...Option) *Service {
 	svc := &Service{
-		store:   store,
-		auditor: auditor,
-		logger:  logger,
-		ttl:     ttl,
+		store:                  store,
+		auditor:                auditor,
+		logger:                 logger,
+		consentTTL:             ttl,
+		grantIdempotencyWindow: defaultGrantIdempotencyWindow,
+	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	if svc.grantIdempotencyWindow <= 0 {
+		svc.grantIdempotencyWindow = defaultGrantIdempotencyWindow
 	}
 	return svc
 }
 
 // WithMetrics sets the metrics instance for the service
-func WithMetrics(m *metrics.Metrics) func(*Service) {
+func WithMetrics(m *metrics.Metrics) Option {
 	return func(s *Service) {
 		s.metrics = m
 	}
 }
 
 // WithLogger sets the logger instance for the service.
-func WithLogger(logger *slog.Logger) func(*Service) {
+func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {
 		s.logger = logger
+	}
+}
+
+// WithGrantWindow configures the idempotency window for repeated grants.
+func WithGrantWindow(window time.Duration) Option {
+	return func(s *Service) {
+		if window > 0 {
+			s.grantIdempotencyWindow = window
+		}
 	}
 }
 
@@ -82,7 +103,7 @@ func (s *Service) Grant(ctx context.Context, userID string, purposes []models.Pu
 
 func (s *Service) upsertGrant(ctx context.Context, userID string, purpose models.Purpose) (*models.Record, error) {
 	now := time.Now()
-	expiry := now.Add(s.ttl)
+	expiry := now.Add(s.consentTTL)
 	existing, err := s.store.FindByUserAndPurpose(ctx, userID, purpose)
 	if err != nil {
 		return nil, pkgerrors.Wrap(pkgerrors.CodeInternal, "failed to read consent", err)
@@ -92,6 +113,13 @@ func (s *Service) upsertGrant(ctx context.Context, userID string, purpose models
 	// History is tracked via audit log
 	if existing != nil {
 		wasActive := existing.IsActive(now)
+
+		// Idempotent within configured window: skip update if recently granted
+		// This prevents audit noise from rapid repeated requests while still allowing periodic TTL extension
+		if wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
+			return existing, nil
+		}
+
 		existing.GrantedAt = now
 		existing.ExpiresAt = &expiry
 		existing.RevokedAt = nil
