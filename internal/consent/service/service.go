@@ -88,7 +88,10 @@ func (s *Service) upsertGrant(ctx context.Context, userID string, purpose models
 		return nil, pkgerrors.Wrap(pkgerrors.CodeInternal, "failed to read consent", err)
 	}
 
-	if existing != nil && existing.IsActive(now) {
+	// Reuse existing consent record (active, expired, or revoked) to maintain clean DB
+	// History is tracked via audit log
+	if existing != nil {
+		wasActive := existing.IsActive(now)
 		existing.GrantedAt = now
 		existing.ExpiresAt = &expiry
 		existing.RevokedAt = nil
@@ -104,9 +107,13 @@ func (s *Service) upsertGrant(ctx context.Context, userID string, purpose models
 			Timestamp: now,
 		})
 		s.incrementConsentsGranted(purpose)
+		if !wasActive {
+			s.incrementActiveConsents(1)
+		}
 		return existing, nil
 	}
 
+	// First-time consent grant - create new record
 	record := &models.Record{
 		ID:        fmt.Sprintf("consent_%s", uuid.New().String()),
 		UserID:    userID,

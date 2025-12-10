@@ -45,7 +45,7 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	defer server.Close()
 
 	t.Log("Step 1: Grant consent for multiple purposes")
-	grantBody, _ := json.Marshal(map[string]any{"purposes": []string{"login", "registry_check", "profile_access"}})
+	grantBody, _ := json.Marshal(map[string]any{"purposes": []string{"login", "registry_check", "vc_issuance"}})
 	resp, err := http.Post(server.URL+"/auth/consent", "application/json", bytes.NewReader(grantBody))
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -90,13 +90,14 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	assert.Len(t, revokeData.Revoked, 1)
 	assert.Contains(t, revokeData.Message, "Consent revoked for 1 purpose")
 
-	t.Log("Step 4: Expire a different consent (profile_access) by manipulating expiry time")
+	t.Log("Step 4: Expire a different consent (vc_issuance) by manipulating expiry time")
 	expiredAt := time.Now().Add(-time.Hour)
-	profileRecord, err := consentStore.FindByUserAndPurpose(context.Background(), "user123", consentModel.PurposeProfileAccess)
+	vcRecord, err := consentStore.FindByUserAndPurpose(context.Background(), "user123", consentModel.PurposeVCIssuance)
 	require.NoError(t, err)
-	require.NotNil(t, profileRecord)
-	profileRecord.ExpiresAt = &expiredAt
-	require.NoError(t, consentStore.Update(context.Background(), profileRecord))
+	require.NotNil(t, vcRecord)
+	originalVCID := vcRecord.ID // Store original ID to verify reuse
+	vcRecord.ExpiresAt = &expiredAt
+	require.NoError(t, consentStore.Update(context.Background(), vcRecord))
 
 	t.Log("Step 5: List consents and verify different statuses (active, revoked, expired)")
 	listResp2, err := http.Get(server.URL + "/auth/consent")
@@ -111,7 +112,7 @@ func TestConsentIntegrationFlow(t *testing.T) {
 
 	statusCounts := map[string]int{}
 	for _, record := range listData2.Consents {
-		statusCounts[record.Status]++
+		statusCounts[string(record.Status)]++
 		switch record.Purpose {
 		case consentModel.PurposeLogin:
 			assert.Equal(t, consentModel.StatusActive, record.Status, "login should be active")
@@ -121,19 +122,19 @@ func TestConsentIntegrationFlow(t *testing.T) {
 		case consentModel.PurposeRegistryCheck:
 			assert.Equal(t, consentModel.StatusRevoked, record.Status, "registry_check should be revoked")
 			assert.NotNil(t, record.RevokedAt)
-		case consentModel.PurposeProfileAccess:
-			assert.Equal(t, consentModel.StatusExpired, record.Status, "profile_access should be expired")
+		case consentModel.PurposeVCIssuance:
+			assert.Equal(t, consentModel.StatusExpired, record.Status, "vc_issuance should be expired")
 			assert.Nil(t, record.RevokedAt)
 			assert.NotNil(t, record.ExpiresAt)
-			assert.True(t, record.ExpiresAt.Before(time.Now()), "profile_access should be expired")
+			assert.True(t, record.ExpiresAt.Before(time.Now()), "vc_issuance should be expired")
 		}
 	}
-	assert.Equal(t, 1, statusCounts[consentModel.StatusActive], "should have 1 active consent")
-	assert.Equal(t, 1, statusCounts[consentModel.StatusRevoked], "should have 1 revoked consent")
-	assert.Equal(t, 1, statusCounts[consentModel.StatusExpired], "should have 1 expired consent")
+	assert.Equal(t, 1, statusCounts[string(consentModel.StatusActive)], "should have 1 active consent")
+	assert.Equal(t, 1, statusCounts[string(consentModel.StatusRevoked)], "should have 1 revoked consent")
+	assert.Equal(t, 1, statusCounts[string(consentModel.StatusExpired)], "should have 1 expired consent")
 
-	t.Log("Step 6: Re-grant the expired consent (profile_access)")
-	regrantBody, _ := json.Marshal(map[string]any{"purposes": []string{"profile_access"}})
+	t.Log("Step 6: Re-grant the expired consent (vc_issuance)")
+	regrantBody, _ := json.Marshal(map[string]any{"purposes": []string{"vc_issuance"}})
 	regrantResp, err := http.Post(server.URL+"/auth/consent", "application/json", bytes.NewReader(regrantBody))
 	require.NoError(t, err)
 	defer regrantResp.Body.Close()
@@ -143,10 +144,15 @@ func TestConsentIntegrationFlow(t *testing.T) {
 	var regrantData consentModel.GrantResponse
 	require.NoError(t, json.Unmarshal(regrantRespBody, &regrantData))
 	assert.Len(t, regrantData.Granted, 1)
-	assert.Equal(t, consentModel.PurposeProfileAccess, regrantData.Granted[0].Purpose)
+	assert.Equal(t, consentModel.PurposeVCIssuance, regrantData.Granted[0].Purpose)
 	assert.Equal(t, consentModel.StatusActive, regrantData.Granted[0].Status)
 
-	t.Log("Step 7: Final list - verify profile_access is now active again")
+	// Verify the consent ID was reused (not creating a new record)
+	regrantedRecord, err := consentStore.FindByUserAndPurpose(context.Background(), "user123", consentModel.PurposeVCIssuance)
+	require.NoError(t, err)
+	assert.Equal(t, originalVCID, regrantedRecord.ID, "consent ID should be reused when re-granting expired consent")
+
+	t.Log("Step 7: Final list - verify vc_issuance is now active again")
 	listResp3, err := http.Get(server.URL + "/auth/consent")
 	require.NoError(t, err)
 	defer listResp3.Body.Close()
@@ -159,17 +165,17 @@ func TestConsentIntegrationFlow(t *testing.T) {
 
 	finalStatusCounts := map[string]int{}
 	for _, record := range listData3.Consents {
-		finalStatusCounts[record.Status]++
-		if record.Purpose == consentModel.PurposeProfileAccess {
-			assert.Equal(t, consentModel.StatusActive, record.Status, "profile_access should be active after re-grant")
+		finalStatusCounts[string(record.Status)]++
+		if record.Purpose == consentModel.PurposeVCIssuance {
+			assert.Equal(t, consentModel.StatusActive, record.Status, "vc_issuance should be active after re-grant")
 			assert.Nil(t, record.RevokedAt)
 			assert.NotNil(t, record.ExpiresAt)
 			assert.True(t, record.ExpiresAt.After(time.Now()), "re-granted consent should have future expiry")
 		}
 	}
-	assert.Equal(t, 2, finalStatusCounts[consentModel.StatusActive], "should have 2 active consents (login + profile_access)")
-	assert.Equal(t, 1, finalStatusCounts[consentModel.StatusRevoked], "should still have 1 revoked consent (registry_check)")
-	assert.Equal(t, 0, finalStatusCounts[consentModel.StatusExpired], "should have 0 expired consents")
+	assert.Equal(t, 2, finalStatusCounts[string(consentModel.StatusActive)], "should have 2 active consents (login + vc_issuance)")
+	assert.Equal(t, 1, finalStatusCounts[string(consentModel.StatusRevoked)], "should still have 1 revoked consent (registry_check)")
+	assert.Equal(t, 0, finalStatusCounts[string(consentModel.StatusExpired)], "should have 0 expired consents")
 
 	t.Log("Step 8: Verify audit trail")
 	auditEvents, err := auditStore.ListByUser(context.Background(), "user123")
