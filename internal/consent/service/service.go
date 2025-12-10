@@ -25,7 +25,10 @@ type Store interface {
 
 type Option func(*Service)
 
-const defaultGrantIdempotencyWindow = 5 * time.Minute
+const (
+	defaultConsentTTL             = 365 * 24 * time.Hour // 1 year
+	defaultGrantIdempotencyWindow = 5 * time.Minute
+)
 
 // Service persists consent decisions and enforces lifecycle rules per PRD-002.
 type Service struct {
@@ -37,16 +40,20 @@ type Service struct {
 	grantIdempotencyWindow time.Duration
 }
 
-func NewService(store Store, auditor *audit.Publisher, logger *slog.Logger, ttl time.Duration, opts ...Option) *Service {
+func NewService(store Store, auditor *audit.Publisher, logger *slog.Logger, opts ...Option) *Service {
 	svc := &Service{
 		store:                  store,
 		auditor:                auditor,
 		logger:                 logger,
-		consentTTL:             ttl,
+		consentTTL:             defaultConsentTTL,
 		grantIdempotencyWindow: defaultGrantIdempotencyWindow,
 	}
 	for _, opt := range opts {
 		opt(svc)
+	}
+	// Validate and apply defaults if needed
+	if svc.consentTTL <= 0 {
+		svc.consentTTL = defaultConsentTTL
 	}
 	if svc.grantIdempotencyWindow <= 0 {
 		svc.grantIdempotencyWindow = defaultGrantIdempotencyWindow
@@ -68,7 +75,18 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
+// WithConsentTTL configures the time-to-live duration for granted consents.
+// If not set or set to zero/negative, defaults to 1 year.
+func WithConsentTTL(ttl time.Duration) Option {
+	return func(s *Service) {
+		if ttl > 0 {
+			s.consentTTL = ttl
+		}
+	}
+}
+
 // WithGrantWindow configures the idempotency window for repeated grants.
+// If not set or set to zero/negative, defaults to 5 minutes.
 func WithGrantWindow(window time.Duration) Option {
 	return func(s *Service) {
 		if window > 0 {

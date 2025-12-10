@@ -52,7 +52,7 @@ func initializeAuthService(m *metrics.Metrics, log *slog.Logger, jwtService *jwt
 	return authService.NewService(
 		authStore.NewInMemoryUserStore(),
 		authStore.NewInMemorySessionStore(),
-		24*time.Hour, // TODO Make configurable
+		authService.WithSessionTTL(24*time.Hour), // TODO Make configurable
 		authService.WithMetrics(m),
 		authService.WithLogger(log),
 		authService.WithJWTService(jwtService),
@@ -103,7 +103,7 @@ func registerRoutes(
 		consentStore.NewInMemoryStore(),
 		audit.NewPublisher(audit.NewInMemoryStore()),
 		log,
-		cfg.ConsentTTL,
+		consentService.WithConsentTTL(cfg.ConsentTTL),
 	)
 	consentHTTPHandler := consentHandler.New(consentSvc, log, m)
 
