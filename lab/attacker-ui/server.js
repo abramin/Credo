@@ -130,7 +130,12 @@ async function runMissingAudienceScenario() {
   const rsResp = await fetch(`${resourceBase}/api/data`, {
     headers: { Authorization: `Bearer ${tokenJSON.access_token || ""}` },
   });
-  const rsJSON = await rsResp.json();
+  let rsJSON;
+  if (rsResp.ok) {
+    rsJSON = await rsResp.json();
+  } else {
+    rsJSON = { error: `HTTP error ${rsResp.status}`, body: await rsResp.text() };
+  }
   steps.push({
     title: "Replay token against naive resource server",
     request: { resource: `${resourceBase}/api/data` },
