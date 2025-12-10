@@ -61,7 +61,7 @@ docker-clean:
 # === E2E TESTS ===
 e2e:
 	@echo "Running E2E tests with godog..."
-	@cd e2e && go test -v --godog.format=pretty
+	@cd e2e && go test -v 
 
 e2e-normal:
 	@echo "Running normal flow E2E tests..."
