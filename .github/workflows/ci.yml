@@ -176,6 +176,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Copy frontend UI first
+        run: |
+          mkdir -p pages
+          cp -r frontend/public/* pages/
+          mkdir -p pages/openapi pages/e2e
+          ls -la pages/
+
       - name: Download OpenAPI docs
         uses: actions/download-artifact@v4
         with:
@@ -188,11 +195,14 @@ jobs:
           name: e2e-pages
           path: pages/
 
-      - name: Copy frontend UI
+      - name: Verify structure
         run: |
-          mkdir -p pages
-          cp -r frontend/public/* pages/
+          echo "Pages structure:"
           ls -la pages/
+          echo "OpenAPI docs:"
+          ls -la pages/openapi/ || echo "No openapi dir"
+          echo "E2E reports:"
+          ls -la pages/e2e/ || echo "No e2e dir"
 
       - name: Upload to GitHub Pages
         uses: actions/upload-pages-artifact@v3
