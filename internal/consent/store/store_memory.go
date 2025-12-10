@@ -10,21 +10,21 @@ import (
 
 type InMemoryStore struct {
 	mu       sync.RWMutex
-	consents map[string][]*models.ConsentRecord
+	consents map[string][]*models.Record
 }
 
 func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{consents: make(map[string][]*models.ConsentRecord)}
+	return &InMemoryStore{consents: make(map[string][]*models.Record)}
 }
 
-func (s *InMemoryStore) Save(_ context.Context, consent *models.ConsentRecord) error {
+func (s *InMemoryStore) Save(_ context.Context, consent *models.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.consents[consent.UserID] = append(s.consents[consent.UserID], consent)
 	return nil
 }
 
-func (s *InMemoryStore) FindByUserAndPurpose(_ context.Context, userID string, purpose models.ConsentPurpose) (*models.ConsentRecord, error) {
+func (s *InMemoryStore) FindByUserAndPurpose(_ context.Context, userID string, purpose models.Purpose) (*models.Record, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	records := s.consents[userID]
@@ -37,19 +37,37 @@ func (s *InMemoryStore) FindByUserAndPurpose(_ context.Context, userID string, p
 	return nil, nil
 }
 
-func (s *InMemoryStore) ListByUser(_ context.Context, userID string) ([]*models.ConsentRecord, error) {
+func (s *InMemoryStore) ListByUser(_ context.Context, userID string, filter *models.RecordFilter) ([]*models.Record, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	records := s.consents[userID]
-	copies := make([]*models.ConsentRecord, len(records))
-	for i, record := range records {
+
+	var filtered []*models.Record
+	now := time.Now()
+
+	for _, record := range records {
+		// Apply filters if specified
+		if filter != nil {
+			if filter.Purpose != "" && string(record.Purpose) != filter.Purpose {
+				continue
+			}
+			if filter.Status != "" {
+				status := record.ComputeStatus(now)
+				if string(status) != filter.Status {
+					continue
+				}
+			}
+		}
+
+		// Return a copy to prevent external modifications
 		copyRecord := *record
-		copies[i] = &copyRecord
+		filtered = append(filtered, &copyRecord)
 	}
-	return copies, nil
+
+	return filtered, nil
 }
 
-func (s *InMemoryStore) Update(_ context.Context, consent *models.ConsentRecord) error {
+func (s *InMemoryStore) Update(_ context.Context, consent *models.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records := s.consents[consent.UserID]
@@ -63,17 +81,20 @@ func (s *InMemoryStore) Update(_ context.Context, consent *models.ConsentRecord)
 	return nil
 }
 
-func (s *InMemoryStore) RevokeByUserAndPurpose(_ context.Context, userID string, purpose models.ConsentPurpose, revokedAt time.Time) error {
+func (s *InMemoryStore) RevokeByUserAndPurpose(_ context.Context, userID string, purpose models.Purpose, revokedAt time.Time) (*models.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records := s.consents[userID]
+	result := &models.Record{}
 	for i := range records {
 		if records[i].Purpose == purpose && records[i].RevokedAt == nil {
 			records[i].RevokedAt = &revokedAt
+			result = records[i]
+			break
 		}
 	}
 	s.consents[userID] = records
-	return nil
+	return result, nil
 }
 
 func (s *InMemoryStore) DeleteByUser(_ context.Context, userID string) error {

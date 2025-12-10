@@ -10,10 +10,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	consentModel "id-gateway/internal/consent/models"
+	"id-gateway/internal/consent/models"
 	"id-gateway/internal/platform/metrics"
 	"id-gateway/internal/platform/middleware"
 	"id-gateway/internal/transport/http/shared"
+	respond "id-gateway/internal/transport/http/shared/json"
 	dErrors "id-gateway/pkg/domain-errors"
 	s "id-gateway/pkg/string"
 	"id-gateway/pkg/validation"
@@ -21,10 +22,9 @@ import (
 
 // Service defines the interface for consent operations.
 type Service interface {
-	Grant(ctx context.Context, userID string, purposes []consentModel.ConsentPurpose) ([]*consentModel.ConsentRecord, error)
-	Revoke(ctx context.Context, userID string, purpose consentModel.ConsentPurpose) error
-	Require(ctx context.Context, userID string, purpose consentModel.ConsentPurpose) error
-	List(ctx context.Context, userID string) ([]*consentModel.ConsentRecord, error)
+	Grant(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error)
+	Revoke(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error)
+	List(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.ConsentWithStatus, error)
 }
 
 // Handler handles consent-related endpoints.
@@ -47,12 +47,19 @@ func New(consent Service, logger *slog.Logger, metrics *metrics.Metrics) *Handle
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/auth/consent", h.handleGrantConsent)
 	r.Post("/auth/consent/revoke", h.handleRevokeConsent)
-	r.Get("/auth/consent", h.handleGetConsent)
+	r.Get("/auth/consent", h.handleGetConsents)
 }
 
 // handleGrantConsent grants consent for the authenticated user per PRD-002 FR-1.
 func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	start := time.Now()
+	defer func() {
+		if h.metrics != nil {
+			h.metrics.ObserveConsentGrantLatency(time.Since(start).Seconds())
+		}
+	}()
+
 	requestID := middleware.GetRequestID(ctx)
 	userID := middleware.GetUserID(ctx)
 
@@ -64,7 +71,7 @@ func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var grantReq consentModel.GrantConsentRequest
+	var grantReq models.GrantRequest
 	if err := json.NewDecoder(r.Body).Decode(&grantReq); err != nil {
 		h.logger.WarnContext(ctx, "failed to decode grant consent request",
 			"request_id", requestID,
@@ -93,14 +100,12 @@ func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := map[string]any{
-		"granted": formatConsentResponses(granted, time.Now()),
-		"message": formatActionMessage("Consent granted for %d purposes", len(granted)),
+	res := &models.GrantResponse{
+		Granted: formatGrantResponses(granted, time.Now()),
+		Message: formatActionMessage("Consent granted for %d purpose", len(granted)),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	respond.WriteJSON(w, http.StatusOK, res)
 }
 
 func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +121,7 @@ func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var revokeReq consentModel.RevokeConsentRequest
+	var revokeReq models.RevokeRequest
 	if err := json.NewDecoder(r.Body).Decode(&revokeReq); err != nil {
 		h.logger.WarnContext(ctx, "failed to decode revoke consent request",
 			"request_id", requestID,
@@ -135,30 +140,35 @@ func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var revoked []*consentModel.ConsentRecord
-	for _, purpose := range revokeReq.Purposes {
-		if err := h.consent.Revoke(ctx, userID, purpose); err != nil {
-			h.logger.ErrorContext(ctx, "failed to revoke consent",
-				"request_id", requestID,
-				"error", err,
-			)
-			shared.WriteError(w, err)
-			return
-		}
-		revoked = append(revoked, &consentModel.ConsentRecord{Purpose: purpose, RevokedAt: ptrTime(time.Now())})
+	revoked, err := h.consent.Revoke(ctx, userID, revokeReq.Purposes)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "failed to revoke consent",
+			"request_id", requestID,
+			"error", err,
+		)
+		shared.WriteError(w, err)
+		return
 	}
 
-	response := map[string]any{
-		"revoked": formatConsentResponses(revoked, time.Now()),
-		"message": formatActionMessage("Consent revoked for %d purpose", len(revoked)),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	respond.WriteJSON(w, http.StatusOK, models.RevokeResponse{
+		Revoked: formatRevokeResponses(revoked),
+		Message: formatActionMessage("Consent revoked for %d purpose", len(revoked)),
+	})
 }
 
-func (h *Handler) handleGetConsent(w http.ResponseWriter, r *http.Request) {
+func formatRevokeResponses(revoked []*models.Record) []*models.Revoked {
+	var resp []*models.Revoked
+	for _, record := range revoked {
+		resp = append(resp, &models.Revoked{
+			Purpose:   record.Purpose,
+			RevokedAt: *record.RevokedAt,
+			Status:    record.ComputeStatus(time.Now()),
+		})
+	}
+	return resp
+}
+
+func (h *Handler) handleGetConsents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 	userID := middleware.GetUserID(ctx)
@@ -171,24 +181,19 @@ func (h *Handler) handleGetConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: consider using DTO here
 	statusFilter := r.URL.Query().Get("status")
 	purposeFilter := r.URL.Query().Get("purpose")
 
-	if statusFilter != "" && statusFilter != "active" && statusFilter != "expired" && statusFilter != "revoked" {
+	if statusFilter != "" && statusFilter != string(models.StatusActive) && statusFilter != string(models.StatusExpired) && statusFilter != string(models.StatusRevoked) {
 		shared.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid status filter"))
 		return
 	}
 
-	var purpose consentModel.ConsentPurpose
-	if purposeFilter != "" {
-		purpose = consentModel.ConsentPurpose(purposeFilter)
-		if !purpose.IsValid() {
-			shared.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid purpose filter"))
-			return
-		}
-	}
-
-	consents, err := h.consent.List(ctx, userID)
+	res, err := h.consent.List(ctx, userID, &models.RecordFilter{
+		Purpose: purposeFilter,
+		Status:  statusFilter,
+	})
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to list consent",
 			"request_id", requestID,
@@ -198,44 +203,21 @@ func (h *Handler) handleGetConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
-	filtered := filterConsents(consents, purposeFilter, statusFilter, now)
-	response := map[string]any{
-		"consents": formatConsentResponses(filtered, now),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	respond.WriteJSON(w, http.StatusOK, models.ListResponse{Consents: res})
 }
 
-func formatConsentResponses(records []*consentModel.ConsentRecord, now time.Time) []map[string]any {
-	var resp []map[string]any
+// TODO: move to models or service package
+func formatGrantResponses(records []*models.Record, now time.Time) []*models.Grant {
+	var resp []*models.Grant
 	for _, record := range records {
-		resp = append(resp, map[string]any{
-			"id":         record.ID,
-			"purpose":    record.Purpose,
-			"granted_at": record.GrantedAt,
-			"expires_at": record.ExpiresAt,
-			"revoked_at": record.RevokedAt,
-			"status":     record.Status(now),
+		resp = append(resp, &models.Grant{
+			Purpose:   record.Purpose,
+			GrantedAt: record.GrantedAt,
+			ExpiresAt: record.ExpiresAt,
+			Status:    record.ComputeStatus(now),
 		})
 	}
 	return resp
-}
-
-func filterConsents(records []*consentModel.ConsentRecord, purposeFilter, statusFilter string, now time.Time) []*consentModel.ConsentRecord {
-	var filtered []*consentModel.ConsentRecord
-	for _, record := range records {
-		if purposeFilter != "" && string(record.Purpose) != purposeFilter {
-			continue
-		}
-		if statusFilter != "" && record.Status(now) != statusFilter {
-			continue
-		}
-		filtered = append(filtered, record)
-	}
-	return filtered
 }
 
 func ptrTime(t time.Time) *time.Time {

@@ -50,14 +50,6 @@ type Service struct {
 const StatusPendingConsent = "pending_consent"
 const StatusActive = "active"
 
-const (
-	eventUserCreated      = "user_created"
-	eventSessionCreated   = "session_created"
-	eventTokenIssued      = "token_issued"
-	eventUserInfoAccessed = "userinfo_accessed"
-	eventAuthFailed       = "auth_failed"
-)
-
 type AuditPublisher interface {
 	Emit(ctx context.Context, base audit.Event) error
 }
@@ -120,7 +112,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to find or create user")
 	}
 	if user.ID == newUser.ID {
-		s.logAudit(ctx, eventUserCreated,
+		s.logAudit(ctx, string(audit.EventUserCreated),
 			"user_id", user.ID.String(),
 			"client_id", req.ClientID,
 		)
@@ -154,7 +146,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	if err != nil {
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to save session")
 	}
-	s.logAudit(ctx, eventSessionCreated,
+	s.logAudit(ctx, string(audit.EventSessionCreated),
 		"user_id", user.ID.String(),
 		"session_id", newSession.ID.String(),
 		"client_id", req.ClientID,
@@ -235,7 +227,7 @@ func (s *Service) UserInfo(ctx context.Context, sessionID uuid.UUID) (*models.Us
 		FamilyName:    user.LastName,
 		Name:          user.FirstName + " " + user.LastName,
 	}
-	s.logAudit(ctx, eventUserInfoAccessed,
+	s.logAudit(ctx, string(audit.EventUserInfoAccessed),
 		"user_id", user.ID.String(),
 		"session_id", session.ID.String(),
 	)
@@ -335,7 +327,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	if err != nil {
 		return nil, dErrors.New(dErrors.CodeInternal, "failed to generate ID token")
 	}
-	s.logAudit(ctx, eventTokenIssued,
+	s.logAudit(ctx, string(audit.EventTokenIssued),
 		"user_id", session.UserID.String(),
 		"session_id", session.ID.String(),
 		"client_id", session.ClientID,
@@ -373,15 +365,15 @@ func (s *Service) logAuthFailure(ctx context.Context, reason string, isError boo
 	if requestID := middleware.GetRequestID(ctx); requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
-	args := append(attributes, "event", eventAuthFailed, "reason", reason, "log_type", "standard")
+	args := append(attributes, "event", audit.EventAuthFailed, "reason", reason, "log_type", "standard")
 	if s.logger == nil {
 		return
 	}
 	if isError {
-		s.logger.ErrorContext(ctx, eventAuthFailed, args...)
+		s.logger.ErrorContext(ctx, string(audit.EventAuthFailed), args...)
 		return
 	}
-	s.logger.WarnContext(ctx, eventAuthFailed, args...)
+	s.logger.WarnContext(ctx, string(audit.EventAuthFailed), args...)
 }
 
 // incrementUserCreated increments the users created metric if metrics are enabled

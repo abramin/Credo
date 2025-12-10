@@ -42,10 +42,10 @@ func (m *MockService) EXPECT() *MockServiceMockRecorder {
 }
 
 // Grant mocks base method.
-func (m *MockService) Grant(ctx context.Context, userID string, purposes []models.ConsentPurpose) ([]*models.ConsentRecord, error) {
+func (m *MockService) Grant(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Grant", ctx, userID, purposes)
-	ret0, _ := ret[0].([]*models.ConsentRecord)
+	ret0, _ := ret[0].([]*models.Record)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -57,44 +57,31 @@ func (mr *MockServiceMockRecorder) Grant(ctx, userID, purposes any) *gomock.Call
 }
 
 // List mocks base method.
-func (m *MockService) List(ctx context.Context, userID string) ([]*models.ConsentRecord, error) {
+func (m *MockService) List(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.ConsentWithStatus, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "List", ctx, userID)
-	ret0, _ := ret[0].([]*models.ConsentRecord)
+	ret := m.ctrl.Call(m, "List", ctx, userID, filter)
+	ret0, _ := ret[0].([]*models.ConsentWithStatus)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // List indicates an expected call of List.
-func (mr *MockServiceMockRecorder) List(ctx, userID any) *gomock.Call {
+func (mr *MockServiceMockRecorder) List(ctx, userID, filter any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockService)(nil).List), ctx, userID)
-}
-
-// Require mocks base method.
-func (m *MockService) Require(ctx context.Context, userID string, purpose models.ConsentPurpose) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Require", ctx, userID, purpose)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Require indicates an expected call of Require.
-func (mr *MockServiceMockRecorder) Require(ctx, userID, purpose any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Require", reflect.TypeOf((*MockService)(nil).Require), ctx, userID, purpose)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "List", reflect.TypeOf((*MockService)(nil).List), ctx, userID, filter)
 }
 
 // Revoke mocks base method.
-func (m *MockService) Revoke(ctx context.Context, userID string, purpose models.ConsentPurpose) error {
+func (m *MockService) Revoke(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Revoke", ctx, userID, purpose)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "Revoke", ctx, userID, purposes)
+	ret0, _ := ret[0].([]*models.Record)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Revoke indicates an expected call of Revoke.
-func (mr *MockServiceMockRecorder) Revoke(ctx, userID, purpose any) *gomock.Call {
+func (mr *MockServiceMockRecorder) Revoke(ctx, userID, purposes any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Revoke", reflect.TypeOf((*MockService)(nil).Revoke), ctx, userID, purpose)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Revoke", reflect.TypeOf((*MockService)(nil).Revoke), ctx, userID, purposes)
 }

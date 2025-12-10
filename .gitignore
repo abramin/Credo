@@ -40,4 +40,11 @@ frontend/node_modules/
 frontend/dist/
 frontend/.cache/
 
+# E2E Tests (godog)
+e2e/reports/
+
+# Karate Tests (deprecated - migrated to godog)
+karate-tests/target/
+karate-tests/.mvn/
+
 temp_docs/
