@@ -6,6 +6,7 @@ document.addEventListener('alpine:init', () => {
     Alpine.data('consentDemo', () => ({
         // State
         loading: false,
+        purposesLoading: false,
         consentsLoading: false,
         error: null,
         success: null,
@@ -61,7 +62,6 @@ document.addEventListener('alpine:init', () => {
 
         // Initialization
         init() {
-            console.log('Consent Demo initialized');
             // Check if we have a token from OAuth flow
             this.checkForToken();
             // Auto-dismiss notifications after 5 seconds
@@ -79,6 +79,19 @@ document.addEventListener('alpine:init', () => {
 
         // Check if OAuth token is available in URL or sessionStorage
         checkForToken() {
+            // Look for token in URL query parameter (e.g., ?token=xxx)
+            const urlParams = new URLSearchParams(window.location.search);
+            const tokenParam = urlParams.get('token');
+            if (tokenParam) {
+                this.accessToken = tokenParam;
+                this.isAuthenticated = true;
+                sessionStorage.setItem('access_token', tokenParam);
+                // Clean up URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+                this.success = '✅ Authenticated with provided token!';
+                return;
+            }
+
             // Look for token in URL hash (from OAuth redirect)
             const hash = window.location.hash;
             if (hash.includes('access_token=')) {
@@ -86,6 +99,7 @@ document.addEventListener('alpine:init', () => {
                 if (match) {
                     this.accessToken = match[1];
                     this.isAuthenticated = true;
+                    sessionStorage.setItem('access_token', match[1]);
                     // Clean up URL
                     window.history.replaceState({}, document.title, window.location.pathname);
                     this.success = '✅ Authenticated! You can now test consent endpoints.';
@@ -101,15 +115,24 @@ document.addEventListener('alpine:init', () => {
                 return;
             }
 
+            // Check for auto-auth via demo mode (generate a test token)
+            if (urlParams.get('demo') === 'true' || urlParams.get('auto') === 'true') {
+                // Generate a test token for demo purposes
+                // In a real scenario, this would come from the OAuth flow
+                this.accessToken = 'demo_token_' + Math.random().toString(36).substring(2, 15);
+                this.isAuthenticated = true;
+                sessionStorage.setItem('access_token', this.accessToken);
+                this.success = '✅ Auto-authenticated in demo mode! (Using test token)';
+                return;
+            }
+
             // Not authenticated
-            console.log('No token found - authentication required');
         },
 
         // Start OAuth flow to get token
         startOAuthFlow() {
-            // Redirect to OAuth demo which will authenticate and come back here
-            const returnUrl = window.location.href;
-            // Store the return URL so OAuth demo knows where to redirect back
+            // Store clean return URL (without hash or query params)
+            const returnUrl = window.location.origin + window.location.pathname;
             sessionStorage.setItem('consent-demo-return', returnUrl);
             // Redirect to OAuth demo to get token
             window.location.href = '/demo.html?return=consent-demo.html';
@@ -150,7 +173,21 @@ document.addEventListener('alpine:init', () => {
                     if (response.status === 401) {
                         throw new Error('Unauthorized - token may be expired. Please authenticate again.');
                     }
+                    if (response.status === 404) {
+                        throw new Error('Backend endpoint not found. Is the server running?');
+                    }
+                    // Try to get error message from response
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+                    }
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error(`Backend returned ${contentType || 'unknown content'} instead of JSON. Status: ${response.status}`);
                 }
 
                 const data = await response.json();
@@ -223,7 +260,10 @@ document.addEventListener('alpine:init', () => {
                 await this.loadUserConsents();
             } catch (err) {
                 console.error('Failed to grant consent:', err);
-                this.error = `Failed to grant consent: ${err.message}`;
+                // Surface backend validation errors directly to the UI
+                this.error = err.message || 'Failed to grant consent';
+                // Bring the error banner into view
+                window.scrollTo({ top: 0, behavior: 'smooth' });
             } finally {
                 this.loading = false;
             }
