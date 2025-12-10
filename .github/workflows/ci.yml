@@ -60,10 +60,9 @@ jobs:
         working-directory: e2e
         run: |
           mkdir -p reports
-          go test -v
+          go test -v -- -godog.format=cucumber:./reports/cucumber.json
         env:
           BASE_URL: http://localhost:8080
-          GODOG_FORMAT: cucumber:reports/cucumber.json
 
       - name: Stop backend server
         if: always()
