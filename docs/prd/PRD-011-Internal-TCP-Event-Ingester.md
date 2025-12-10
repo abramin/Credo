@@ -1,0 +1,175 @@
+# PRD-011: Internal TCP Event Ingester
+
+**Project:** Credo Identity Platform
+
+**Owner:** Core Services
+
+**Status:** Draft v1
+
+**Priority:** P1 (Platform Reliability)
+
+**Last Updated:** 2025-12-06
+
+---
+
+## 1. Problem Statement
+
+Credo services emit high volumes of structured identity telemetry (token issuance, session lifecycle, consent decisions, authentication attempts). Today these events are sent via synchronous HTTP calls to a logging endpoint, leading to unnecessary per-request overhead, tight coupling between producers and consumers, reliability issues when downstream systems lag, and higher latency on critical identity flows. A lightweight, persistent-connection ingestion path is needed to handle high-throughput internal telemetry without affecting customer-facing latency.
+
+---
+
+## 2. Goals
+
+### Primary Goals
+
+1. Provide a TCP-based ingestion endpoint for internal Credo components.
+2. Support high event throughput with stable latency under load.
+3. Implement backpressure so slow downstream sinks do not stall core identity flows.
+4. Batch and forward events to a pluggable storage sink (file, Postgres, or a Kafka-like mock).
+5. Expose basic observability metrics (ingest rate, queue depth, open connections, drops).
+
+### Secondary Goals
+
+- Provide an interview-ready demonstration of distributed-systems design principles.
+- Keep the system modular enough for future replacement with Kafka/S3/Snowflake pipelines.
+
+---
+
+## 3. Out of Scope
+
+- No external clients. The service is strictly internal.
+- No customer-visible APIs.
+- No need for guaranteed exactly-once semantics.
+- No enriched analytics or transformations. Just normalization and batching.
+
+---
+
+## 4. Users & Use Cases
+
+### Internal Producers (Credo Services)
+
+- Auth service
+- Token service
+- Session manager
+- Consent service
+
+**Usage:** Send newline-delimited JSON events over long-lived TCP connections.
+
+### Internal Consumers
+
+- Logging/observability pipelines
+- Security analytics / anomaly detection (future)
+- Audit log writers
+
+---
+
+## 5. Functional Requirements
+
+### 5.1 TCP Ingestion
+
+- The service MUST listen on a configurable TCP port.
+- Support many concurrent producers.
+- Accept framed events (newline-delimited JSON strings).
+- Each connection is handled by an independent, lightweight goroutine.
+
+### 5.2 Validation
+
+- Basic schema validation: must contain `event_type`, `ts`, and `actor`.
+- Invalid events must be counted and optionally dropped.
+
+### 5.3 Backpressure & Queueing
+
+- Ingestion pipeline MUST use a bounded internal channel.
+- If the internal queue is full:
+  - Option A: block producers (default).
+  - Option B: drop events with metrics (configurable).
+
+### 5.4 Batching
+
+- Events MUST be grouped into batches by either:
+  - max batch size
+  - max batch interval
+- Batches are forwarded to the sink.
+
+### 5.5 Sink Module
+
+Initial implementation options:
+
+- File sink (append-only, rotates daily).
+- Postgres sink (simple INSERT batching).
+- Mock Kafka sink using a buffered channel + disk segments.
+
+The service MUST allow easy swapping of sink implementations.
+
+### 5.6 Metrics
+
+Expose via HTTP `/metrics`:
+
+- open TCP connections
+- ingest rate (events/sec)
+- queue depth
+- dropped events
+- batch flush frequency
+- sink latency
+
+---
+
+## 6. Non-Functional Requirements
+
+### Performance
+
+- Sustain at least 10k events/sec on a single instance (target for demo).
+- Minimal impact on producer services under normal load.
+
+### Reliability
+
+- Service must continue accepting events as long as internal queue is not saturated.
+- Batch flushes must be atomic per batch.
+
+### Scalability
+
+- Horizontally scalable by running multiple instances.
+- Downstream sinks must be able to handle eventual load (not guaranteed by the ingester).
+
+### Security
+
+- Internal-only.
+- Only Credo services can connect (enforced by network policies or shared secret optional).
+- Events stored with integrity (no modification).
+
+---
+
+## 7. Architecture Overview
+
+Producers (Auth, Token, Session services) → multiline JSON over TCP → TCP Listener → per-connection goroutine → bounded ingestion queue → batcher → sink module (file/PG/Kafka mock) → metrics & health check.
+
+---
+
+## 8. Success Metrics
+
+- Zero impact on request latency in upstream identity flows after migration.
+- Stable performance under 10k events/sec.
+- Queue saturation < 5 percent under load tests.
+- Easy demonstrability in interviews.
+
+---
+
+## 9. Future Extensions
+
+1. Add protobuf framing instead of JSON.
+2. TLS for internal TCP traffic.
+3. Real Kafka or Redpanda integration.
+4. Per-event routing for different consumers.
+5. Replay scripts for debugging production issues.
+
+---
+
+## 10. Acceptance Criteria
+
+- TCP listener accepts concurrent connections and ingests newline-delimited JSON events.
+- Events missing `event_type`, `ts`, or `actor` are counted and optionally dropped without crashing producers.
+- Backpressure strategy is configurable between blocking producers and dropping events with metrics.
+- Batches flush on size or interval thresholds and dispatch through a pluggable sink interface.
+- File, Postgres, and mock Kafka sinks are implemented with simple configuration toggles.
+- `/metrics` endpoint exposes ingest rate, queue depth, open connections, dropped events, batch flush frequency, and sink latency.
+- Load test demonstrates 10k events/sec with <5% queue saturation and no producer-side latency regression.
