@@ -131,3 +131,40 @@ func (tc *TestContext) ResponseContains(text string) bool {
 
 	return false
 }
+
+// Getter methods for step package interfaces
+
+func (tc *TestContext) GetClientID() string {
+	return tc.ClientID
+}
+
+func (tc *TestContext) GetRedirectURI() string {
+	return tc.RedirectURI
+}
+
+func (tc *TestContext) GetAuthCode() string {
+	return tc.AuthCode
+}
+
+func (tc *TestContext) SetAuthCode(code string) {
+	tc.AuthCode = code
+}
+
+func (tc *TestContext) GetAccessToken() string {
+	return tc.AccessToken
+}
+
+func (tc *TestContext) SetAccessToken(token string) {
+	tc.AccessToken = token
+}
+
+func (tc *TestContext) GetLastResponseStatus() int {
+	if tc.LastResponse == nil {
+		return 0
+	}
+	return tc.LastResponse.StatusCode
+}
+
+func (tc *TestContext) GetLastResponseBody() []byte {
+	return tc.LastResponseBody
+}

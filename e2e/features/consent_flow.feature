@@ -7,7 +7,7 @@ Feature: Consent Management
     Given the ID Gateway is running
     And I am authenticated as "consent-test@example.com"
 
-    @consent @normal
+      @consent @normal
   Scenario: Grant consent for multiple purposes
     When I grant consent for purposes "login,registry_check,vc_issuance"
     Then the response status should be 200
@@ -17,7 +17,7 @@ Feature: Consent Management
     And each granted consent should have "granted_at"
     And each granted consent should have "expires_at"
 
-    @consent @normal
+      @consent @normal
   Scenario: List all consents
     Given I grant consent for purposes "login,registry_check"
     When I list my consents
@@ -25,7 +25,7 @@ Feature: Consent Management
     And the response should contain "consents"
     And the response should contain at least 2 consent records
 
-    @consent @normal
+      @consent @normal
   Scenario: Revoke specific consent
     Given I grant consent for purposes "login,registry_check,vc_issuance"
     When I revoke consent for purposes "registry_check"
@@ -35,7 +35,7 @@ Feature: Consent Management
     And the revoked consent should have "status" equal to "revoked"
     And the revoked consent should have "revoked_at"
 
-    @consent @normal
+      @consent @normal
   Scenario: List consents shows correct statuses after revocation
     Given I grant consent for purposes "login,registry_check"
     And I revoke consent for purposes "registry_check"
@@ -44,7 +44,7 @@ Feature: Consent Management
     And the consent for purpose "login" should have status "active"
     And the consent for purpose "registry_check" should have status "revoked"
 
-    @consent @normal
+      @consent @normal
   Scenario: Re-grant previously revoked consent
     Given I grant consent for purposes "login"
     And I revoke consent for purposes "login"
@@ -53,50 +53,50 @@ Feature: Consent Management
     And the consent for purpose "login" should have status "active"
     And the consent should have a new "granted_at" timestamp
 
-    @consent @validation
+      @consent @validation
   Scenario: Grant consent without authentication
     When I grant consent for purposes "login" without authentication
     Then the response status should be 401
     And the response field "error" should equal "unauthorized"
 
-    @consent @validation
+      @consent @validation
   Scenario: Grant consent with empty purposes array
     When I POST to "/auth/consent" with empty purposes array
     Then the response status should be 400
     And the response field "error" should equal "bad_request"
 
-    @consent @validation
+      @consent @validation
   Scenario: Grant consent with invalid purpose
     When I grant consent for purposes "invalid_purpose"
     Then the response status should be 400
     And the response field "error" should equal "bad_request"
 
-    @consent @validation
+      @consent @validation
   Scenario: Revoke consent without authentication
     When I revoke consent for purposes "login" without authentication
     Then the response status should be 401
     And the response field "error" should equal "unauthorized"
 
-    @consent @validation
+      @consent @validation
   Scenario: Revoke consent with invalid purpose
     When I revoke consent for purposes "invalid_purpose"
     Then the response status should be 400
     And the response field "error" should equal "bad_request"
 
-    @consent @validation
+      @consent @validation
   Scenario: List consents without authentication
     When I GET "/auth/consent" without authorization
     Then the response status should be 401
     And the response field "error" should equal "unauthorized"
 
-    @consent @idempotency
+      @consent @idempotency
   Scenario: Revoke already revoked consent is idempotent
     Given I grant consent for purposes "login"
     And I revoke consent for purposes "login"
     When I revoke consent for purposes "login"
     Then the response status should be 200
 
-    @consent @idempotency
+      @consent @idempotency
   Scenario: Grant consent renews existing active consent
     Given I grant consent for purposes "login"
     And I wait 2 seconds
