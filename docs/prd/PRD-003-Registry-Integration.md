@@ -239,6 +239,12 @@ if err != nil {
 3. If either fails, return error
 4. Return both records
 
+### Identity Evidence Orchestration
+
+- The registry service acts as an identity-evidence aggregator that sequences registry lookups alongside other verification methods (e.g., document checks) to produce a combined evidence package.
+- The orchestration layer selects lookup paths per configuration/consent and is extendable to additional registry families (civil registry, driver license APIs, digital ID wallets, biometric matches) without changing callers.
+- Multi-source correlation rules (e.g., reconcile conflicting name/address, merge confidence scores) are planned so combined evidence can be weighted per provider and regulatory regime.
+
 ---
 
 ## 4. Technical Requirements
@@ -392,6 +398,13 @@ func MinimizeCitizenRecord(record *CitizenRecord, regulatedMode bool) *CitizenRe
 - Before returning in HTTP response
 - Before storing in cache (store full, minimize on read)
 
+### TR-6: Partner Registry Integration Model
+
+- Provide a registry provider abstraction layer so new national, regional, or third-party registries can be added without changing service callers.
+- Support pluggable protocols (REST, SOAP, gRPC) with capability negotiation to advertise which fields and filters each provider exposes.
+- Normalize errors (timeouts, bad data, authentication failures, provider outages) into a consistent failure taxonomy to simplify retries and alerts.
+- Maintain contract tests per provider version to detect breaking API changes before rollout.
+
 ---
 
 ## 5. API Specifications
@@ -456,6 +469,13 @@ In regulated mode:
 - All registry calls require consent
 - Rate limiting per user (future: 10 requests/minute)
 
+### Threat Model Snapshot
+
+- Replay attacks on registry endpoints (mitigate with nonce/timestamp validation and TLS-only transport).
+- Enumeration of national IDs via brute-force requests (mitigate with rate limiting, anomaly detection, and consent gating).
+- Cache poisoning altering registry responses (mitigate with integrity checks and scoped cache keys).
+- Leakage of provider credentials or API keys (mitigate with secret rotation, scoped permissions, and access logging).
+
 ---
 
 ## 7. Performance Requirements
@@ -476,6 +496,12 @@ In regulated mode:
 - Client timeout: 5 seconds
 - If registry unreachable, fail fast
 - Return 504 Gateway Timeout to client
+
+### PR-4: Real-time Availability and Latency SLOs
+
+- Target registry availability SLO: 99.9% monthly for combined registry orchestration.
+- External registry calls should meet p95 latency of 300ms and p99 latency of 500ms; combined citizen+sanctions flows should meet p95 400ms and p99 700ms including cache misses.
+- Define fallback strategies (use cached responses, switch to alternate providers, or short-circuit with manual review) when provider health degrades or latency budgets are exceeded.
 
 ---
 
@@ -501,6 +527,13 @@ In regulated mode:
 - Registry timeouts (counter, labeled by type)
 - Registry errors (counter, labeled by type)
 
+### Dashboards and Failure Taxonomy
+
+- Per-provider dashboards showing request volume, latency percentiles, error codes, and cache effectiveness; include drilldowns for capability gaps per provider.
+- Standardized failure taxonomy: timeout, bad/invalid data, authentication failure, dependency outage, contract/version mismatch.
+- Correlate registry evidence with user verification flows (link trace IDs to user/session IDs in decision engine dashboards).
+- Regulator-facing audit trail dashboards summarizing consent status, evidence provenance, and data minimization state.
+
 ### Tracing
 
 - All registry flows **MUST** emit distributed traces using an internal tracer interface (do not depend directly on OpenTelemetry APIs). The interface **MUST** support `Start(ctx, name, attrs...) (context.Context, Span)` and `Span.End(err error)` so spans can record failures without panics.
@@ -508,6 +541,7 @@ In regulated mode:
 - Mock clients **MUST** start spans for outbound calls (`registry.citizen.call`, `registry.sanctions.call`) and include attributes for simulated latency and deterministic test data branches (e.g., `listed`, `age_bucket`).
 - Emit a span event named `audit.emitted` after audit publishing to show ordering of compliance logging versus registry calls.
 - Provide a **no-op tracer** for tests and **inject** the tracer into `Service` and mock clients so tracing is optional but configurable. Production wiring should use OpenTelemetry to satisfy the interface.
+- Apply sampling rules that retain failure/error spans at 100% and downsample successful calls while keeping exemplars for p99 latency; ensure spans satisfy eIDAS/ISO/ITF audit traceability expectations where applicable.
 
 ---
 
@@ -650,7 +684,16 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 ---
 
-## 11. Acceptance Criteria
+## 11. Coverage Model
+
+- Maintain a mapping from region or ID format to registry provider (e.g., national IDs → civil registry mock, passports → unsupported, driver license → future provider).
+- Support configurable fallback chains (preferred provider → secondary provider → manual review) when primary registries are unavailable or lack fields.
+- Allow configuration for unsupported IDs to short-circuit with user-friendly errors and compliance logging instead of opaque failures.
+- Track coverage percentage of the active user base by registry method to guide expansion and onboarding of new providers.
+
+---
+
+## 12. Acceptance Criteria
 
 - [ ] Citizen lookup returns full data in non-regulated mode
 - [ ] Citizen lookup returns minimized data in regulated mode
@@ -666,7 +709,7 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 ---
 
-## 12. Dependencies & Blockers
+## 13. Dependencies & Blockers
 
 ### Dependencies
 
@@ -682,7 +725,7 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 ---
 
-## 13. Future Enhancements (Out of Scope)
+## 14. Future Enhancements (Out of Scope)
 
 - Real external registry integration (SOAP/REST APIs)
 - Batch registry lookups (check multiple IDs)
@@ -694,10 +737,21 @@ curl -X POST http://localhost:8080/registry/citizen \
 - Rate limiting per user/IP
 - Retry logic with exponential backoff
 - Circuit breaker for registry failures
+- Biometric pipeline compatibility: optional hooks for face match scores and liveness evidence treated as standardized confidence inputs alongside registry checks.
+- Bringing registry logic in-house: replace mocks with internally maintained registry connectors (caching, SLA monitoring, schema validation, resilience patterns) to reduce third-party dependency and limit downtime blast radius.
+
+### Registry Integration Readiness Checklist (Appendix)
+
+- Contract tests executed against provider sandbox and recorded for CI.
+- Privacy and consent review completed (data minimization, hashing/pseudonymization plans documented).
+- Latency budget analysis for provider endpoints and combined orchestration paths.
+- Permission model verified (API keys/credentials scoped by environment and role).
+- Consent flow validation and audit logging verified end-to-end.
+- Partner onboarding steps complete (API keys provisioned, sandbox/live toggles, error contract signed-off).
 
 ---
 
-## 14. Regulatory Considerations
+## 15. Regulatory Considerations
 
 ### GDPR Compliance (Article 5: Data Minimization)
 
@@ -713,9 +767,16 @@ curl -X POST http://localhost:8080/registry/citizen \
 - ✅ Audit all checks for compliance evidence
 - ✅ Cache to reduce costs while maintaining freshness
 
+### Regulatory Adaptability and Privacy Constraints
+
+- Support eIDAS 2.0/European digital identity wallet alignment by accepting verifiable credentials as registry evidence inputs where available.
+- Store proof of consent (purpose, timestamp, jurisdiction) and link to audit events; enforce jurisdiction-specific retention policies.
+- Hash or pseudonymize national identifiers in traces/logs; keep PII separated from result sets in regulated deployments.
+- Make data retention configurable by jurisdiction and purpose, with default minimization for regulated environments.
+
 ---
 
-## 15. References
+## 16. References
 
 - [GDPR Article 5: Principles relating to processing](https://gdpr-info.eu/art-5-gdpr/)
 - Tutorial: `docs/TUTORIAL.md` Section 3
@@ -726,6 +787,7 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 ## Revision History
 
-| Version | Date       | Author       | Changes     |
-| ------- | ---------- | ------------ | ----------- |
-| 1.0     | 2025-12-03 | Product Team | Initial PRD |
+| Version | Date       | Author           | Changes     |
+| ------- | ---------- | ---------------- | ----------- |
+| 1.0     | 2025-12-03 | Product Team     | Initial PRD |
+| 1.1     | 2025-12-10 | Engineering Team | Add tracing |
