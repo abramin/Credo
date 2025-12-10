@@ -98,6 +98,9 @@ async function runMissingAudienceScenario() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(authorizeBody),
   });
+  if (!authorizeResp.ok) {
+    throw new Error(`Authorization request failed with status ${authorizeResp.status}`);
+  }
   const authorizeJSON = await authorizeResp.json();
   steps.push({
     title: "Authorization request",
@@ -118,6 +121,9 @@ async function runMissingAudienceScenario() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(tokenBody),
   });
+  if (!tokenResp.ok) {
+    throw new Error(`Token request failed with status ${tokenResp.status}`);
+  }
   const tokenJSON = await tokenResp.json();
   steps.push({
     title: "Token exchange",
@@ -130,6 +136,9 @@ async function runMissingAudienceScenario() {
   const rsResp = await fetch(`${resourceBase}/api/data`, {
     headers: { Authorization: `Bearer ${tokenJSON.access_token || ""}` },
   });
+  if (!rsResp.ok) {
+    throw new Error(`Resource server request failed with status ${rsResp.status}`);
+  }
   const rsJSON = await rsResp.json();
   steps.push({
     title: "Replay token against naive resource server",
