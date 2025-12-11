@@ -146,19 +146,6 @@ time curl -X POST http://localhost:8081/api/v1/citizen/lookup \
   -d '{"national_id":"TEST123"}' | jq
 ```
 
-## Run Integration Tests
-
-```bash
-# Run all registry tests
-go test ./internal/evidence/registry/... -v
-
-# Run integration tests only
-go test ./internal/evidence/registry -run TestRegistryIntegrationSuite -v
-
-# Run with race detection
-go test ./internal/evidence/registry/... -race -v
-```
-
 ## Environment Variables
 
 ### Backend Configuration
