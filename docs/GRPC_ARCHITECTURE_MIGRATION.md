@@ -1,4 +1,4 @@
-# gRPC + Hexagonal Architecture Migration Guide
+# Hexagonal Architecture Migration Guide
 
 **Date:** 2025-12-11
 **Version:** 2.0
@@ -8,17 +8,16 @@
 
 ## Executive Summary
 
-Credo has been upgraded to use **hexagonal architecture** (ports-and-adapters) with **gRPC for interservice communication**. This document outlines all changes made across code, documentation, and build systems.
+Credo has been upgraded to use **hexagonal architecture** (ports-and-adapters) with clear module boundaries. The system currently runs as a monolith with in-process adapters, but the architecture is ready for future migration to gRPC microservices with minimal code changes.
 
 ### Key Changes
 
-1. ✅ **Protobuf API Contracts** - Defined in `api/proto/`
-2. ✅ **Port Interfaces** - Domain layer depends only on interfaces
-3. ✅ **gRPC Adapters** - Client and server adapters for interservice calls
+1. ✅ **Port Interfaces** - Domain layer depends only on interfaces
+2. ✅ **In-Process Adapters** - Implement ports for current monolith
+3. ✅ **Protobuf API Contracts** - Defined in `api/proto/` (for future gRPC)
 4. ✅ **Architecture Documentation** - Updated with hexagonal diagrams
-5. ✅ **Build System** - Makefile targets for proto generation
+5. ✅ **Build System** - Makefile targets for proto generation (future)
 6. ⏳ **PRD Updates** - Add interservice communication sections (pending)
-7. ⏳ **CI/CD** - Proto validation in GitHub Actions (pending)
 
 ---
 
@@ -40,30 +39,36 @@ Registry Service
 - Cannot extract services to microservices
 - Circular dependency risks
 
-### After: Hexagonal Architecture with gRPC
+### After: Hexagonal Architecture with In-Process Adapters (Current - Phase 0)
 
 ```
 Registry Service (Domain)
     │
     ├─> Depends on: ports.ConsentPort (interface)
     │
-    └─> Injected: grpc.ConsentClient (adapter)
+    └─> Injected: adapters.ConsentAdapter (in-process)
             │
-            └─> gRPC call to Consent Service
+            └─> Direct call to Consent Service (same process)
 ```
 
 **Benefits:**
 
 - Loose coupling via interfaces
 - Easy to mock for testing
-- Ready for microservices migration
-- Type-safe contracts (protobuf)
+- Ready for microservices migration (swap adapters)
+- No gRPC overhead while in monolith
+- Clear module boundaries enforced by ports
 
 ---
 
-## Protobuf API Contracts
+## Protobuf API Contracts (For Future gRPC)
 
-- Can be found in api/proto
+Protobuf definitions exist in `api/proto/` for future microservices migration. These define the contracts between services when they are eventually split. For now, they are not actively used.
+
+**Future Use:**
+- When splitting into microservices, gRPC adapters will use these contracts
+- Proto generation via `make proto-gen` (when needed)
+- Type-safe, versioned API contracts
 
 ---
 
@@ -71,80 +76,166 @@ Registry Service (Domain)
 
 ### ConsentPort (`internal/registry/ports/consent.go`)
 
+Defines the interface for consent operations needed by the registry service.
+
 **Key Points:**
 
-- No gRPC/protobuf imports
-- No HTTP/JSON imports
+- No infrastructure imports (gRPC, HTTP, database)
 - Pure domain interface
 - Easy to mock for testing
+- Implementation-agnostic
+
+```go
+type ConsentPort interface {
+    HasConsent(ctx context.Context, userID string, purpose string) (bool, error)
+    RequireConsent(ctx context.Context, userID string, purpose string) error
+}
+```
 
 ### RegistryPort (`internal/decision/ports/registry.go`)
 
+Defines the interface for registry operations needed by the decision engine.
+
+**Key Points:**
+
+- No infrastructure imports
+- Uses port-specific domain models (not database or protobuf models)
+- Supports both individual and combined checks
+
+```go
+type RegistryPort interface {
+    CheckCitizen(ctx context.Context, nationalID string) (*CitizenRecord, error)
+    CheckSanctions(ctx context.Context, nationalID string) (*SanctionsRecord, error)
+    Check(ctx context.Context, nationalID string) (*CitizenRecord, *SanctionsRecord, error)
+}
+```
+
 ---
 
-## gRPC Adapters
+## In-Process Adapters (Current)
 
-### Server Adapter (Inbound)
+### ConsentAdapter (`internal/registry/adapters/consent_adapter.go`)
 
-**Responsibilities:**
-
-- Validate protobuf requests
-- Translate proto ↔ domain models
-- Handle gRPC-specific errors
-- Call domain service (no business logic)
-
-### Client Adapter (Outbound)
-
-**Location:** `internal/registry/adapters/grpc/consent_client.go`
+In-process adapter that implements `ports.ConsentPort` by directly calling the consent service.
 
 **Responsibilities:**
 
 - Implement port interface
-- Add timeouts and metadata
-- Translate domain ↔ proto models
-- Map gRPC errors to domain errors
-- Handle connection failures
+- Call consent service directly (same process)
+- Translate between port models and service models if needed
+- No network overhead
+
+**Future Migration:**
+When splitting into microservices, replace with `grpc.ConsentClient` - zero changes to registry domain layer.
+
+### RegistryAdapter (`internal/decision/adapters/registry_adapter.go`)
+
+In-process adapter that implements `ports.RegistryPort` by directly calling the registry service.
+
+**Responsibilities:**
+
+- Implement port interface
+- Call registry service directly (same process)
+- Translate between port models and service models
+- No network overhead
+
+**Future Migration:**
+When splitting into microservices, replace with `grpc.RegistryClient` - zero changes to decision domain layer.
 
 ---
 
 ## Dependency Injection (Wiring)
 
-### Main.go Pattern
+### Main.go Pattern (Current - In-Process)
+
+```go
+package main
+
+import (
+	"credo/internal/consent/service"
+	"credo/internal/decision/adapters"
+	"credo/internal/registry/adapters"
+	// ...
+)
+
+func main() {
+	// 1. Create stores
+	consentStore := consent.NewInMemoryStore()
+	registryStore := registry.NewCacheStore()
+
+	// 2. Create domain services
+	consentService := service.NewService(consentStore, auditor, ttl)
+	registryService := registry.NewService(citizens, sanctions, registryStore, regulated)
+
+	// 3. Create in-process adapters (implement ports)
+	consentAdapter := adapters.NewConsentAdapter(consentService)
+	registryAdapter := adapters.NewRegistryAdapter(registryService)
+
+	// 4. Inject adapters into services that need them
+	// Registry depends on consent
+	registryServiceWithConsent := registry.NewService(
+		store,
+		consentAdapter, // <-- Implements ports.ConsentPort
+	)
+
+	// Decision depends on registry
+	decisionService := decision.NewService(
+		registryAdapter, // <-- Implements ports.RegistryPort
+		policyEngine,
+	)
+
+	// 5. HTTP handlers use same services
+	httpHandler := transport.NewHandler(
+		consentService,
+		registryServiceWithConsent,
+		decisionService,
+		// ...
+	)
+
+	// 6. Start HTTP server (no gRPC servers needed yet)
+	http.ListenAndServe(":8080", httpHandler)
+}
+```
+
+### Future Main.go Pattern (After Microservices Split)
+
+When splitting into microservices, only the wiring changes - domain code stays the same:
 
 ```go
 package main
 
 func main() {
-	// 1. Create stores
-	consentStore := consent.NewInMemoryStore()
+	// 1. Create domain service (consent service example)
+	consentService := service.NewService(store, auditor, ttl)
 
-	// 2. Create domain services
-	consentService := consent.NewService(consentStore, auditor, ttl)
-
-	// 3. Create gRPC server adapter
+	// 2. Create gRPC server adapter
 	consentGRPCServer := grpc.NewConsentServer(consentService)
 
-	// 4. Start gRPC server
+	// 3. Start gRPC server
 	lis, _ := net.Listen("tcp", ":9091")
 	grpcServer := grpc.NewServer()
 	consentpb.RegisterConsentServiceServer(grpcServer, consentGRPCServer)
-	go grpcServer.Serve(lis)
+	grpcServer.Serve(lis)
+}
+```
 
-	// 5. Create gRPC client adapter for other services
-	consentClient, _ := grpc.NewConsentClient("localhost:9091", 5*time.Second)
+Gateway service:
 
-	// 6. Inject client into registry service
+```go
+func main() {
+	// 1. Create gRPC client adapters
+	consentClient, _ := grpc.NewConsentClient("consent-service:9091")
+	registryClient, _ := grpc.NewRegistryClient("registry-service:9092")
+
+	// 2. Inject gRPC adapters (same ports.ConsentPort interface)
 	registryService := registry.NewService(
 		store,
-		consentClient, // <-- Implements ports.ConsentPort
+		consentClient, // <-- Still implements ports.ConsentPort, now via gRPC
 	)
 
-	// 7. HTTP handlers use same services
-	httpHandler := transport.NewHandler(
-		consentService,
-		registryService,
-		// ...
-	)
+	// 3. HTTP handlers
+	httpHandler := transport.NewHandler(registryService, ...)
+	http.ListenAndServe(":8080", httpHandler)
 }
 ```
 
@@ -209,7 +300,7 @@ which protoc-gen-go protoc-gen-go-grpc  # Should find both
 
 ## Migration Path to Microservices
 
-### Phase 1: Monolith with in-process gRPC (Current)
+### Phase 0: Monolith with Hexagonal Architecture (Current)
 
 ```
 ┌────────────────────────────────────┐
@@ -221,11 +312,19 @@ which protoc-gen-go protoc-gen-go-grpc  # Should find both
 │  └────┬─────┘   └──────┬───────┘  │
 │       │                │           │
 │       └────────────────┘           │
-│        In-memory calls             │
+│    In-process adapters             │
+│    (implement ports)               │
 └────────────────────────────────────┘
 ```
 
-### Phase 2: Extract Consent Service
+**Current State:**
+- All services in single process
+- Port interfaces define module boundaries
+- In-process adapters implement ports
+- No gRPC overhead
+- Ready to split when needed
+
+### Phase 1: Extract Consent Service (Future)
 
 ```
 ┌─────────────────────┐      ┌──────────────────────┐
@@ -241,13 +340,16 @@ which protoc-gen-go protoc-gen-go-grpc  # Should find both
 
 **Steps:**
 
-1. Start consent service as separate process
-2. Update `NewConsentClient("consent-service:9091")`
-3. **No code changes to domain logic**
-4. Deploy both services
-5. Verify gRPC health checks
+1. Generate protobuf code: `make proto-gen`
+2. Implement gRPC server adapter for consent service
+3. Implement gRPC client adapter for registry service
+4. Start consent service as separate process
+5. Update main.go to use `grpc.NewConsentClient("consent-service:9091")`
+6. **Zero changes to domain logic** - just swap adapters in main.go
+7. Deploy both services
+8. Verify gRPC health checks
 
-### Phase 3: Full Microservices
+### Phase 2: Full Microservices (Future)
 
 ```
 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
@@ -497,32 +599,39 @@ func (c *ConsentClient) addMetadata(ctx context.Context) context.Context {
 
 ## Next Steps
 
-### Immediate (V1)
+### Current Phase (Phase 0 - Monolith)
 
-- [x] Create protobuf definitions
 - [x] Add port interfaces
-- [x] Implement gRPC adapters
+- [x] Implement in-process adapters
 - [x] Update architecture documentation
+- [x] Create protobuf definitions (for future)
 - [x] Add Makefile targets
 - [ ] Update PRD-001, PRD-002, PRD-003 with interservice communication sections
-- [ ] Add CI/CD proto validation
 - [ ] Generate gomock mocks for ports
+- [ ] Add integration tests using port interfaces
 
-### Short-term (V2)
+### Phase 1 (First Microservice Split)
 
+When ready to split consent service:
+
+- [ ] Generate protobuf code: `make proto-gen`
+- [ ] Implement gRPC server adapter for consent
+- [ ] Implement gRPC client adapter for registry
+- [ ] Add gRPC health checks
 - [ ] Add retry logic with exponential backoff
 - [ ] Implement circuit breakers
 - [ ] Add gRPC interceptors for logging/metrics
-- [ ] Use mTLS for production
-- [ ] Add service discovery (Consul, etcd)
-- [ ] Implement health checks per service
+- [ ] Deploy consent service separately
+- [ ] Update main.go wiring (zero domain changes)
 
-### Long-term (Microservices)
+### Phase 2 (Full Microservices)
 
-- [ ] Extract consent service
 - [ ] Extract registry service
 - [ ] Extract auth service
+- [ ] Extract decision service
 - [ ] Add API gateway (gRPC-Web, Envoy)
+- [ ] Use mTLS for production
+- [ ] Add service discovery (Consul, etcd)
 - [ ] Implement service mesh (Istio)
 - [ ] Add distributed tracing (Jaeger, Zipkin)
 
@@ -540,6 +649,7 @@ func (c *ConsentClient) addMetadata(ctx context.Context) context.Context {
 
 ## Revision History
 
-| Version | Date       | Author           | Changes                                               |
-| ------- | ---------- | ---------------- | ----------------------------------------------------- |
-| 1.0     | 2025-12-11 | Engineering Team | Initial gRPC + hexagonal architecture migration guide |
+| Version | Date       | Author           | Changes                                                      |
+| ------- | ---------- | ---------------- | ------------------------------------------------------------ |
+| 1.0     | 2025-12-11 | Engineering Team | Initial gRPC + hexagonal architecture migration guide        |
+| 2.0     | 2025-12-11 | Engineering Team | Updated to reflect Phase 0 (monolith with in-process adapters) |

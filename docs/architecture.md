@@ -216,13 +216,18 @@ api/proto/
 
 The hexagonal architecture enables zero-downtime migration:
 
-1. **Phase 1 (Current)**: Monolith with in-process gRPC
-2. **Phase 2**: Extract consent service to separate process
+1. **Phase 0 (Current)**: Monolith with in-process adapters
+   - All services in single process
+   - Port interfaces define module boundaries
+   - In-process adapters implement ports
+   - No gRPC overhead
+2. **Phase 1**: Extract consent service to separate process
+   - Implement gRPC server/client adapters
    - Start consent gRPC server on port 9091
    - Update registry to connect to `consent-service:9091`
-   - No code changes to registry service logic
-3. **Phase 3**: Extract more services (registry, auth, decision)
-4. **Phase 4**: Add service mesh (Istio/Linkerd) for mTLS, tracing
+   - **Zero code changes to domain logic** - just swap adapters
+3. **Phase 2**: Extract more services (registry, auth, decision)
+4. **Phase 3**: Add service mesh (Istio/Linkerd) for mTLS, tracing
 
 ---
 
@@ -273,22 +278,24 @@ internal/
     jwt.go                      # JWT generation and validation with HS256
     jwt_adapter.go              # Adapter for middleware interface
   auth/
-    service.go                  # Users, sessions, tokens (domain logic)
-    store.go                    # UserStore, SessionStore (ports)
-    models.go                   # Domain models
-    adapters/
-      grpc/
-        server.go               # gRPC server adapter (inbound)
+    service/
+      service.go                # Users, sessions, tokens (domain logic)
+    store/
+      store.go                  # UserStore, SessionStore (ports)
+    models/
+      models.go                 # Domain models
   consent/
-    service.go                  # Grant, revoke, RequireConsent (domain logic)
-    store.go                    # ConsentStore (port)
-    models.go                   # Domain models
-    adapters/
-      grpc/
-        server.go               # gRPC server adapter (inbound)
+    service/
+      service.go                # Grant, revoke, RequireConsent (domain logic)
+    store/
+      store.go                  # ConsentStore (port)
+    models/
+      models.go                 # Domain models
   registry/
     ports/
       consent.go                # ConsentPort interface (dependency on consent)
+    adapters/
+      consent_adapter.go        # In-process adapter implementing ConsentPort
     service/
       service.go                # Registry orchestration, caching, minimisation
     clients/
@@ -297,9 +304,14 @@ internal/
     handler/handler.go          # optional HTTP adapter (demo)
     models/models.go            # internal registry models
     store/store_memory.go       # in-memory cache store (TTL via config)
+  decision/
+    ports/
+      registry.go               # RegistryPort interface (dependency on registry)
+      consent.go                # ConsentPort interface (dependency on consent)
     adapters/
-      grpc/
-        consent_client.go       # gRPC client adapter for consent (outbound)
+      registry_adapter.go       # In-process adapter implementing RegistryPort
+    service/
+      service.go                # Decision engine logic
     integration_test.go
   evidence/
     vc/
@@ -307,17 +319,6 @@ internal/
       store.go                  # VCStore
       store_memory.go
       models.go
-  decision/
-    ports/
-      consent.go                # ConsentPort interface
-      registry.go               # RegistryPort interface
-    service.go                  # Evaluate decisions (domain logic)
-    store.go                    # DecisionStore
-    models.go
-    adapters/
-      grpc/
-        consent_client.go       # gRPC client adapter for consent
-        registry_client.go      # gRPC client adapter for registry
   audit/
     publisher.go                # queue or channel publisher
     worker.go                   # background consumer

@@ -4,6 +4,8 @@ package registry
 // registry evidence. Keep these PII-light and versioned independently from any
 // internal registry schemas or persistence models.
 
+// :warning: Wont be needed once protobuf/gRPC is in place for inter-service communication.!
+
 // ContractVersion identifies the contract schema version for compatibility checks.
 // Bump on breaking changes to the shapes below; consumers can pin or roll forward.
 const ContractVersion = "v0.1.0"
