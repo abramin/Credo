@@ -435,7 +435,7 @@ _ = h.auditPublisher.Emit(ctx, audit.Event{
 ### Showcase Complete When:
 
 - [ ] 2-3 advanced features implemented
-- [ ] Each feature has distinctive resume line
+- [ ] Each feature has a clear value statement
 - [ ] Documentation explains cryptographic/technical details
 - [ ] Live demo available
 - [ ] Performance benchmarks documented

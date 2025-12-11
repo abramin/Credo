@@ -30,7 +30,7 @@ Credo services emit high volumes of structured identity telemetry (token issuanc
 
 ### Secondary Goals
 
-- Provide an interview-ready demonstration of distributed-systems design principles.
+- Provide a clear demonstration of distributed-systems design principles.
 - Keep the system modular enough for future replacement with Kafka/S3/Snowflake pipelines.
 
 ---
@@ -150,7 +150,7 @@ Producers (Auth, Token, Session services) → multiline JSON over TCP → TCP Li
 - Zero impact on request latency in upstream identity flows after migration.
 - Stable performance under 10k events/sec.
 - Queue saturation < 5 percent under load tests.
-- Easy demonstrability in interviews.
+- Easy demonstrability in architecture reviews.
 
 ---
 

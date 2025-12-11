@@ -115,7 +115,7 @@ This phase demonstrates the ability to think in terms of reliability rather than
 
 ## Phase 8: Final Architectural Narrative
 
-The project concludes with a formal system design document tailored for interviews and portfolio review.
+The project concludes with a formal system design document for architecture reviews and stakeholder communication.
 
 ### Document Sections
 
