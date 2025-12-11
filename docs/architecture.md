@@ -134,12 +134,14 @@ Credo follows **hexagonal architecture** (also known as ports-and-adapters) to k
 ### Communication Boundaries
 
 **External API (HTTP/JSON):**
+
 - Client applications → Gateway
 - Protocol: HTTP/1.1, JSON
 - Auth: Bearer tokens (JWT)
 - Location: `internal/transport/http/`
 
 **Internal API (gRPC/Protobuf):**
+
 - Service → Service (within monolith)
 - Protocol: gRPC over HTTP/2, Protobuf
 - Auth: Mutual TLS (future), metadata propagation
@@ -187,6 +189,7 @@ registryService := registry.NewService(
 ```
 
 **Benefits:**
+
 - Registry service has no gRPC imports in core logic
 - Easy to mock ConsentPort for testing
 - Can swap gRPC for HTTP or in-process calls without changing service code
@@ -204,6 +207,7 @@ api/proto/
 ```
 
 Generated Go code:
+
 ```
 api/proto/
   common/commonpb/   # Generated Go package
@@ -477,9 +481,11 @@ Evidence is split into `registry` and `vc`.
 
 **Responsibilities**
 
-- Integrate with citizen and sanctions registry mocks.
-- Cache results with TTL.
-- Apply minimisation when regulated mode is active.
+- Integrate with citizen and sanctions registries through pluggable provider abstraction
+- Orchestrate multi-source evidence gathering with fallback chains and correlation rules
+- Cache results with TTL
+- Apply minimisation when regulated mode is active
+- Normalize errors across different registry providers
 
 **Key types**
 
@@ -505,11 +511,43 @@ type RegistryResult struct {
 
 **Service**
 
-- `Check(ctx, nationalID)` - Returns both citizen and sanctions records
-- `Citizen(ctx, nationalID)` - Returns citizen record from cache or registry
-- `Sanctions(ctx, nationalID)` - Returns sanctions record from cache or registry
+- `Check(ctx, nationalID)` - Returns both citizen and sanctions records via orchestrator
+- `Citizen(ctx, nationalID)` - Returns citizen record from cache or provider
+- `Sanctions(ctx, nationalID)` - Returns sanctions record from cache or provider
 
-This service is the only place that knows about external registry details. It handles caching with a 5-minute TTL and applies data minimization in regulated mode using `MinimizeCitizenRecord()`.
+This service uses the orchestrator to coordinate lookups across multiple providers with automatic fallback, retry logic, and evidence correlation.
+
+**Provider Abstraction Architecture**
+
+The registry module implements a comprehensive provider abstraction layer:
+
+- **Provider Interface**: Universal contract enabling pluggable integration with any registry source (HTTP, SOAP, gRPC) without modifying service layer code
+
+- **Protocol Adapters**: Separate protocol concerns from business logic. HTTP adapter handles REST APIs, with SOAP and gRPC adapters available for different provider types
+
+- **Error Taxonomy**: Eight normalized error categories (timeout, bad_data, authentication, provider_outage, contract_mismatch, not_found, rate_limited, internal) with automatic retry semantics based on error type
+
+- **Orchestrator**: Coordinates multi-source evidence gathering with four strategies:
+
+  - Primary: Uses single provider for fast responses
+  - Fallback: Tries primary then alternatives on failure
+  - Parallel: Queries all providers simultaneously
+  - Voting: Uses consensus or highest confidence from multiple sources
+
+- **Correlation Rules**: Pluggable logic for merging conflicting evidence from multiple sources, reconciling field discrepancies, and computing weighted confidence scores
+
+- **Capability Negotiation**: Providers declare supported fields, filters, and API versions. System validates compatibility and routes requests to appropriate providers
+
+- **Contract Testing**: Framework for validating provider outputs against expected schemas and detecting API version changes before deployment
+
+This architecture enables:
+
+- Adding new registry providers without changing callers
+- Automatic failover to backup providers
+- Correlation of conflicting data from multiple sources
+- Protocol-agnostic integration (HTTP/SOAP/gRPC)
+- Consistent error handling and retry policies
+- Provider health monitoring and circuit breaking
 
 **Cross-module contracts**
 
@@ -517,7 +555,7 @@ This service is the only place that knows about external registry details. It ha
 - The registry service maps internal models into these DTOs before handing data to decision or other modules; raw identifiers stay inside the registry boundary.
 - Decision imports only the contract package, avoiding reach into registry internals and keeping the future microservice split clean.
 - PII minimization is enforced by passing only derived/necessary fields across the boundary.
-
+- Provider abstraction maintains clear separation between external integrations and internal domain models.
 
 #### VC
 
@@ -1055,14 +1093,17 @@ The codebase currently has:
 - ✅ **Observability stack:** Context-aware structured logging, Prometheus metrics, request ID tracing, and HTTP middleware.
 - ✅ **HTTP middleware:** Recovery, logging, request ID, timeout, content-type validation, and latency tracking.
 - ✅ **Hexagonal architecture:** Port interfaces and gRPC adapters enable clean service boundaries and microservices migration.
+- ✅ **Provider abstraction:** Universal provider interface with protocol adapters, orchestration layer, error taxonomy, and contract testing framework for registry integrations.
 - ⚠️ **HTTP layer partial:** Auth handlers complete (authorize, token, userinfo). Consent, Evidence, Decision, and User Data Rights handlers return 501 (see PRDs in `docs/prd/`).
+- ⚠️ **Service layer migration:** Registry service needs migration to use orchestrator instead of direct client calls.
 
 ---
 
 ## Revision History
 
-| Version | Date       | Author           | Changes                                                    |
-| ------- | ---------- | ---------------- | ---------------------------------------------------------- |
-| 1.0     | 2025-12-03 | Engineering Team | Initial architecture documentation                          |
-| 1.1     | 2025-12-10 | Engineering Team | Updated registry structure with contracts and minimization |
-| 2.0     | 2025-12-11 | Engineering Team | Added hexagonal architecture, gRPC interservice communication, protobuf contracts, and port/adapter pattern documentation |
+| Version | Date       | Author           | Changes                                                                                                                                                                     |
+| ------- | ---------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Engineering Team | Initial architecture documentation                                                                                                                                          |
+| 1.1     | 2025-12-10 | Engineering Team | Updated registry structure with contracts and minimization                                                                                                                  |
+| 2.0     | 2025-12-11 | Engineering Team | Added hexagonal architecture, gRPC interservice communication, protobuf contracts, and port/adapter pattern documentation                                                   |
+| 2.1     | 2025-12-11 | Engineering Team | Documented provider abstraction architecture for registry module, added orchestration layer details, error taxonomy, capability negotiation, and contract testing framework |

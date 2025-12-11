@@ -1,9 +1,10 @@
 # PRD-003: Registry Integration (Citizen & Sanctions)
 
-**Status:** Implementation Required
+**Status:** In Progress
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
-**Last Updated:** 2025-12-03
+**Last Updated:** 2025-12-11
+**Version:** 1.2
 
 ---
 
@@ -243,7 +244,16 @@ if err != nil {
 
 - The registry service acts as an identity-evidence aggregator that sequences registry lookups alongside other verification methods (e.g., document checks) to produce a combined evidence package.
 - The orchestration layer selects lookup paths per configuration/consent and is extendable to additional registry families (civil registry, driver license APIs, digital ID wallets, biometric matches) without changing callers.
-- Multi-source correlation rules (e.g., reconcile conflicting name/address, merge confidence scores) are planned so combined evidence can be weighted per provider and regulatory regime.
+- Multi-source correlation rules (e.g., reconcile conflicting name/address, merge confidence scores) are implemented so combined evidence can be weighted per provider and regulatory regime.
+
+**Implementation Status:** The provider abstraction architecture has been implemented with the following components:
+
+- **Provider Interface**: Universal contract for all evidence sources with capability negotiation
+- **Protocol Adapters**: Pluggable support for HTTP, SOAP, and gRPC protocols via adapter pattern
+- **Error Taxonomy**: Normalized failure categories (timeout, bad_data, authentication, provider_outage, contract_mismatch, not_found, rate_limited, internal) with automatic retry semantics
+- **Orchestrator**: Multi-source coordination with four lookup strategies (primary, fallback, parallel, voting)
+- **Correlation Rules**: Pluggable rules for merging evidence from multiple sources (CitizenNameRule, WeightedAverageRule)
+- **Contract Testing**: Framework for validating provider API compatibility and detecting breaking changes
 
 ---
 
@@ -400,10 +410,44 @@ func MinimizeCitizenRecord(record *CitizenRecord, regulatedMode bool) *CitizenRe
 
 ### TR-6: Partner Registry Integration Model
 
-- Provide a registry provider abstraction layer so new national, regional, or third-party registries can be added without changing service callers.
-- Support pluggable protocols (REST, SOAP, gRPC) with capability negotiation to advertise which fields and filters each provider exposes.
-- Normalize errors (timeouts, bad data, authentication failures, provider outages) into a consistent failure taxonomy to simplify retries and alerts.
-- Maintain contract tests per provider version to detect breaking API changes before rollout.
+**Provider Abstraction Architecture** (Implemented in `internal/evidence/registry/providers/`)
+
+The registry module implements a provider abstraction layer that enables pluggable, multi-source evidence aggregation:
+
+**Core Components:**
+
+- **Provider Interface**: All registry sources implement a universal Provider interface with ID, Capabilities, Lookup, and Health methods. This enables protocol-agnostic integration regardless of whether the provider uses HTTP, SOAP, or gRPC.
+
+- **Capability Negotiation**: Each provider declares its capabilities including protocol type, evidence type, supported fields, API version, and available filters. This metadata enables dynamic routing and compatibility checking.
+
+- **Error Taxonomy**: All provider errors are normalized into eight categories with explicit retry semantics. Timeout, provider outage, and rate-limited errors are automatically retryable, while authentication, bad data, and contract mismatch errors are not.
+
+- **Protocol Adapters**: HTTP, SOAP, and gRPC adapters handle protocol-specific concerns (serialization, authentication, transport) while presenting a uniform Provider interface to callers. Custom response parsers convert provider-specific formats into normalized Evidence structures.
+
+- **Evidence Structure**: All providers return a generic Evidence container with provider metadata, confidence scores, structured data map, timestamps, and trace information. This allows heterogeneous evidence from different sources to be handled uniformly.
+
+**Orchestration Layer** (Implemented in `internal/evidence/registry/orchestrator/`)
+
+The orchestrator coordinates multi-source evidence gathering with:
+
+- **Provider Registry**: Central registry maintaining all registered providers with lookup by ID or type
+
+- **Lookup Strategies**: Four strategies support different use cases - Primary (fast, single source), Fallback (resilient, tries alternatives), Parallel (comprehensive, queries all), Voting (high confidence, uses consensus)
+
+- **Provider Chains**: Configurable fallback sequences per evidence type with timeout and retry policies
+
+- **Correlation Rules**: Pluggable rules merge conflicting evidence from multiple sources, reconcile field discrepancies, and compute weighted confidence scores
+
+**Contract Testing Framework** (Implemented in `internal/evidence/registry/providers/contract/`)
+
+Maintains provider compatibility through:
+
+- **Contract Suites**: Validate provider outputs against expected schema and behavior
+- **Capability Tests**: Verify declared capabilities match actual provider behavior
+- **Error Contract Tests**: Ensure errors follow the normalized taxonomy
+- **Snapshot Tests**: Detect unintended API changes through regression testing
+
+This architecture satisfies all TR-6 requirements while providing a foundation for future registry integrations.
 
 ---
 
@@ -787,7 +831,8 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 ## Revision History
 
-| Version | Date       | Author           | Changes     |
-| ------- | ---------- | ---------------- | ----------- |
-| 1.0     | 2025-12-03 | Product Team     | Initial PRD |
-| 1.1     | 2025-12-10 | Engineering Team | Add tracing |
+| Version | Date       | Author           | Changes                                                                                                                                          |
+| ------- | ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1.0     | 2025-12-03 | Product Team     | Initial PRD                                                                                                                                      |
+| 1.1     | 2025-12-10 | Engineering Team | Add tracing requirements                                                                                                                         |
+| 1.2     | 2025-12-11 | Engineering Team | Document provider abstraction architecture implementation, add orchestration details, expand TR-6 with capability negotiation and error taxonomy |
