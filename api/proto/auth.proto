@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package credo.auth.v1;
+
+option go_package = "github.com/credo/gateway/api/proto/auth;authpb";
+
+import "google/protobuf/timestamp.proto";
+import "api/proto/common.proto";
+
+// AuthService handles user authentication and session management
+// Used internally by other services to verify users and sessions
+service AuthService {
+  // Get user by ID
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+
+  // Verify JWT token and return user context
+  rpc VerifyToken(VerifyTokenRequest) returns (VerifyTokenResponse);
+
+  // Get session by ID
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+}
+
+// GetUserRequest retrieves user by ID
+message GetUserRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string user_id = 2;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+// VerifyTokenRequest validates JWT
+message VerifyTokenRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string token = 2;
+}
+
+message VerifyTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string session_id = 3;
+  string client_id = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// GetSessionRequest retrieves session
+message GetSessionRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string session_id = 2;
+}
+
+message GetSessionResponse {
+  Session session = 1;
+}
+
+// User (minimized for internal use)
+message User {
+  string id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  bool verified = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// Session (minimized for internal use)
+message Session {
+  string id = 1;
+  string user_id = 2;
+  string client_id = 3;
+  repeated string requested_scope = 4;
+  string status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+}

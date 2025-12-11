@@ -50,7 +50,7 @@ The current audit system (PRD-006) provides append-only logging, but cannot cryp
 
 **As a** developer
 **I want to** understand cryptographic guarantees of the audit system
-**So that** I can explain it in interviews and documentation
+**So that** I can document and communicate it clearly
 
 ---
 

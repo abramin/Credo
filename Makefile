@@ -2,11 +2,13 @@
 APP_NAME := credo
 PKG := ./...
 MAIN := ./cmd/server/main.go
+PROTO_DIR := api/proto
+PROTO_FILES := $(wildcard $(PROTO_DIR)/*.proto)
 
 # === DEFAULT ===
 default: dev
 
-.PHONY: default build run test test-cover test-one e2e e2e-normal e2e-security e2e-report e2e-clean lint fmt imports openapi-lint openapi-build clean docker-clean help
+.PHONY: default build run test test-cover test-one e2e e2e-normal e2e-security e2e-report e2e-clean lint fmt imports openapi-lint openapi-build clean docker-clean proto-gen proto-check proto-clean help
 
 # === BUILD ===
 build:
@@ -83,6 +85,34 @@ e2e-clean:
 	@echo "Cleaning E2E test artifacts..."
 	cd e2e && rm -rf reports
 
+# === PROTOBUF ===
+proto-gen:
+	@echo "Generating Go code from protobuf definitions..."
+	@if command -v protoc >/dev/null 2>&1; then \
+		protoc \
+			--go_out=. \
+			--go_opt=paths=source_relative \
+			--go-grpc_out=. \
+			--go-grpc_opt=paths=source_relative \
+			$(PROTO_FILES); \
+		echo "Protobuf generation complete."; \
+	else \
+		echo "protoc not installed. Install with:"; \
+		echo "  brew install protobuf  # macOS"; \
+		echo "  apt install protobuf-compiler  # Ubuntu"; \
+		exit 1; \
+	fi
+
+proto-check:
+	@echo "Checking if generated proto files are up to date..."
+	@git diff --exit-code api/proto/ || (echo "ERROR: Generated proto files are out of date. Run 'make proto-gen'" && exit 1)
+	@echo "Proto files are up to date."
+
+proto-clean:
+	@echo "Cleaning generated proto files..."
+	@find $(PROTO_DIR) -name "*.pb.go" -delete
+	@echo "Cleaned generated proto files."
+
 # === OPENAPI ===
 openapi-lint:
 	@if command -v npx >/dev/null 2>&1; then \
@@ -109,21 +139,24 @@ openapi-build:
 # === HELP ===
 help:
 	@echo "Available targets:"
-	@echo "  build        Build the binary"
-	@echo "  run          Run the server"
-	@echo "  test         Run all tests"
-	@echo "  test-cover   Run tests with coverage"
-	@echo "  test-one     Run a single test (use: make test-one t=TestName)"
-	@echo "  e2e          Run E2E tests with godog"
-	@echo "  e2e-normal   Run only normal flow E2E tests"
-	@echo "  e2e-security Run only security simulation tests"
-	@echo "  e2e-report   Run E2E tests and generate JSON report"
-	@echo "  e2e-clean    Clean E2E test artifacts"
-	@echo "  openapi-lint Lint OpenAPI specifications"
-	@echo "  openapi-build Build OpenAPI HTML documentation"
-	@echo "  lint         Run golangci-lint if available"
-	@echo "  fmt          Format code and run vet"
-	@echo "  imports      Fix import ordering (goimports)"
-	@echo "  clean        Remove build artifacts"
-	@echo "  docker-clean Stop containers and remove images/volumes for this app"
-	@echo "  help         Show this help"
+	@echo "  build          Build the binary"
+	@echo "  run            Run the server"
+	@echo "  test           Run all tests"
+	@echo "  test-cover     Run tests with coverage"
+	@echo "  test-one       Run a single test (use: make test-one t=TestName)"
+	@echo "  e2e            Run E2E tests with godog"
+	@echo "  e2e-normal     Run only normal flow E2E tests"
+	@echo "  e2e-security   Run only security simulation tests"
+	@echo "  e2e-report     Run E2E tests and generate JSON report"
+	@echo "  e2e-clean      Clean E2E test artifacts"
+	@echo "  proto-gen      Generate Go code from protobuf definitions"
+	@echo "  proto-check    Check if generated proto files are up to date"
+	@echo "  proto-clean    Remove generated proto files"
+	@echo "  openapi-lint   Lint OpenAPI specifications"
+	@echo "  openapi-build  Build OpenAPI HTML documentation"
+	@echo "  lint           Run golangci-lint if available"
+	@echo "  fmt            Format code and run vet"
+	@echo "  imports        Fix import ordering (goimports)"
+	@echo "  clean          Remove build artifacts"
+	@echo "  docker-clean   Stop containers and remove images/volumes for this app"
+	@echo "  help           Show this help"

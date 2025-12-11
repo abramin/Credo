@@ -395,7 +395,7 @@ See `SYSTEM_DESIGN_ROADMAP.md` for full details:
 
 # Track C: Advanced/Showcase Features (DIFFERENTIATOR)
 
-These features make the project stand out from "basic auth gateways". Pick 2-3 based on target job market.
+These features make the project stand out from "basic auth gateways". Pick 2-3 based on target audience and deployment needs.
 
 ## C1. Cryptographic Audit Trail (Merkle Tree)
 
@@ -417,11 +417,10 @@ These features make the project stand out from "basic auth gateways". Pick 2-3 b
 - Easiest advanced feature
 - Clear value proposition
 - Relevant to fintech, healthcare, compliance
-- Strong resume line
+- Clear differentiator
+### Value Highlight
 
-### Resume Impact
-
-"Built cryptographically verifiable audit system using Merkle trees for tamper-proof logging in identity verification gateway."
+Built cryptographically verifiable audit system using Merkle trees for tamper-proof logging in identity verification gateway.
 
 ### Implementation Highlights
 
@@ -463,13 +462,13 @@ func (m *MerkleAudit) GenerateProof(eventID string) MerkleProof {
 
 ### Why Second
 
-- Practical and relevant to EU jobs
+- Practical and relevant to EU regulatory environments
 - Shows understanding of real-world constraints
 - Builds on existing audit/data rights work
 
-### Resume Impact
+### Value Highlight
 
-"Implemented automated GDPR/CCPA compliance engine with real-time policy enforcement and data retention management."
+Implemented automated GDPR/CCPA compliance engine with real-time policy enforcement and data retention management.
 
 ### Features
 

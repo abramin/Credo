@@ -75,6 +75,166 @@ Everything runs in one binary, but each internal package has a clear responsibil
 
 ---
 
+## Interservice Communication Model
+
+### Hexagonal Architecture (Ports and Adapters)
+
+Credo follows **hexagonal architecture** (also known as ports-and-adapters) to keep the core business logic independent of communication protocols:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                     External Layer (HTTP)                     │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  HTTP Handlers (JSON/REST)                             │  │
+│  │  - Public API for client apps                          │  │
+│  │  - OAuth 2.0 endpoints                                 │  │
+│  │  - Consent management                                  │  │
+│  │  - VC issuance                                         │  │
+│  └────────────────────┬───────────────────────────────────┘  │
+└─────────────────────────┼──────────────────────────────────────┘
+                         │ Calls
+                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Service Layer (Domain)                     │
+│  ┌────────────┐  ┌────────────┐  ┌─────────────────────┐    │
+│  │   auth     │  │  consent   │  │  registry / vc      │    │
+│  │  Service   │  │  Service   │  │  Service            │    │
+│  └────────────┘  └────────────┘  └─────────────────────┘    │
+│         │               │                   │                 │
+│         │ Depends on    │ Depends on        │ Depends on     │
+│         │ Ports         │ Ports             │ Ports          │
+│         ▼               ▼                   ▼                 │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │             Port Interfaces (contracts)               │    │
+│  │  - ConsentPort                                        │    │
+│  │  - RegistryPort                                       │    │
+│  │  - AuthPort                                           │    │
+│  └──────────────────────────────────────────────────────┘    │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ Implemented by
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│                  Adapter Layer (Infrastructure)               │
+│  ┌────────────────────┐    ┌────────────────────────────┐    │
+│  │  gRPC Adapters     │    │  HTTP Adapters (future)   │    │
+│  │                    │    │                           │    │
+│  │  ┌──────────────┐  │    │  ┌──────────────────────┐ │    │
+│  │  │ gRPC Client  │  │    │  │   HTTP Client       │ │    │
+│  │  │ (outbound)   │  │    │  │   (external APIs)   │ │    │
+│  │  └──────────────┘  │    │  └──────────────────────┘ │    │
+│  │                    │    │                           │    │
+│  │  ┌──────────────┐  │    │                           │    │
+│  │  │ gRPC Server  │  │    │                           │    │
+│  │  │ (inbound)    │  │    │                           │    │
+│  │  └──────────────┘  │    │                           │    │
+│  └────────────────────┘    └────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Communication Boundaries
+
+**External API (HTTP/JSON):**
+
+- Client applications → Gateway
+- Protocol: HTTP/1.1, JSON
+- Auth: Bearer tokens (JWT)
+- Location: `internal/transport/http/`
+
+**Internal API (gRPC/Protobuf):**
+
+- Service → Service (within monolith)
+- Protocol: gRPC over HTTP/2, Protobuf
+- Auth: Mutual TLS (future), metadata propagation
+- Location: `api/proto/`, `internal/*/adapters/grpc/`
+
+### Why gRPC for Interservice Communication?
+
+1. **Type Safety**: Protobuf contracts prevent breaking changes
+2. **Performance**: Binary serialization, HTTP/2 multiplexing
+3. **Service Boundaries**: Clear contracts enable microservices migration
+4. **Observability**: Built-in tracing, deadlines, metadata propagation
+5. **Resilience**: Connection pooling, load balancing, circuit breakers
+
+### Interservice Flow Example
+
+**Registry Service calls Consent Service:**
+
+```go
+// 1. Registry service depends on ConsentPort interface (domain layer)
+type Service struct {
+    consentPort ports.ConsentPort  // <-- Port (interface)
+}
+
+// 2. gRPC adapter implements ConsentPort
+type ConsentClient struct {
+    client consentpb.ConsentServiceClient  // Generated gRPC client
+}
+
+func (c *ConsentClient) RequireConsent(ctx, userID, purpose) error {
+    // Translate domain call to gRPC
+    resp, err := c.client.RequireConsent(ctx, &consentpb.RequireConsentRequest{
+        UserId: userID,
+        Purpose: mapPurposeToProto(purpose),
+    })
+    // Translate gRPC response to domain error
+    return mapGRPCError(err)
+}
+
+// 3. Wiring (dependency injection in main.go)
+consentClient := grpc.NewConsentClient("localhost:9091")
+registryService := registry.NewService(
+    store,
+    consentClient,  // <-- Injected adapter
+)
+```
+
+**Benefits:**
+
+- Registry service has no gRPC imports in core logic
+- Easy to mock ConsentPort for testing
+- Can swap gRPC for HTTP or in-process calls without changing service code
+
+### Protobuf Contracts
+
+Protobuf definitions live in `api/proto/`:
+
+```
+api/proto/
+  common.proto       # Shared types (RequestMetadata, Error, HealthCheck)
+  consent.proto      # Consent service API
+  registry.proto     # Registry service API
+  auth.proto         # Auth service API
+```
+
+Generated Go code:
+
+```
+api/proto/
+  common/commonpb/   # Generated Go package
+  consent/consentpb/ # Generated Go package
+  registry/registrypb/
+  auth/authpb/
+```
+
+### Migration Path to Microservices
+
+The hexagonal architecture enables zero-downtime migration:
+
+1. **Phase 0 (Current)**: Monolith with in-process adapters
+   - All services in single process
+   - Port interfaces define module boundaries
+   - In-process adapters implement ports
+   - No gRPC overhead
+2. **Phase 1**: Extract consent service to separate process
+   - Implement gRPC server/client adapters
+   - Start consent gRPC server on port 9091
+   - Update registry to connect to `consent-service:9091`
+   - **Zero code changes to domain logic** - just swap adapters
+3. **Phase 2**: Extract more services (registry, auth, decision)
+4. **Phase 3**: Add service mesh (Istio/Linkerd) for mTLS, tracing
+
+---
+
 ## Service Boundaries inside the Monolith
 
 1. **Auth Service**
@@ -97,55 +257,87 @@ Everything runs in one binary, but each internal package has a clear responsibil
 ## Package Layout
 
 ```text
+api/
+  proto/                        # Protobuf API definitions
+    common.proto                # Shared types (RequestMetadata, Error, HealthCheck)
+    consent.proto               # Consent service gRPC API
+    registry.proto              # Registry service gRPC API
+    auth.proto                  # Auth service gRPC API
+    common/commonpb/            # Generated Go code
+    consent/consentpb/          # Generated Go code
+    registry/registrypb/        # Generated Go code
+    auth/authpb/                # Generated Go code
+
+contracts/
+  registry/                     # PII-light DTO contracts, versioned separately
+
 internal/
   platform/
-    config/         # configuration loading
-    logger/         # structured logging with slog
-    httpserver/     # shared HTTP server setup
-    middleware/     # HTTP middleware (recovery, logging, request ID, latency, JWT auth)
-    metrics/        # Prometheus metrics collection
+    config/                     # configuration loading
+    logger/                     # structured logging with slog
+    httpserver/                 # shared HTTP server setup
+    middleware/                 # HTTP middleware (recovery, logging, request ID, latency, JWT auth)
+    metrics/                    # Prometheus metrics collection
   jwt_token/
-    jwt.go          # JWT generation and validation with HS256
-    jwt_adapter.go  # Adapter for middleware interface
+    jwt.go                      # JWT generation and validation with HS256
+    jwt_adapter.go              # Adapter for middleware interface
   auth/
-    service.go      # Users, sessions, tokens
-    store.go        # UserStore, SessionStore
-    models.go
+    service/
+      service.go                # Users, sessions, tokens (domain logic)
+    store/
+      store.go                  # UserStore, SessionStore (ports)
+    models/
+      models.go                 # Domain models
   consent/
-    service.go      # Grant, revoke, RequireConsent
-    store.go
-    models.go
-  evidence/
-    registry/
-      client_citizen.go    # citizen registry mock
-      client_sanctions.go  # sanctions registry mock
-      service.go           # RegistryService, caching, minimisation
-      store.go             # RegistryCacheStore
-      models.go
-    vc/
-      service.go           # VCService
-      store.go             # VCStore
-      models.go
+    service/
+      service.go                # Grant, revoke, RequireConsent (domain logic)
+    store/
+      store.go                  # ConsentStore (port)
+    models/
+      models.go                 # Domain models
+  registry/
+    ports/
+      consent.go                # ConsentPort interface (dependency on consent)
+    adapters/
+      consent_adapter.go        # In-process adapter implementing ConsentPort
+    service/
+      service.go                # Registry orchestration, caching, minimisation
+    clients/
+      citizen/citizen.go        # citizen registry mock
+      sanctions/sanctions.go    # sanctions registry mock
+    handler/handler.go          # optional HTTP adapter (demo)
+    models/models.go            # internal registry models
+    store/store_memory.go       # in-memory cache store (TTL via config)
   decision/
-    service.go      # Evaluate decisions
-    store.go        # DecisionStore
-    models.go
+    ports/
+      registry.go               # RegistryPort interface (dependency on registry)
+      consent.go                # ConsentPort interface (dependency on consent)
+    adapters/
+      registry_adapter.go       # In-process adapter implementing RegistryPort
+    service/
+      service.go                # Decision engine logic
+    integration_test.go
+  evidence/
+    vc/
+      service.go                # VCService
+      store.go                  # VCStore
+      store_memory.go
+      models.go
   audit/
-    publisher.go    # queue or channel publisher
-    worker.go       # background consumer
-    store.go        # AuditStore
+    publisher.go                # queue or channel publisher
+    worker.go                   # background consumer
+    store.go                    # AuditStore
     models.go
   transport/
     http/
       router.go
-      handlers_auth.go
-      handlers_consent.go
       handlers_evidence.go
       handlers_decision.go
       handlers_me.go
+      shared/                   # shared HTTP helpers
 cmd/
   server/
-    main.go         # wires everything together
+    main.go                     # wires everything together (DI container)
 ```
 
 Rules of thumb:
@@ -289,37 +481,81 @@ Evidence is split into `registry` and `vc`.
 
 **Responsibilities**
 
-- Integrate with citizen and sanctions registry mocks.
-- Cache results with TTL.
-- Apply minimisation when regulated mode is active.
+- Integrate with citizen and sanctions registries through pluggable provider abstraction
+- Orchestrate multi-source evidence gathering with fallback chains and correlation rules
+- Cache results with TTL
+- Apply minimisation when regulated mode is active
+- Normalize errors across different registry providers
 
 **Key types**
 
 ```go
 type CitizenRecord struct {
-    NationalID  string    // Unique national identifier
-    FullName    string    // Full legal name
-    DateOfBirth string    // Format: YYYY-MM-DD
-    Address     string    // Full address
-    Valid       bool      // Whether record is valid/active
-    CheckedAt   time.Time // When this record was fetched
+    NationalID  string // Unique national identifier
+    FullName    string // Full legal name
+    DateOfBirth string // Format: YYYY-MM-DD
+    Valid       bool   // Whether record is valid/active
 }
 
 type SanctionsRecord struct {
-    NationalID string    // Unique national identifier
-    Listed     bool      // Whether person is on sanctions/PEP list
-    Source     string    // Source of the flag
-    CheckedAt  time.Time // When this record was fetched
+    NationalID string // Unique national identifier
+    Listed     bool   // Whether person is on sanctions/PEP list
+    Source     string // Source of the flag
+}
+
+type RegistryResult struct {
+    Citizen  *CitizenRecord
+    Sanction *SanctionsRecord
 }
 ```
 
 **Service**
 
-- `Check(ctx, nationalID)` - Returns both citizen and sanctions records
-- `Citizen(ctx, nationalID)` - Returns citizen record from cache or registry
-- `Sanctions(ctx, nationalID)` - Returns sanctions record from cache or registry
+- `Check(ctx, nationalID)` - Returns both citizen and sanctions records via orchestrator
+- `Citizen(ctx, nationalID)` - Returns citizen record from cache or provider
+- `Sanctions(ctx, nationalID)` - Returns sanctions record from cache or provider
 
-This service is the only place that knows about external registry details. It handles caching with a 5-minute TTL and applies data minimization in regulated mode using `MinimizeCitizenRecord()`.
+This service uses the orchestrator to coordinate lookups across multiple providers with automatic fallback, retry logic, and evidence correlation.
+
+**Provider Abstraction Architecture**
+
+The registry module implements a comprehensive provider abstraction layer:
+
+- **Provider Interface**: Universal contract enabling pluggable integration with any registry source (HTTP, SOAP, gRPC) without modifying service layer code
+
+- **Protocol Adapters**: Separate protocol concerns from business logic. HTTP adapter handles REST APIs, with SOAP and gRPC adapters available for different provider types
+
+- **Error Taxonomy**: Eight normalized error categories (timeout, bad_data, authentication, provider_outage, contract_mismatch, not_found, rate_limited, internal) with automatic retry semantics based on error type
+
+- **Orchestrator**: Coordinates multi-source evidence gathering with four strategies:
+
+  - Primary: Uses single provider for fast responses
+  - Fallback: Tries primary then alternatives on failure
+  - Parallel: Queries all providers simultaneously
+  - Voting: Uses consensus or highest confidence from multiple sources
+
+- **Correlation Rules**: Pluggable logic for merging conflicting evidence from multiple sources, reconciling field discrepancies, and computing weighted confidence scores
+
+- **Capability Negotiation**: Providers declare supported fields, filters, and API versions. System validates compatibility and routes requests to appropriate providers
+
+- **Contract Testing**: Framework for validating provider outputs against expected schemas and detecting API version changes before deployment
+
+This architecture enables:
+
+- Adding new registry providers without changing callers
+- Automatic failover to backup providers
+- Correlation of conflicting data from multiple sources
+- Protocol-agnostic integration (HTTP/SOAP/gRPC)
+- Consistent error handling and retry policies
+- Provider health monitoring and circuit breaking
+
+**Cross-module contracts**
+
+- `contracts/registry` defines the PII-light DTOs (`CitizenRecord{DateOfBirth, Valid}`, `SanctionsRecord{Listed}`) and a `ContractVersion` for compatibility.
+- The registry service maps internal models into these DTOs before handing data to decision or other modules; raw identifiers stay inside the registry boundary.
+- Decision imports only the contract package, avoiding reach into registry internals and keeping the future microservice split clean.
+- PII minimization is enforced by passing only derived/necessary fields across the boundary.
+- Provider abstraction maintains clear separation between external integrations and internal domain models.
 
 #### VC
 
@@ -361,41 +597,32 @@ The service supports claim minimization in regulated mode using `MinimizeClaims(
 **Key types**
 
 ```go
-type DecisionStatus string
+type DecisionOutcome string
 
 const (
-    DecisionPass              DecisionStatus = "pass"
-    DecisionPassWithConditions               = "pass_with_conditions"
-    DecisionFail                             = "fail"
+    DecisionPass               DecisionOutcome = "pass"
+    DecisionPassWithConditions DecisionOutcome = "pass_with_conditions"
+    DecisionFail               DecisionOutcome = "fail"
 )
 
-type DecisionInput struct {
-    UserID          string
-    Purpose         string
-    SanctionsListed bool
-    CitizenValid    bool
-    HasCredential   bool
-    DerivedIdentity DerivedIdentity
-    Context         map[string]any // Extra data (amount, country, etc.)
-}
-
 type DerivedIdentity struct {
-    PseudonymousID string // Hash of user ID for privacy
-    IsOver18       bool   // Derived from DateOfBirth, no PII
+    PseudonymousID string // user pseudonym, not email/name
+    IsOver18       bool   // derived from DOB or credential
+    CitizenValid   bool   // registry validity flag
 }
 
-type DecisionOutcome struct {
-    Status     DecisionStatus
-    Reason     string
-    Conditions []string // e.g., ["obtain_credential", "manual_review"]
+type DecisionInput struct {
+    Identity   DerivedIdentity
+    Sanctions  registrycontracts.SanctionsRecord // PII-light contract (listed flag)
+    Credential vc.Claims                          // minimized VC claims
 }
 ```
 
 **Service**
 
-- `Evaluate(ctx, DecisionInput) (DecisionOutcome, error)`
+- `Evaluate(ctx, DecisionInput) DecisionOutcome`
 
-The `DecisionInput` structure contains pre-processed evidence (sanctions status, citizen validity, credential existence) and derived identity attributes. This ensures no PII is passed to the decision engine - only boolean flags and computed values.
+`DecisionInput` keeps the engine dependency-free: derived identity flags, a contract `SanctionsRecord` (listed flag only), and minimized VC claims. No raw PII or registry internals cross the boundary.
 
 ---
 
@@ -660,9 +887,9 @@ High level entities across services:
 
 - `evidence.registry`
 
-  - `CitizenRecord` - NationalID, FullName, DateOfBirth (string), Address, Valid, CheckedAt
-  - `SanctionsRecord` - NationalID, Listed, Source, CheckedAt
-  - Cached in `RegistryCacheStore` with 5-minute TTL
+  - `CitizenRecord` - NationalID, FullName, DateOfBirth (string), Valid
+  - `SanctionsRecord` - NationalID, Listed, Source
+  - Cached in `RegistryCacheStore` with 5-minute TTL; mapped to PII-light `contracts/registry` DTOs for cross-module sharing
 
 - `evidence.vc`
 
@@ -672,9 +899,9 @@ High level entities across services:
 
 - `decision`
 
-  - `DecisionInput` - UserID, Purpose, SanctionsListed, CitizenValid, HasCredential, DerivedIdentity, Context
-  - `DerivedIdentity` - PseudonymousID, IsOver18 (no PII)
-  - `DecisionOutcome` - Status, Reason, Conditions
+  - `DecisionInput` - Identity (DerivedIdentity), Sanctions (contract DTO), Credential (vc.Claims)
+  - `DerivedIdentity` - PseudonymousID, IsOver18, CitizenValid (no PII)
+  - `DecisionOutcome` - pass | pass_with_conditions | fail
 
 - `audit`
   - `Event` - ID, Timestamp, UserID, Action, Purpose, Decision, Reason, RequestID
@@ -701,11 +928,11 @@ High level entities across services:
 - `evidence.registry`
   **Key minimization logic:**
 
-  - Calls `MinimizeCitizenRecord()` before returning data
-  - In regulated mode: strips `FullName`, `DateOfBirth`, `Address` - keeps only `Valid` boolean and `NationalID`
-  - Derives `IsOver18` from `DateOfBirth` in decision logic, then discards raw DOB
-  - Cache TTL enforced at 5 minutes (from `config.RegistryCacheTTL`)
-  - Sanctions records are not minimized (contain no PII, only boolean `Listed` flag)
+  - Calls `MinimizeCitizenRecord()` before returning data when regulated.
+  - Strips `NationalID`, `FullName`, and `DateOfBirth`; keeps only the `Valid` boolean in regulated mode.
+  - Maps internal records to PII-light `contracts/registry` DTOs for downstream use; DOB may be omitted once minimized.
+  - Cache TTL enforced at 5 minutes (from `config.RegistryCacheTTL`).
+  - Sanctions records are not minimized, but only the `Listed` flag crosses the contract boundary; provider details stay internal.
 
 - `evidence.vc`
   **Key minimization logic:**
@@ -718,9 +945,9 @@ High level entities across services:
 - `decision`
   **Privacy-first design:**
 
-  - Accepts `DerivedIdentity` struct with `IsOver18` boolean, not raw DOB
-  - Decision logic operates on pre-computed flags (`SanctionsListed`, `CitizenValid`, `HasCredential`)
-  - No PII flows through decision engine, only boolean evidence
+  - Accepts `DerivedIdentity` with `IsOver18` and `CitizenValid`, plus contract `SanctionsRecord` and minimized VC claims.
+  - No raw PII flows through the decision engine; registry internals and identifiers stay behind the contract boundary.
+  - Policy rules operate on derived flags, not on raw DOB or names.
 
 - `audit`
   Required for all sensitive operations. Events include action, purpose, decision, reason but avoid logging raw PII (use user IDs, not emails).
@@ -865,4 +1092,18 @@ The codebase currently has:
 - ✅ **Production-ready auth:** OAuth 2.0 Authorization Code Flow fully implemented with comprehensive test coverage.
 - ✅ **Observability stack:** Context-aware structured logging, Prometheus metrics, request ID tracing, and HTTP middleware.
 - ✅ **HTTP middleware:** Recovery, logging, request ID, timeout, content-type validation, and latency tracking.
+- ✅ **Hexagonal architecture:** Port interfaces and gRPC adapters enable clean service boundaries and microservices migration.
+- ✅ **Provider abstraction:** Universal provider interface with protocol adapters, orchestration layer, error taxonomy, and contract testing framework for registry integrations.
 - ⚠️ **HTTP layer partial:** Auth handlers complete (authorize, token, userinfo). Consent, Evidence, Decision, and User Data Rights handlers return 501 (see PRDs in `docs/prd/`).
+- ⚠️ **Service layer migration:** Registry service needs migration to use orchestrator instead of direct client calls.
+
+---
+
+## Revision History
+
+| Version | Date       | Author           | Changes                                                                                                                                                                     |
+| ------- | ---------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Engineering Team | Initial architecture documentation                                                                                                                                          |
+| 1.1     | 2025-12-10 | Engineering Team | Updated registry structure with contracts and minimization                                                                                                                  |
+| 2.0     | 2025-12-11 | Engineering Team | Added hexagonal architecture, gRPC interservice communication, protobuf contracts, and port/adapter pattern documentation                                                   |
+| 2.1     | 2025-12-11 | Engineering Team | Documented provider abstraction architecture for registry module, added orchestration layer details, error taxonomy, capability negotiation, and contract testing framework |

@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package credo.consent.v1;
+
+option go_package = "github.com/credo/gateway/api/proto/consent;consentpb";
+
+import "google/protobuf/timestamp.proto";
+import "api/proto/common.proto";
+
+// ConsentService handles purpose-based consent management
+// Used internally by other services (registry, vc, decision)
+service ConsentService {
+  // Check if user has active consent for a purpose
+  rpc HasConsent(HasConsentRequest) returns (HasConsentResponse);
+
+  // Require consent or return error (enforcement)
+  rpc RequireConsent(RequireConsentRequest) returns (RequireConsentResponse);
+
+  // Grant consent for purposes (internal operation)
+  rpc GrantConsent(GrantConsentRequest) returns (GrantConsentResponse);
+
+  // Revoke consent for purposes (internal operation)
+  rpc RevokeConsent(RevokeConsentRequest) returns (RevokeConsentResponse);
+
+  // List all consents for a user
+  rpc ListConsents(ListConsentsRequest) returns (ListConsentsResponse);
+}
+
+// Purpose enum matching internal consent.Purpose
+enum Purpose {
+  PURPOSE_UNSPECIFIED = 0;
+  PURPOSE_LOGIN = 1;
+  PURPOSE_REGISTRY_CHECK = 2;
+  PURPOSE_VC_ISSUANCE = 3;
+  PURPOSE_DECISION_EVALUATION = 4;
+  PURPOSE_BIOMETRIC_VERIFICATION = 5;
+}
+
+// Consent status
+enum ConsentStatus {
+  CONSENT_STATUS_UNSPECIFIED = 0;
+  CONSENT_STATUS_ACTIVE = 1;
+  CONSENT_STATUS_EXPIRED = 2;
+  CONSENT_STATUS_REVOKED = 3;
+}
+
+// HasConsentRequest checks if user has valid consent
+message HasConsentRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string user_id = 2;
+  Purpose purpose = 3;
+}
+
+message HasConsentResponse {
+  bool has_consent = 1;
+  ConsentStatus status = 2;
+  google.protobuf.Timestamp granted_at = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+// RequireConsentRequest enforces consent requirement
+message RequireConsentRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string user_id = 2;
+  Purpose purpose = 3;
+}
+
+message RequireConsentResponse {
+  bool allowed = 1;
+  string reason = 2; // Empty if allowed, error reason if not
+}
+
+// GrantConsentRequest grants consent
+message GrantConsentRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string user_id = 2;
+  repeated Purpose purposes = 3;
+}
+
+message GrantConsentResponse {
+  repeated ConsentRecord granted = 1;
+}
+
+// RevokeConsentRequest revokes consent
+message RevokeConsentRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string user_id = 2;
+  repeated Purpose purposes = 3;
+}
+
+message RevokeConsentResponse {
+  repeated ConsentRecord revoked = 1;
+}
+
+// ListConsentsRequest lists all consents
+message ListConsentsRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string user_id = 2;
+  ConsentStatus status_filter = 3; // Optional filter
+}
+
+message ListConsentsResponse {
+  repeated ConsentRecord consents = 1;
+}
+
+// ConsentRecord represents a consent record
+message ConsentRecord {
+  string id = 1;
+  string user_id = 2;
+  Purpose purpose = 3;
+  google.protobuf.Timestamp granted_at = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  google.protobuf.Timestamp revoked_at = 6;
+  ConsentStatus status = 7;
+}
