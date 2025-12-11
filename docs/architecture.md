@@ -75,6 +75,157 @@ Everything runs in one binary, but each internal package has a clear responsibil
 
 ---
 
+## Interservice Communication Model
+
+### Hexagonal Architecture (Ports and Adapters)
+
+Credo follows **hexagonal architecture** (also known as ports-and-adapters) to keep the core business logic independent of communication protocols:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                     External Layer (HTTP)                     │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │  HTTP Handlers (JSON/REST)                             │  │
+│  │  - Public API for client apps                          │  │
+│  │  - OAuth 2.0 endpoints                                 │  │
+│  │  - Consent management                                  │  │
+│  │  - VC issuance                                         │  │
+│  └────────────────────┬───────────────────────────────────┘  │
+└─────────────────────────┼──────────────────────────────────────┘
+                         │ Calls
+                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Service Layer (Domain)                     │
+│  ┌────────────┐  ┌────────────┐  ┌─────────────────────┐    │
+│  │   auth     │  │  consent   │  │  registry / vc      │    │
+│  │  Service   │  │  Service   │  │  Service            │    │
+│  └────────────┘  └────────────┘  └─────────────────────┘    │
+│         │               │                   │                 │
+│         │ Depends on    │ Depends on        │ Depends on     │
+│         │ Ports         │ Ports             │ Ports          │
+│         ▼               ▼                   ▼                 │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │             Port Interfaces (contracts)               │    │
+│  │  - ConsentPort                                        │    │
+│  │  - RegistryPort                                       │    │
+│  │  - AuthPort                                           │    │
+│  └──────────────────────────────────────────────────────┘    │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ Implemented by
+                             ▼
+┌──────────────────────────────────────────────────────────────┐
+│                  Adapter Layer (Infrastructure)               │
+│  ┌────────────────────┐    ┌────────────────────────────┐    │
+│  │  gRPC Adapters     │    │  HTTP Adapters (future)   │    │
+│  │                    │    │                           │    │
+│  │  ┌──────────────┐  │    │  ┌──────────────────────┐ │    │
+│  │  │ gRPC Client  │  │    │  │   HTTP Client       │ │    │
+│  │  │ (outbound)   │  │    │  │   (external APIs)   │ │    │
+│  │  └──────────────┘  │    │  └──────────────────────┘ │    │
+│  │                    │    │                           │    │
+│  │  ┌──────────────┐  │    │                           │    │
+│  │  │ gRPC Server  │  │    │                           │    │
+│  │  │ (inbound)    │  │    │                           │    │
+│  │  └──────────────┘  │    │                           │    │
+│  └────────────────────┘    └────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Communication Boundaries
+
+**External API (HTTP/JSON):**
+- Client applications → Gateway
+- Protocol: HTTP/1.1, JSON
+- Auth: Bearer tokens (JWT)
+- Location: `internal/transport/http/`
+
+**Internal API (gRPC/Protobuf):**
+- Service → Service (within monolith)
+- Protocol: gRPC over HTTP/2, Protobuf
+- Auth: Mutual TLS (future), metadata propagation
+- Location: `api/proto/`, `internal/*/adapters/grpc/`
+
+### Why gRPC for Interservice Communication?
+
+1. **Type Safety**: Protobuf contracts prevent breaking changes
+2. **Performance**: Binary serialization, HTTP/2 multiplexing
+3. **Service Boundaries**: Clear contracts enable microservices migration
+4. **Observability**: Built-in tracing, deadlines, metadata propagation
+5. **Resilience**: Connection pooling, load balancing, circuit breakers
+
+### Interservice Flow Example
+
+**Registry Service calls Consent Service:**
+
+```go
+// 1. Registry service depends on ConsentPort interface (domain layer)
+type Service struct {
+    consentPort ports.ConsentPort  // <-- Port (interface)
+}
+
+// 2. gRPC adapter implements ConsentPort
+type ConsentClient struct {
+    client consentpb.ConsentServiceClient  // Generated gRPC client
+}
+
+func (c *ConsentClient) RequireConsent(ctx, userID, purpose) error {
+    // Translate domain call to gRPC
+    resp, err := c.client.RequireConsent(ctx, &consentpb.RequireConsentRequest{
+        UserId: userID,
+        Purpose: mapPurposeToProto(purpose),
+    })
+    // Translate gRPC response to domain error
+    return mapGRPCError(err)
+}
+
+// 3. Wiring (dependency injection in main.go)
+consentClient := grpc.NewConsentClient("localhost:9091")
+registryService := registry.NewService(
+    store,
+    consentClient,  // <-- Injected adapter
+)
+```
+
+**Benefits:**
+- Registry service has no gRPC imports in core logic
+- Easy to mock ConsentPort for testing
+- Can swap gRPC for HTTP or in-process calls without changing service code
+
+### Protobuf Contracts
+
+Protobuf definitions live in `api/proto/`:
+
+```
+api/proto/
+  common.proto       # Shared types (RequestMetadata, Error, HealthCheck)
+  consent.proto      # Consent service API
+  registry.proto     # Registry service API
+  auth.proto         # Auth service API
+```
+
+Generated Go code:
+```
+api/proto/
+  common/commonpb/   # Generated Go package
+  consent/consentpb/ # Generated Go package
+  registry/registrypb/
+  auth/authpb/
+```
+
+### Migration Path to Microservices
+
+The hexagonal architecture enables zero-downtime migration:
+
+1. **Phase 1 (Current)**: Monolith with in-process gRPC
+2. **Phase 2**: Extract consent service to separate process
+   - Start consent gRPC server on port 9091
+   - Update registry to connect to `consent-service:9091`
+   - No code changes to registry service logic
+3. **Phase 3**: Extract more services (registry, auth, decision)
+4. **Phase 4**: Add service mesh (Istio/Linkerd) for mTLS, tracing
+
+---
+
 ## Service Boundaries inside the Monolith
 
 1. **Auth Service**
@@ -97,46 +248,76 @@ Everything runs in one binary, but each internal package has a clear responsibil
 ## Package Layout
 
 ```text
+api/
+  proto/                        # Protobuf API definitions
+    common.proto                # Shared types (RequestMetadata, Error, HealthCheck)
+    consent.proto               # Consent service gRPC API
+    registry.proto              # Registry service gRPC API
+    auth.proto                  # Auth service gRPC API
+    common/commonpb/            # Generated Go code
+    consent/consentpb/          # Generated Go code
+    registry/registrypb/        # Generated Go code
+    auth/authpb/                # Generated Go code
+
 contracts/
-  registry/             # PII-light DTO contracts, versioned separately
+  registry/                     # PII-light DTO contracts, versioned separately
 
 internal/
   platform/
-    config/             # configuration loading
-    logger/             # structured logging with slog
-    httpserver/         # shared HTTP server setup
-    middleware/         # HTTP middleware (recovery, logging, request ID, latency, JWT auth)
-    metrics/            # Prometheus metrics collection
+    config/                     # configuration loading
+    logger/                     # structured logging with slog
+    httpserver/                 # shared HTTP server setup
+    middleware/                 # HTTP middleware (recovery, logging, request ID, latency, JWT auth)
+    metrics/                    # Prometheus metrics collection
   jwt_token/
-    jwt.go              # JWT generation and validation with HS256
-    jwt_adapter.go      # Adapter for middleware interface
+    jwt.go                      # JWT generation and validation with HS256
+    jwt_adapter.go              # Adapter for middleware interface
   auth/
-    service.go          # Users, sessions, tokens
-    store.go            # UserStore, SessionStore
-    models.go
+    service.go                  # Users, sessions, tokens (domain logic)
+    store.go                    # UserStore, SessionStore (ports)
+    models.go                   # Domain models
+    adapters/
+      grpc/
+        server.go               # gRPC server adapter (inbound)
   consent/
-    service.go          # Grant, revoke, RequireConsent
-    store.go
-    models.go
+    service.go                  # Grant, revoke, RequireConsent (domain logic)
+    store.go                    # ConsentStore (port)
+    models.go                   # Domain models
+    adapters/
+      grpc/
+        server.go               # gRPC server adapter (inbound)
+  registry/
+    ports/
+      consent.go                # ConsentPort interface (dependency on consent)
+    service/
+      service.go                # Registry orchestration, caching, minimisation
+    clients/
+      citizen/citizen.go        # citizen registry mock
+      sanctions/sanctions.go    # sanctions registry mock
+    handler/handler.go          # optional HTTP adapter (demo)
+    models/models.go            # internal registry models
+    store/store_memory.go       # in-memory cache store (TTL via config)
+    adapters/
+      grpc/
+        consent_client.go       # gRPC client adapter for consent (outbound)
+    integration_test.go
   evidence/
-    registry/
-      clients/
-        citizen/citizen.go      # citizen registry mock
-        sanctions/sanctions.go  # sanctions registry mock
-      handler/handler.go        # optional HTTP adapter (demo)
-      models/models.go          # internal registry models
-      service/service.go        # registry orchestration, caching, minimisation
-      store/store_memory.go     # in-memory cache store (TTL via config)
-      integration_test.go
     vc/
       service.go                # VCService
       store.go                  # VCStore
       store_memory.go
       models.go
   decision/
-    service.go                  # Evaluate decisions
+    ports/
+      consent.go                # ConsentPort interface
+      registry.go               # RegistryPort interface
+    service.go                  # Evaluate decisions (domain logic)
     store.go                    # DecisionStore
     models.go
+    adapters/
+      grpc/
+        consent_client.go       # gRPC client adapter for consent
+        registry_client.go      # gRPC client adapter for registry
   audit/
     publisher.go                # queue or channel publisher
     worker.go                   # background consumer
@@ -151,7 +332,7 @@ internal/
       shared/                   # shared HTTP helpers
 cmd/
   server/
-    main.go                     # wires everything together
+    main.go                     # wires everything together (DI container)
 ```
 
 Rules of thumb:
@@ -872,4 +1053,15 @@ The codebase currently has:
 - ✅ **Production-ready auth:** OAuth 2.0 Authorization Code Flow fully implemented with comprehensive test coverage.
 - ✅ **Observability stack:** Context-aware structured logging, Prometheus metrics, request ID tracing, and HTTP middleware.
 - ✅ **HTTP middleware:** Recovery, logging, request ID, timeout, content-type validation, and latency tracking.
+- ✅ **Hexagonal architecture:** Port interfaces and gRPC adapters enable clean service boundaries and microservices migration.
 - ⚠️ **HTTP layer partial:** Auth handlers complete (authorize, token, userinfo). Consent, Evidence, Decision, and User Data Rights handlers return 501 (see PRDs in `docs/prd/`).
+
+---
+
+## Revision History
+
+| Version | Date       | Author           | Changes                                                    |
+| ------- | ---------- | ---------------- | ---------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Engineering Team | Initial architecture documentation                          |
+| 1.1     | 2025-12-10 | Engineering Team | Updated registry structure with contracts and minimization |
+| 2.0     | 2025-12-11 | Engineering Team | Added hexagonal architecture, gRPC interservice communication, protobuf contracts, and port/adapter pattern documentation |
