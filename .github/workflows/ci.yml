@@ -226,3 +226,88 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # deploy-aws:
+  #   name: Deploy to AWS Elastic Beanstalk
+  #   runs-on: ubuntu-latest
+  #   needs: [test, e2e]
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  #   environment:
+  #     name: aws-production
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v5
+  #       with:
+  #         go-version-file: go.mod
+  #         cache: true
+
+  #     - name: Build Go application
+  #       run: go build -o application ./cmd/server/main.go
+
+  #     - name: Generate deployment timestamp
+  #       id: timestamp
+  #       run: echo "version=$(date +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+  #     - name: Create deployment package
+  #       run: |
+  #         mkdir -p deploy
+  #         cp application deploy/
+  #         cd deploy
+  #         zip -r ../deploy-${{ steps.timestamp.outputs.version }}.zip .
+  #         cd ..
+  #         ls -lh deploy-*.zip
+
+  #     - name: Configure AWS credentials
+  #       uses: aws-actions/configure-aws-credentials@v4
+  #       with:
+  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #         aws-region: ${{ secrets.AWS_REGION }}
+
+  #     - name: Upload deployment package to S3
+  #       run: |
+  #         aws s3 cp deploy-${{ steps.timestamp.outputs.version }}.zip \
+  #           s3://${{ secrets.EB_BUCKET }}/credo-demo-${{ steps.timestamp.outputs.version }}.zip
+
+  #     - name: Create Elastic Beanstalk application version
+  #       run: |
+  #         aws elasticbeanstalk create-application-version \
+  #           --application-name ${{ secrets.EB_APP_NAME }} \
+  #           --version-label v-${{ steps.timestamp.outputs.version }} \
+  #           --source-bundle S3Bucket="${{ secrets.EB_BUCKET }}",S3Key="credo-demo-${{ steps.timestamp.outputs.version }}.zip" \
+  #           --description "Deploy from GitHub Actions - commit ${GITHUB_SHA::7}"
+
+  #     - name: Deploy to Elastic Beanstalk
+  #       run: |
+  #         aws elasticbeanstalk update-environment \
+  #           --application-name ${{ secrets.EB_APP_NAME }} \
+  #           --environment-name ${{ secrets.EB_ENV_NAME }} \
+  #           --version-label v-${{ steps.timestamp.outputs.version }}
+
+  #     - name: Wait for deployment to complete
+  #       run: |
+  #         aws elasticbeanstalk wait environment-updated \
+  #           --application-name ${{ secrets.EB_APP_NAME }} \
+  #           --environment-name ${{ secrets.EB_ENV_NAME }} \
+  #           --max-attempts 30 \
+  #           --delay 10
+
+  #     - name: Get deployment URL
+  #       id: url
+  #       run: |
+  #         URL=$(aws elasticbeanstalk describe-environments \
+  #           --application-name ${{ secrets.EB_APP_NAME }} \
+  #           --environment-names ${{ secrets.EB_ENV_NAME }} \
+  #           --query 'Environments[0].CNAME' \
+  #           --output text)
+  #         echo "url=http://${URL}" >> $GITHUB_OUTPUT
+  #         echo "Deployed to: http://${URL}"
+
+  #     - name: Verify deployment
+  #       run: |
+  #         sleep 10
+  #         curl -f ${{ steps.url.outputs.url }}/health || exit 1
+  #         echo "✅ Deployment successful and health check passed"
