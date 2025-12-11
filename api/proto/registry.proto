@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package credo.registry.v1;
+
+option go_package = "github.com/credo/gateway/api/proto/registry;registrypb";
+
+import "google/protobuf/timestamp.proto";
+import "api/proto/common.proto";
+
+// RegistryService handles citizen and sanctions registry lookups
+// Used internally by decision engine and VC issuance
+service RegistryService {
+  // Check citizen record
+  rpc CheckCitizen(CheckCitizenRequest) returns (CheckCitizenResponse);
+
+  // Check sanctions record
+  rpc CheckSanctions(CheckSanctionsRequest) returns (CheckSanctionsResponse);
+
+  // Combined check (citizen + sanctions)
+  rpc Check(CheckRequest) returns (CheckResponse);
+}
+
+// CheckCitizenRequest checks citizen registry
+message CheckCitizenRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string national_id = 2;
+}
+
+message CheckCitizenResponse {
+  CitizenRecord citizen = 1;
+  bool from_cache = 2;
+}
+
+// CheckSanctionsRequest checks sanctions registry
+message CheckSanctionsRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string national_id = 2;
+}
+
+message CheckSanctionsResponse {
+  SanctionsRecord sanctions = 1;
+  bool from_cache = 2;
+}
+
+// CheckRequest performs combined check
+message CheckRequest {
+  credo.common.v1.RequestMetadata metadata = 1;
+  string national_id = 2;
+}
+
+message CheckResponse {
+  CitizenRecord citizen = 1;
+  SanctionsRecord sanctions = 2;
+  bool from_cache = 3;
+}
+
+// CitizenRecord (minimized for internal use)
+// In regulated mode, only 'valid' and 'national_id' are populated
+message CitizenRecord {
+  string national_id = 1;
+  string full_name = 2; // Empty in regulated mode
+  string date_of_birth = 3; // Empty in regulated mode (format: YYYY-MM-DD)
+  bool valid = 4;
+  google.protobuf.Timestamp checked_at = 5;
+}
+
+// SanctionsRecord (no PII, safe for any mode)
+message SanctionsRecord {
+  string national_id = 1;
+  bool listed = 2;
+  string source = 3;
+  google.protobuf.Timestamp checked_at = 4;
+}
