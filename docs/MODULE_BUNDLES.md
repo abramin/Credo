@@ -38,7 +38,3 @@ Add for operational plumbing, exports, and client developer experience.
 - Layer the Assurance Pack if you must satisfy risk/compliance bars.
 - Layer the Decentralized Pack if your trust model requires DIDs/ZKPs.
 - Layer the Integrations Pack to fit existing observability, data, and client ecosystems.
-
-## Alignment With Architecture
-- The evidence orchestrator (provider registry, strategies, correlation rules) embodies the modular approach in code: providers and rules are injected, not hard-wired.
-- Each pack corresponds to isolated PRDs and can be delivered as separate services or Go packages wired through interfaces and handlers per AGENTS.md conventions.
