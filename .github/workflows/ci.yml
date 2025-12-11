@@ -114,8 +114,10 @@ jobs:
 
       - name: Build OpenAPI docs
         run: |
-          npx @redocly/cli@1.12.0 build-docs docs/openapi/auth.yaml -o docs/openapi/auth.html
-          npx @redocly/cli@1.12.0 build-docs docs/openapi/consent.yaml -o docs/openapi/consent.html
+          for file in docs/openapi/*.yaml; do
+            basename=$(basename "$file" .yaml)
+            npx @redocly/cli@1.12.0 build-docs "$file" -o "docs/openapi/${basename}.html"
+          done
 
       - name: Upload OpenAPI artifacts for PR review
         if: github.event_name == 'pull_request'
