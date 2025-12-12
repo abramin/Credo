@@ -24,6 +24,8 @@ type TestContext struct {
 	State            string
 	ClientID         string
 	RedirectURI      string
+	UserID           string
+	AdminToken       string
 }
 
 // NewTestContext creates a new test context
@@ -31,6 +33,11 @@ func NewTestContext() *TestContext {
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:8080"
+	}
+
+	adminToken := os.Getenv("ADMIN_API_TOKEN")
+	if adminToken == "" {
+		adminToken = "demo-admin-token"
 	}
 
 	return &TestContext{
@@ -43,6 +50,7 @@ func NewTestContext() *TestContext {
 		},
 		ClientID:    "test-client",
 		RedirectURI: "http://localhost:3000/callback",
+		AdminToken:  adminToken,
 	}
 }
 
@@ -86,6 +94,32 @@ func (tc *TestContext) POSTWithHeaders(path string, body interface{}, headers ma
 // GET makes a GET request and stores the response
 func (tc *TestContext) GET(path string, headers map[string]string) error {
 	req, err := http.NewRequestWithContext(context.Background(), "GET", tc.BaseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := tc.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to make request: %w", err)
+	}
+
+	tc.LastResponse = resp
+	tc.LastResponseBody, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return nil
+}
+
+// DELETE makes a DELETE request and stores the response
+func (tc *TestContext) DELETE(path string, headers map[string]string) error {
+	req, err := http.NewRequestWithContext(context.Background(), "DELETE", tc.BaseURL+path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -175,4 +209,16 @@ func (tc *TestContext) GetLastResponseStatus() int {
 
 func (tc *TestContext) GetLastResponseBody() []byte {
 	return tc.LastResponseBody
+}
+
+func (tc *TestContext) GetUserID() string {
+	return tc.UserID
+}
+
+func (tc *TestContext) SetUserID(userID string) {
+	tc.UserID = userID
+}
+
+func (tc *TestContext) GetAdminToken() string {
+	return tc.AdminToken
 }

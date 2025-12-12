@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -11,6 +12,7 @@ import (
 type TestContext interface {
 	POST(path string, body interface{}) error
 	GET(path string, headers map[string]string) error
+	DELETE(path string, headers map[string]string) error
 	GetResponseField(field string) (interface{}, error)
 	GetClientID() string
 	GetRedirectURI() string
@@ -18,6 +20,11 @@ type TestContext interface {
 	SetAuthCode(code string)
 	GetAccessToken() string
 	SetAccessToken(token string)
+	GetUserID() string
+	SetUserID(userID string)
+	GetAdminToken() string
+	ResponseContains(text string) bool
+	GetLastResponseStatus() int
 }
 
 // RegisterSteps registers authentication-related step definitions
@@ -36,6 +43,13 @@ func RegisterSteps(ctx *godog.ScenarioContext, tc TestContext) {
 	ctx.Step(`^I POST to "([^"]*)" with invalid email "([^"]*)"$`, steps.postWithInvalidEmail)
 	ctx.Step(`^I POST to "([^"]*)" with grant_type "([^"]*)"$`, steps.postWithGrantType)
 	ctx.Step(`^I GET "([^"]*)" with invalid token "([^"]*)"$`, steps.getWithInvalidToken)
+
+	// Admin steps
+	ctx.Step(`^I save the user ID from the userinfo response$`, steps.saveUserIDFromUserInfo)
+	ctx.Step(`^I delete the user via admin API$`, steps.deleteUserViaAdmin)
+	ctx.Step(`^I delete the user via admin API with token "([^"]*)"$`, steps.deleteUserViaAdminWithToken)
+	ctx.Step(`^I attempt to delete user with ID "([^"]*)" via admin API$`, steps.deleteSpecificUserViaAdmin)
+	ctx.Step(`^I attempt to get user info with the saved access token$`, steps.attemptGetUserInfo)
 }
 
 type authSteps struct {
@@ -119,6 +133,47 @@ func (s *authSteps) requestUserInfo(ctx context.Context) error {
 	}
 	s.tc.SetAccessToken(accessToken.(string))
 
+	return s.tc.GET("/auth/userinfo", map[string]string{
+		"Authorization": "Bearer " + s.tc.GetAccessToken(),
+	})
+}
+
+func (s *authSteps) saveUserIDFromUserInfo(ctx context.Context) error {
+	userID, err := s.tc.GetResponseField("sub")
+	if err != nil {
+		return err
+	}
+	s.tc.SetUserID(userID.(string))
+	return nil
+}
+
+func (s *authSteps) deleteUserViaAdmin(ctx context.Context) error {
+	userID := s.tc.GetUserID()
+	if userID == "" {
+		return fmt.Errorf("no user ID saved")
+	}
+	return s.tc.DELETE("/admin/auth/users/"+userID, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+func (s *authSteps) deleteUserViaAdminWithToken(ctx context.Context, token string) error {
+	userID := s.tc.GetUserID()
+	if userID == "" {
+		return fmt.Errorf("no user ID saved")
+	}
+	return s.tc.DELETE("/admin/auth/users/"+userID, map[string]string{
+		"X-Admin-Token": token,
+	})
+}
+
+func (s *authSteps) deleteSpecificUserViaAdmin(ctx context.Context, userID string) error {
+	return s.tc.DELETE("/admin/auth/users/"+userID, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+func (s *authSteps) attemptGetUserInfo(ctx context.Context) error {
 	return s.tc.GET("/auth/userinfo", map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
