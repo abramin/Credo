@@ -16,7 +16,8 @@ import (
 	auth "credo/internal/auth/handler"
 	"credo/internal/auth/models"
 	"credo/internal/auth/service"
-	"credo/internal/auth/store"
+	sessionStore "credo/internal/auth/store/session"
+	userStore "credo/internal/auth/store/user"
 	jwttoken "credo/internal/jwt_token"
 	"credo/internal/platform/middleware"
 	dErrors "credo/pkg/domain-errors"
@@ -27,11 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemorySessionStore, *jwttoken.JWTService, *audit.InMemoryStore) {
+func SetupSuite(t *testing.T) (*chi.Mux, *userStore.InMemoryUserStore, *sessionStore.InMemorySessionStore, *jwttoken.JWTService, *audit.InMemoryStore) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	userStore := store.NewInMemoryUserStore()
-	sessionStore := store.NewInMemorySessionStore()
+	userStore := userStore.NewInMemoryUserStore()
+	sessionStore := sessionStore.NewInMemorySessionStore()
 	jwtService := jwttoken.NewJWTService(
 		"test-secret-key",
 		"credo",

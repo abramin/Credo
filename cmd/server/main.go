@@ -12,7 +12,8 @@ import (
 	"credo/internal/audit"
 	authHandler "credo/internal/auth/handler"
 	authService "credo/internal/auth/service"
-	authStore "credo/internal/auth/store"
+	sessionStore "credo/internal/auth/store/session"
+	userStore "credo/internal/auth/store/user"
 	consentHandler "credo/internal/consent/handler"
 	consentService "credo/internal/consent/service"
 	consentStore "credo/internal/consent/store"
@@ -62,8 +63,8 @@ func main() {
 // initializeAuthService creates and configures the authentication service
 func initializeAuthService(m *metrics.Metrics, log *slog.Logger, jwtService *jwttoken.JWTService, cfg *config.Server) *authService.Service {
 	return authService.NewService(
-		authStore.NewInMemoryUserStore(),
-		authStore.NewInMemorySessionStore(),
+		userStore.NewInMemoryUserStore(),
+		sessionStore.NewInMemorySessionStore(),
 		authService.WithSessionTTL(cfg.SessionTTL),
 		authService.WithMetrics(m),
 		authService.WithLogger(log),

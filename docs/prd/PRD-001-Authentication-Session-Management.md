@@ -3,7 +3,7 @@
 **Status:** Implementation Required
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
-**Last Updated:** 2025-12-03
+**Last Updated:** 2025-12-11
 
 ---
 
@@ -15,10 +15,10 @@ Credo requires a lightweight authentication system that manages user identities 
 
 ### Goals
 
-- Implement OIDC-lite authentication flow (OAuth2 + minimal identity layer)
+- Implement OIDC-lite authentication flow (OAuth2 + minimal identity layer) using signed JWTs
 - Manage user lifecycle (creation, retrieval, profile access)
 - Handle session creation and validation
-- Issue access and ID tokens for authenticated users
+- Issue access and ID tokens for authenticated users with configurable TTLs
 - Provide userinfo endpoint for profile claims
 
 ### Non-Goals
@@ -136,6 +136,7 @@ This implementation follows the standard **OAuth 2.0 Authorization Code Flow** (
    - RedirectURI from input (stored for validation at token exchange)
    - CreatedAt = current timestamp
    - CodeExpiresAt = current timestamp + 10 minutes
+   - ExpiresAt = current timestamp + Session TTL (default 24h, configurable via `SESSION_TTL`)
 9. Save session to SessionStore
 10. Build redirect_uri response:
     - Append code and state as query parameters
@@ -172,9 +173,9 @@ This implementation follows the standard **OAuth 2.0 Authorization Code Flow** (
 ```json
 {
   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "id_token": "idt_550e8400-e29b-41d4-a716-446655440000",
+  "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "token_type": "Bearer",
-  "expires_in": 3600
+  "expires_in": 900
 }
 ```
 
@@ -191,8 +192,8 @@ This implementation follows the standard **OAuth 2.0 Authorization Code Flow** (
 9. Mark authorization code as used in session (set CodeUsed = true)
 10. Generate JWT access_token with claims: user_id, session_id, client_id, exp, iat, iss, aud
 11. Sign JWT with HS256 using configured signing key
-12. Generate id*token as: `"idt*" + session.ID` (placeholder for now)
-13. Set token expiry: expires_in = session TTL in seconds
+12. Generate id token
+13. Set token expiry: expires_in = token TTL in seconds (default 15m, configurable via `TOKEN_TTL`). Note: Session TTL (default 24h, `SESSION_TTL`) governs how long the underlying session remains valid.
 14. Update session status to "active"
 15. Save updated session
 16. Return tokens
@@ -291,33 +292,32 @@ type Session struct {
 
 ### TR-2: Storage Interfaces
 
-**UserStore** (Location: `internal/auth/store.go`)
+**UserStore** (Location: `internal/auth/store/user`)
 
 ```go
 type UserStore interface {
-    SaveUser(ctx context.Context, user *User) error
-    FindUserByID(ctx context.Context, id string) (*User, error)
-    FindUserByEmail(ctx context.Context, email string) (*User, error)
+    Save(ctx context.Context, user *User) error
+    FindByID(ctx context.Context, id uuid.UUID) (*User, error)
+    FindByEmail(ctx context.Context, email string) (*User, error)
     FindOrCreateByEmail(ctx context.Context, email string, user *models.User) (*models.User, error)
-    DeleteUser(ctx context.Context, id string) error // For GDPR
+    Delete(ctx, id uuid.UUID) with audit event `user_deleted` //  GDPR helper
 }
 ```
 
-**SessionStore** (Location: `internal/auth/store.go`)
+**SessionStore** (Location: `internal/auth/store/session`)
 
 ```go
 type SessionStore interface {
     Save(ctx context.Context, session *Session) error
-    FindByID(ctx context.Context, id uuid.UUID) (*Session, error)
     FindByCode(ctx context.Context, code string) (*Session, error) // For token exchange
-    DeleteSession(ctx context.Context, id uuid.UUID) error
-    DeleteSessionsByUser(ctx context.Context, userID uuid.UUID) error // For GDPR
+    FindByID(ctx context.Context, id uuid.UUID) (*Session, error)
+    DeleteSessionsByUser(ctx, userID uuid.UUID) with audit event `sessions_revoked`     // GDPR helper
 }
 ```
 
 ### TR-3: Service Layer
 
-**AuthService** (Location: `internal/auth/service.go`)
+**AuthService** (Location: `internal/auth/service/service.go`)
 
 ```go
 type AuthService struct {
@@ -325,23 +325,22 @@ type AuthService struct {
     sessions SessionStore
 }
 
-func (s *AuthService) Authorize(ctx context.Context, req AuthorizationRequest) (*AuthorizationResult, error)
-func (s *AuthService) Token(ctx context.Context, req TokenRequest) (*TokenResult, error)
+func (s *AuthService) Authorize(ctx context.Context, req *AuthorizationRequest) (*AuthorizationResult, error)
+func (s *AuthService) Token(ctx context.Context, req *TokenRequest) (*TokenResult, error)
 func (s *AuthService) UserInfo(ctx context.Context, token string) (*User, error)
 ```
 
 ### TR-4: HTTP Handlers
 
-**Handler Struct** (Location: `internal/transport/http/router.go`)
+**Handler Struct** (Location: `internal/auth/handler/handler.go`)
 
 ```go
 type Handler struct {
-    authService   *auth.AuthService
-    // ... other services
+    authService *auth.Service
 }
 ```
 
-**Handler Functions** (Location: `internal/transport/http/handlers_auth.go`)
+**Handler Functions** (Location: `internal/auth/handler/handler.go`)
 
 ```go
 func (h *Handler) handleAuthorize(w http.ResponseWriter, r *http.Request)
@@ -354,14 +353,14 @@ func (h *Handler) handleUserInfo(w http.ResponseWriter, r *http.Request)
 **Required:**
 
 - `internal/platform/logger` - For structured logging
-- `pkg/errors` - For typed error handling
+- `pkg/domain-errors` - For typed error handling
 - `internal/audit` - For logging authentication events
 
 **Store Implementation:**
 
-- Use `internal/auth/store_memory.go` (already implemented)
+- Use in-memory stores in `internal/auth/store/user` and `internal/auth/store/session` (already implemented)
 - Thread-safe with `sync.RWMutex`
-- Returns typed errors from `pkg/errors`
+- Returns typed errors from `pkg/domain-errors`
 
 ---
 
@@ -377,12 +376,13 @@ func (h *Handler) handleUserInfo(w http.ResponseWriter, r *http.Request)
 
 ### Token Format
 
-**Access Token:** `at_<session_id>`
-**ID Token:** `idt_<session_id>`
-**Token Type:** Bearer
-**Lifetime:** 3600 seconds (1 hour)
+**Access Token:** JWT (HS256) containing `user_id`, `session_id`, `client_id`, `iss`, `aud`, `iat`, `exp`, and optional `env`. Lifetime = Token TTL (default 15m via `TOKEN_TTL`).
 
-**Note:** For MVP, tokens are simple opaque strings. Future enhancement: Use JWT with signatures.
+**ID Token:** JWT (HS256) containing `sub` (user_id), `sid` (session_id), `azp` (client_id), `iss`, `aud`, `iat`, `exp`, optional `env`. Lifetime = Token TTL (default 15m).
+
+**Session Lifetime:** Session records persist for Session TTL (default 24h via `SESSION_TTL`) and are used to validate codes, tokens, and userinfo. Code lifetime is fixed at 10 minutes.
+
+**Token Type:** Bearer
 
 ### Error Response Format
 
@@ -409,9 +409,9 @@ All endpoints return errors in this format:
 
 ### SR-2: Token Security
 
-- Tokens must be unguessable (include UUIDs)
-- Tokens should expire after 1 hour
-- Bearer tokens must be validated on every request
+- Tokens are signed JWTs (HS256). Validate signature, issuer, audience, and exp on every request.
+- Token TTL is short-lived (default 15 minutes, configurable via `TOKEN_TTL`).
+- Session TTL governs how long the authorization session stays valid (default 24h, `SESSION_TTL`).
 
 ### SR-3: CSRF Protection
 
@@ -437,6 +437,8 @@ All endpoints return errors in this format:
 - Session started: `session_created` (audit)
 - Token issued: `token_issued` (audit)
 - UserInfo accessed: `userinfo_accessed` (audit)
+- User deleted / GDPR erase: `user_deleted` (audit)
+- Sessions revoked in bulk (e.g., DeleteSessionsByUser): `sessions_revoked` (audit)
 - Authentication failures: `auth_failed` (standard log)
 
 **Log Format:**
@@ -512,15 +514,16 @@ curl -X POST http://localhost:8080/auth/token \
 
 # Expected Response:
 # {
-#   "access_token": "at_550e8400-e29b-41d4-a716-446655440000",
-#   "id_token": "idt_550e8400-e29b-41d4-a716-446655440000",
+#   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+#   "id_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
 #   "token_type": "Bearer",
-#   "expires_in": 3600
+#   "expires_in": 900
 # }
 
 # 3. Get UserInfo with Access Token
 curl http://localhost:8080/auth/userinfo \
-  -H "Authorization: Bearer at_550e8400-e29b-41d4-a716-446655440000"
+  -H "Authorization: Bearer <access_token_jwt>"
+# Replace with the JWT from the token exchange response
 
 # Expected Response:
 # {
@@ -643,8 +646,8 @@ curl -X POST http://localhost:8080/auth/token \
 
 ### Dependencies
 
-- `internal/auth/store_memory.go` - ✅ Already implemented
-- `pkg/errors` - ✅ Already implemented
+- `internal/auth/store/user` and `internal/auth/store/session` in-memory stores - ✅ Already implemented
+- `pkg/domain-errors` - ✅ Already implemented
 - `internal/audit` - ✅ Already implemented
 - `internal/platform/logger` - ✅ Already implemented
 
@@ -670,16 +673,16 @@ curl -X POST http://localhost:8080/auth/token \
 
 ## 13. Open Questions
 
-1. **Session Expiry:** Should sessions expire? If yes, after how long?
-
-   - **Recommendation:** Yes, 24 hours for MVP
-
-2. **User Auto-Creation:** Should we auto-create users on first auth?
+1. **User Auto-Creation:** Should we auto-create users on first auth?
 
    - **Recommendation:** Yes, for demo purposes. Simplifies onboarding.
 
-3. **Token Revocation:** Do we need ability to revoke tokens?
-   - **Recommendation:** Not for MVP. Add in Phase 2.
+2. **Token Revocation / Refresh:** Do we need refresh tokens or explicit token revocation?
+
+   - **Recommendation:** Not for MVP. Consider refresh + revocation in a follow-up.
+
+3. **GDPR Deletes:** When implementing `Delete` or `DeleteSessionsByUser`, should we hard-delete or tombstone?
+   - **Recommendation:** Emit audit (`user_deleted`, `sessions_revoked`) and hard-delete for demo data; revisit retention if persistence is added.
 
 ---
 
@@ -695,13 +698,14 @@ curl -X POST http://localhost:8080/auth/token \
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                               |
-| ------- | ---------- | ------------ | --------------------------------------------------------------------- |
-| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                           |
-| 1.1     | 2025-12-05 | Engineering  | Updated to OAuth 2.0 Authorization Code Flow (RFC 6749 compliant)     |
-|         |            |              | - Changed authorize endpoint to return `code` instead of `session_id` |
-|         |            |              | - Updated token endpoint to use `grant_type` and `code`               |
-|         |            |              | - Added code expiry, replay prevention, and redirect_uri validation   |
-|         |            |              | - Updated Session model with Code, CodeExpiresAt, CodeUsed fields     |
-|         |            |              | - Added FindByCode() to SessionStore interface                        |
-|         |            |              | - Added FindOrCreateByEmail() to User Store interface                 |
+| Version | Date       | Author       | Changes                                                                                                          |
+| ------- | ---------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                                      |
+| 1.1     | 2025-12-05 | Engineering  | Updated to OAuth 2.0 Authorization Code Flow (RFC 6749 compliant)                                                |
+|         |            |              | - Changed authorize endpoint to return `code` instead of `session_id`                                            |
+|         |            |              | - Updated token endpoint to use `grant_type` and `code`                                                          |
+|         |            |              | - Added code expiry, replay prevention, and redirect_uri validation                                              |
+|         |            |              | - Updated Session model with Code, CodeExpiresAt, CodeUsed fields                                                |
+|         |            |              | - Added FindByCode() to SessionStore interface                                                                   |
+|         |            |              | - Added FindOrCreateByEmail() to User Store interface                                                            |
+| 1.2     | 2025-12-11 | Engineering  | Documented JWT token format, token/session TTLs, audit events for deletes, and corrected store/service locations |

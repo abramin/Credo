@@ -11,7 +11,8 @@ import (
 
 	"credo/internal/audit"
 	"credo/internal/auth/models"
-	"credo/internal/auth/store"
+	sessionStore "credo/internal/auth/store/session"
+	userStore "credo/internal/auth/store/user"
 	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
 	"credo/pkg/attrs"
@@ -212,7 +213,7 @@ func (s *Service) UserInfo(ctx context.Context, sessionID string) (*models.UserI
 
 	session, err := s.sessions.FindByID(ctx, parsedSessionID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, userStore.ErrNotFound) {
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"session_id", parsedSessionID.String(),
 			)
@@ -237,7 +238,7 @@ func (s *Service) UserInfo(ctx context.Context, sessionID string) (*models.UserI
 
 	user, err := s.users.FindByID(ctx, session.UserID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, userStore.ErrNotFound) {
 			s.logAuthFailure(ctx, "user_not_found", false,
 				"session_id", parsedSessionID.String(),
 				"user_id", session.UserID.String(),
@@ -286,7 +287,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	// 2. Find session by authorization code
 	session, err := s.sessions.FindByCode(ctx, req.Code)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, sessionStore.ErrNotFound) {
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"client_id", req.ClientID,
 			)

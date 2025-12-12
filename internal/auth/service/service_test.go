@@ -12,7 +12,8 @@ import (
 
 	"credo/internal/auth/models"
 	"credo/internal/auth/service/mocks"
-	"credo/internal/auth/store"
+	sessionStore "credo/internal/auth/store/session"
+	userStore "credo/internal/auth/store/user"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -184,7 +185,7 @@ func (s *ServiceSuite) TestToken() {
 	})
 
 	s.T().Run("session not found", func(t *testing.T) {
-		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, store.ErrNotFound)
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, sessionStore.ErrNotFound)
 
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
@@ -265,7 +266,7 @@ func (s *ServiceSuite) TestUserInfo() {
 	})
 
 	s.T().Run("session lookup returns not found error", func(t *testing.T) {
-		s.mockSessStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(nil, store.ErrNotFound)
+		s.mockSessStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(nil, sessionStore.ErrNotFound)
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		assert.ErrorIs(s.T(), err, dErrors.New(dErrors.CodeNotFound, "session not found"))
@@ -277,7 +278,7 @@ func (s *ServiceSuite) TestUserInfo() {
 			UserID: existingUser.ID,
 			Status: StatusActive,
 		}, nil)
-		s.mockUserStore.EXPECT().FindByID(gomock.Any(), existingUser.ID).Return(nil, store.ErrNotFound)
+		s.mockUserStore.EXPECT().FindByID(gomock.Any(), existingUser.ID).Return(nil, userStore.ErrNotFound)
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		assert.ErrorIs(s.T(), err, dErrors.New(dErrors.CodeUnauthorized, "user not found"))
