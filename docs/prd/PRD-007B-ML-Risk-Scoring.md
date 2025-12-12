@@ -1,34 +1,72 @@
-# PRD-007B: ML-Based Risk Scoring
+# PRD-007B: ML-Based Risk Scoring (Future Enhancement)
 
 **Status:** Not Started
-**Priority:** P2 (Medium)
+**Priority:** P3 (Future / Optional)
 **Owner:** Engineering Team
-**Last Updated:** 2025-12-06
-**Dependencies:** PRD-005 (Decision Engine), PRD-006 (Audit & Compliance)
+**Last Updated:** 2025-12-12
+**Dependencies:** PRD-023 (Rule-Based Fraud Detection), PRD-005 (Decision Engine), PRD-006 (Audit & Compliance)
+
+---
+
+## IMPORTANT: Relationship to PRD-023
+
+**This PRD describes ML-based risk scoring**, which is a **future enhancement** to the rule-based fraud detection system described in PRD-023.
+
+**Key Distinctions:**
+
+| Aspect              | PRD-023 (Rule-Based)                     | PRD-007B (ML-Based)                      |
+| ------------------- | ---------------------------------------- | ---------------------------------------- |
+| **Approach**        | Lightweight rules fed by request metadata| Machine learning models trained on historical data|
+| **Cost**            | Low (no GPU, no training infrastructure) | Higher (training pipeline, model storage)|
+| **Complexity**      | Easy to store, easy to test, easy to tune| Requires ML expertise, model versioning  |
+| **Explainability**  | Transparent (rule weights visible)       | Requires SHAP values or similar          |
+| **When to Use**     | **MVP and ongoing operations**           | **After PRD-023 is mature and data exists**|
+| **Priority**        | **P1 (High) - Implement first**          | **P3 (Future) - Implement later**        |
+
+**Implementation Order:**
+1. **First:** Implement PRD-023 (rule-based fraud detection)
+2. Collect data for 6-12 months (fraud labels, risk scores, outcomes)
+3. **Later:** Evaluate if ML models improve accuracy beyond rules
+4. If yes, implement PRD-007B as enhancement (not replacement)
+
+**Hybrid Approach:**
+- PRD-023 provides baseline risk scoring (always active)
+- PRD-007B (this PRD) adds ML-enhanced risk scores (optional, if beneficial)
+- Both scores can coexist: `rule_based_score` + `ml_score` → `final_score`
 
 ---
 
 ## 1. Overview
 
 ### Problem Statement
-Current decision engine uses static rule-based logic. While powerful, it cannot learn from patterns, adapt to emerging threats, or provide probabilistic risk assessments. Manual rule maintenance becomes burdensome as fraud patterns evolve.
+Rule-based risk scoring (PRD-023) uses static thresholds and heuristics. While effective and transparent, it cannot:
+- **Learn from patterns** in historical fraud data
+- **Adapt to emerging threats** without manual rule updates
+- **Provide probabilistic risk assessments** with confidence intervals
+- **Detect subtle fraud patterns** that rules miss (e.g., behavioral anomalies)
+
+Machine learning models can complement rule-based systems by learning from data.
 
 ### Goals
+- **Complement PRD-023 rule-based system** (not replace it)
 - Build ML-based risk scoring system that learns from historical decisions
-- Provide risk scores (0.0-1.0) for identity verification requests
-- Train on historical audit data (approvals, rejections, fraud reports)
+- Provide ML-enhanced risk scores (0.0-1.0) for identity verification requests
+- Train on historical audit data collected by PRD-023 (approvals, rejections, fraud reports)
 - Support multiple risk dimensions (identity fraud, account takeover, synthetic identity)
-- Enable hybrid approach: ML scores feed into existing rules engine
-- Provide explainability: which features contributed to risk score
-- Support model retraining as new data arrives
+- Enable hybrid approach: Combine ML scores with rule-based scores from PRD-023
+- Provide explainability: which features contributed to risk score (SHAP values)
+- Support model retraining as new data arrives (weekly/monthly)
+- **Only implement if ML demonstrably improves over rule-based approach**
 
-### Non-Goals
+### Non-Goals (Use PRD-023 Instead)
+- Replacing rule-based fraud detection (PRD-023 remains primary system)
+- Implementing fraud detection from scratch (PRD-023 provides foundation)
 - Real-time model training (batch training sufficient)
 - Deep learning models (gradient boosting/random forests sufficient)
 - Automatic model deployment (manual review required)
-- Integration with external fraud databases
-- Behavioral biometrics
-- Graph-based fraud detection
+- Integration with external fraud databases (PRD-023 handles this)
+- Behavioral biometrics (out of scope)
+- Graph-based fraud detection (PRD-023 has simple account graphing)
 - Federated learning across tenants
 
 ---

@@ -94,6 +94,7 @@ Credo is a **regulated identity and authorization system** that:
 | [PRD-007B](./PRD-007B-ML-Risk-Scoring.md)                        | ML-Based Risk Scoring                   | 🔵 Not Started | 14-18h    | PRD-005, 006 |
 | [PRD-008](./PRD-008-GDPR-CCPA-Automation.md)                     | GDPR/CCPA Automation                    | 🔵 Not Started | 12-16h    | PRD-006, 007 |
 | [PRD-024](./PRD-024-Data-Residency-Sovereignty.md) 🆕            | Data Residency & Sovereignty            | 🔵 Not Started | 8-12h     | PRD-001, 006 |
+| [PRD-024](./PRD-027-Risk-Based-Adaptive-Authentication.md) 🆕    | Risk Based Adaptive Authentication      | 🔵 Not Started | 8-12h     | PRD-001, 006 |
 
 **Phase 4 Total:** ~60-84 hours (7.5-10.5 days)
 
