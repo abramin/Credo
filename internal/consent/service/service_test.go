@@ -50,6 +50,12 @@ func TestServiceSuite(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }
 
+func (s *ServiceSuite) assertValidationError(t *testing.T, err error, expectedCode dErrors.Code, msgContext string) {
+	t.Helper()
+	assert.Error(t, err, msgContext)
+	assert.True(t, dErrors.Is(err, expectedCode), msgContext)
+}
+
 func (s *ServiceSuite) TestGrant() {
 	s.T().Run("creates new consent when not exists", func(t *testing.T) {
 		purposes := []models.Purpose{models.PurposeLogin}
@@ -73,8 +79,8 @@ func (s *ServiceSuite) TestGrant() {
 
 		granted, err := s.service.Grant(context.Background(), "user123", purposes)
 		assert.NoError(t, err)
-		assert.Len(t, granted, 1)
-		assert.Equal(t, models.PurposeLogin, granted[0].Purpose)
+		assert.Len(t, granted.Granted, 1)
+		assert.Equal(t, models.PurposeLogin, granted.Granted[0].Purpose)
 	})
 
 	s.T().Run("renews existing active consent", func(t *testing.T) {
@@ -103,10 +109,10 @@ func (s *ServiceSuite) TestGrant() {
 				return nil
 			})
 
-		granted, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
+		res, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, granted, 1)
-		assert.Equal(t, "consent_abc", granted[0].ID)
+		assert.Len(t, res.Granted, 1)
+		assert.Equal(t, models.StatusActive, res.Granted[0].Status)
 	})
 
 	s.T().Run("idempotent within 5-minute window - returns existing without update", func(t *testing.T) {
@@ -128,13 +134,13 @@ func (s *ServiceSuite) TestGrant() {
 		// Should NOT call Update or Save - no store write expected
 		// No need to set expectations for Update/Save
 
-		granted, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
+		res, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, granted, 1)
-		assert.Equal(t, "consent_recent", granted[0].ID)
+		assert.Len(t, res.Granted, 1)
+		assert.Equal(t, existing.Purpose, res.Granted[0].Purpose)
 		// Verify timestamps weren't updated
-		assert.Equal(t, existing.GrantedAt, granted[0].GrantedAt)
-		assert.Equal(t, existing.ExpiresAt, granted[0].ExpiresAt)
+		assert.Equal(t, existing.GrantedAt, res.Granted[0].GrantedAt)
+		assert.Equal(t, existing.ExpiresAt, res.Granted[0].ExpiresAt)
 	})
 
 	s.T().Run("updates consent after 5-minute window expires", func(t *testing.T) {
@@ -164,10 +170,10 @@ func (s *ServiceSuite) TestGrant() {
 				return nil
 			})
 
-		granted, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
+		res, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, granted, 1)
-		assert.Equal(t, "consent_old", granted[0].ID)
+		assert.Len(t, res.Granted, 1)
+		assert.Greater(t, res.Granted[0].GrantedAt, existing.GrantedAt)
 	})
 
 	s.T().Run("always updates expired consent regardless of time window", func(t *testing.T) {
@@ -198,10 +204,10 @@ func (s *ServiceSuite) TestGrant() {
 				return nil
 			})
 
-		granted, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
+		res, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, granted, 1)
-		assert.Equal(t, "consent_expired", granted[0].ID)
+		assert.Len(t, res.Granted, 1)
+		assert.Greater(t, res.Granted[0].GrantedAt, existing.GrantedAt)
 	})
 
 	s.T().Run("always updates revoked consent regardless of time window", func(t *testing.T) {
@@ -235,10 +241,10 @@ func (s *ServiceSuite) TestGrant() {
 				return nil
 			})
 
-		granted, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
+		res, err := s.service.Grant(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, granted, 1)
-		assert.Equal(t, "consent_revoked", granted[0].ID)
+		assert.Len(t, res.Granted, 1)
+		assert.Greater(t, res.Granted[0].GrantedAt, existing.GrantedAt)
 	})
 
 	s.T().Run("grants multiple purposes", func(t *testing.T) {
@@ -262,7 +268,7 @@ func (s *ServiceSuite) TestGrant() {
 
 		granted, err := s.service.Grant(context.Background(), "user123", purposes)
 		assert.NoError(t, err)
-		assert.Len(t, granted, 2)
+		assert.Len(t, granted.Granted, 2)
 	})
 
 	s.T().Run("emits audit with reason for grant", func(t *testing.T) {
@@ -289,17 +295,14 @@ func (s *ServiceSuite) TestGrant() {
 	})
 
 	s.T().Run("validation errors", func(t *testing.T) {
-		// Missing userID
 		_, err := s.service.Grant(context.Background(), "", []models.Purpose{models.PurposeLogin})
-		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized))
+		s.assertValidationError(t, err, dErrors.CodeUnauthorized, "missing userID")
 
-		// Empty purposes
 		_, err = s.service.Grant(context.Background(), "user123", []models.Purpose{})
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "empty purposes")
 
-		// Invalid purpose
 		_, err = s.service.Grant(context.Background(), "user123", []models.Purpose{"invalid"})
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "invalid purpose")
 	})
 
 	s.T().Run("store error on find", func(t *testing.T) {
@@ -347,7 +350,7 @@ func (s *ServiceSuite) TestRevoke() {
 
 		revoked, err := s.service.Revoke(context.Background(), "user123", []models.Purpose{models.PurposeRegistryCheck})
 		assert.NoError(t, err)
-		assert.Len(t, revoked, 1)
+		assert.Len(t, revoked.Revoked, 1)
 	})
 
 	s.T().Run("revokes multiple purposes", func(t *testing.T) {
@@ -371,7 +374,7 @@ func (s *ServiceSuite) TestRevoke() {
 
 		revoked, err := s.service.Revoke(context.Background(), "user123", purposes)
 		assert.NoError(t, err)
-		assert.Len(t, revoked, 2)
+		assert.Len(t, revoked.Revoked, 2)
 	})
 
 	s.T().Run("skips already revoked consent", func(t *testing.T) {
@@ -389,7 +392,7 @@ func (s *ServiceSuite) TestRevoke() {
 
 		revoked, err := s.service.Revoke(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, revoked, 0)
+		assert.Len(t, revoked.Revoked, 0)
 	})
 
 	s.T().Run("skips expired consent", func(t *testing.T) {
@@ -407,7 +410,7 @@ func (s *ServiceSuite) TestRevoke() {
 
 		revoked, err := s.service.Revoke(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, revoked, 0)
+		assert.Len(t, revoked.Revoked, 0)
 	})
 
 	s.T().Run("skips non-existent consent", func(t *testing.T) {
@@ -417,17 +420,15 @@ func (s *ServiceSuite) TestRevoke() {
 
 		revoked, err := s.service.Revoke(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, revoked, 0)
+		assert.Len(t, revoked.Revoked, 0)
 	})
 
 	s.T().Run("validation errors", func(t *testing.T) {
-		// Missing userID
 		_, err := s.service.Revoke(context.Background(), "", []models.Purpose{models.PurposeLogin})
-		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized))
+		s.assertValidationError(t, err, dErrors.CodeUnauthorized, "missing userID")
 
-		// Invalid purpose
 		_, err = s.service.Revoke(context.Background(), "user123", []models.Purpose{"invalid"})
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "invalid purpose")
 	})
 
 	s.T().Run("with auditor publishes audit event", func(t *testing.T) {
@@ -446,9 +447,6 @@ func (s *ServiceSuite) TestRevoke() {
 
 		_, err := s.service.Revoke(context.Background(), "user123", []models.Purpose{models.PurposeRegistryCheck})
 		assert.NoError(t, err)
-
-		// Note: Audit verification would require access to audit store which is created in SetupTest
-		// For a complete test, we'd need to refactor to inject the audit store or make it accessible
 	})
 
 	s.T().Run("returns revoked record with revokedAt set", func(t *testing.T) {
@@ -471,11 +469,10 @@ func (s *ServiceSuite) TestRevoke() {
 			RevokeByUserAndPurpose(gomock.Any(), "user123", models.PurposeLogin, gomock.Any()).
 			Return(&updated, nil)
 
-		revoked, err := s.service.Revoke(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
+		res, err := s.service.Revoke(context.Background(), "user123", []models.Purpose{models.PurposeLogin})
 		assert.NoError(t, err)
-		assert.Len(t, revoked, 1)
-		assert.NotNil(t, revoked[0].RevokedAt)
-		assert.Equal(t, revokedAt, *revoked[0].RevokedAt)
+		assert.Len(t, res.Revoked, 1)
+		assert.Equal(t, revokedAt, res.Revoked[0].RevokedAt)
 	})
 }
 
@@ -548,13 +545,11 @@ func (s *ServiceSuite) TestRequire() {
 	})
 
 	s.T().Run("validation errors", func(t *testing.T) {
-		// Missing userID
 		err := s.service.Require(context.Background(), "", models.PurposeVCIssuance)
-		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized))
+		s.assertValidationError(t, err, dErrors.CodeUnauthorized, "missing userID")
 
-		// Invalid purpose
 		err = s.service.Require(context.Background(), "user123", "invalid")
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "invalid purpose")
 	})
 
 	s.T().Run("store error", func(t *testing.T) {
