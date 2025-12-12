@@ -51,6 +51,12 @@ export BASE_URL=http://localhost:8080
 go test -v
 ```
 
+To avoid the default 5 minute consent grant idempotency window during tests, run the backend with:
+
+```bash
+CONSENT_GRANT_WINDOW=1s go run ../cmd/server/main.go
+```
+
 ## Project Structure
 
 ```
