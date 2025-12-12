@@ -219,7 +219,7 @@ func (s *Service) Revoke(ctx context.Context, userID string, purposes []models.P
 			continue
 		}
 		if record.ExpiresAt != nil && record.ExpiresAt.Before(time.Now()) {
-			continue
+			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, fmt.Sprintf("cannot revoke expired consent for purpose %s", purpose))
 		}
 		now := time.Now()
 		revokedRecord, err := s.store.RevokeByUserAndPurpose(ctx, userID, record.Purpose, now)

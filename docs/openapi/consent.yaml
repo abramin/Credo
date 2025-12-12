@@ -8,6 +8,10 @@ info:
     The API provides purpose-based consent management with support for granting,
     revoking, and listing user consents. All endpoints require authentication
     via JWT bearer token.
+
+    Lifecycle defaults (configurable via env):
+    - Consent TTL: `CONSENT_TTL` (default 365d) sets expiry for new grants and renewals.
+    - Grant idempotency window: `CONSENT_GRANT_WINDOW` (default 5m) makes rapid repeat grants a no-op; timestamps are not updated and the existing consent is returned.
 servers:
   - url: http://localhost:8080
     description: Local development server
@@ -19,7 +23,10 @@ paths:
         Grant consent for one or more purposes. If consent already exists for
         a purpose and is active, it's renewed with a new expiry date. If consent
         was previously revoked or expired, the same consent ID is reused and
-        updated to active status.
+        updated to active status. Requests arriving within the grant idempotency
+        window (`CONSENT_GRANT_WINDOW`, default 5m) for an already-active consent
+        are treated as idempotent: no timestamps are updated and the existing
+        consent is returned.
       security:
         - bearerAuth: []
       requestBody:
@@ -68,7 +75,8 @@ paths:
       description: |
         Retrieve all consent records for the authenticated user, including
         active, expired, and revoked consents. The status field is computed
-        based on the revoked_at and expires_at timestamps.
+        based on the revoked_at and expires_at timestamps. Invalid filter values
+        for `status` or `purpose` return a `400 bad_request` error.
       security:
         - bearerAuth: []
       parameters:
@@ -121,7 +129,8 @@ paths:
       description: |
         Revoke consent for one or more purposes. Once revoked, future operations
         requiring that purpose will fail until consent is re-granted. Revoking
-        already revoked consent is idempotent.
+        already revoked consent is idempotent. Attempting to revoke an expired
+        consent returns `400 bad_request`. Missing consents are ignored (no error).
       security:
         - bearerAuth: []
       requestBody:
@@ -228,7 +237,9 @@ components:
         expires_at:
           type: string
           format: date-time
-          description: Timestamp when consent expires (typically 1 year from grant)
+          description: |
+            Timestamp when consent expires. Defaults to `CONSENT_TTL`
+            (1 year) unless overridden in configuration.
         status:
           $ref: "#/components/schemas/ConsentStatus"
     RevokeConsentRequest:
@@ -335,6 +346,14 @@ components:
               value:
                 error: bad_request
                 error_description: "invalid purpose: invalid_purpose"
+            invalid_filter:
+              value:
+                error: bad_request
+                error_description: "status must be one of [active expired revoked]"
+            revoke_expired:
+              value:
+                error: bad_request
+                error_description: "cannot revoke expired consent for purpose login"
     Unauthorized:
       description: Missing or invalid credentials
       content:
