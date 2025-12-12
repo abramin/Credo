@@ -3,14 +3,16 @@
 **Status:** Implementation Required
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
-**Last Updated:** 2025-12-03
+**Last Updated:** 2025-12-12
 
 ---
 
 ## 1. Overview
 
 ### Problem Statement
+
 Regulated systems must prove:
+
 - **Who** accessed **whose** data
 - **When** the access occurred
 - **What** action was performed
@@ -20,15 +22,18 @@ Regulated systems must prove:
 This requires an **append-only**, **immutable**, **searchable** audit log.
 
 ### Goals
+
 - Emit audit events for all sensitive operations
 - Store events in append-only fashion (no updates/deletes)
 - Provide audit export for users (GDPR transparency)
 - Non-blocking event emission (async publishing)
 - Support querying by user, action, time range
+- Provide a searchable index (Elasticsearch/OpenSearch) for investigative queries with eventual consistency
 
 ### Non-Goals
+
 - Real-time audit dashboards
-- Advanced search/analytics (Elasticsearch integration)
+- SIEM-grade correlation rules (can be exported later)
 - Audit log retention policies (assume permanent for MVP)
 - Audit log encryption at rest
 - External audit log shipping (Splunk, Datadog)
@@ -44,6 +49,7 @@ This requires an **append-only**, **immutable**, **searchable** audit log.
 **Description:** Internal service method called by handlers to log sensitive operations. Should be non-blocking.
 
 **Usage Example:**
+
 ```go
 _ = h.auditPublisher.Emit(ctx, audit.Event{
     ID:        uuid.New().String(),
@@ -75,11 +81,13 @@ _ = h.auditPublisher.Emit(ctx, audit.Event{
 ---
 
 ### FR-2: Export User Audit Log
+
 **Endpoint:** `GET /me/data-export`
 
 **Description:** Export all audit events for the authenticated user (GDPR Article 15 - Right to Access).
 
 **Input:**
+
 - Header: `Authorization: Bearer <token>`
 - Query params (optional):
   - `from` - Start date (ISO 8601)
@@ -87,6 +95,7 @@ _ = h.auditPublisher.Emit(ctx, audit.Event{
   - `action` - Filter by action type
 
 **Output (Success - 200):**
+
 ```json
 {
   "user_id": "user_123",
@@ -121,7 +130,53 @@ _ = h.auditPublisher.Emit(ctx, audit.Event{
 }
 ```
 
+---
+
+### FR-3: Searchable Audit Queries (Investigations)
+
+**Endpoint:** `GET /audit/search`
+
+**Description:** Allow authorized compliance users to search audit events across users with filters. Backed by an Elasticsearch/
+OpenSearch index fed from the append-only event stream.
+
+**Input:**
+
+- Query params:
+  - `user_id` (optional)
+  - `action` (optional, multi-value)
+  - `purpose` (optional)
+  - `from`, `to` (ISO timestamps)
+  - `decision` (optional)
+- Header: `Authorization: Bearer <token>` with `admin/compliance` role
+
+**Output (Success - 200):**
+
+```json
+{
+  "results": [
+    {
+      "id": "evt_def456",
+      "timestamp": "2025-12-03T09:05:00Z",
+      "user_id": "user_123",
+      "action": "consent_granted",
+      "purpose": "registry_check",
+      "decision": "granted",
+      "reason": "user_initiated"
+    }
+  ],
+  "total": 1,
+  "took_ms": 12
+}
+```
+
+**Implementation Notes:**
+
+- Events are appended to durable storage (object store or SQL) and streamed into Elasticsearch/OpenSearch for indexing.
+- Index mappings should accommodate nested payloads and time-based indices for retention; daily indices acceptable for MVP.
+- On query errors or index lag, fall back to exporting raw events (slower) but keep the API contract stable.
+
 **Business Logic:**
+
 1. Extract user from bearer token
 2. Parse optional filters (from, to, action)
 3. Call `auditStore.ListByUser(userID)`
@@ -129,6 +184,7 @@ _ = h.auditPublisher.Emit(ctx, audit.Event{
 5. Return events as JSON
 
 **Error Cases:**
+
 - 401 Unauthorized: Invalid bearer token
 - 500 Internal Server Error: Store failure
 
@@ -202,11 +258,23 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### TR-5: Event Streaming & Indexing Pipeline
+
+- **Transport:** Publish audit events to Kafka/NATS topics so ingestion is decoupled from request latency; keep the synchronous
+  store append as a fallback for degraded modes.
+- **Indexing Workers:** Dedicated consumers forward events to Elasticsearch/OpenSearch indices (per-day) and a long-term
+  warehouse/object store. Include dead-letter handling for indexing errors.
+- **Reliability:** Use an outbox pattern on emitters to guarantee delivery into Kafka; projection/indexers should be
+  idempotent using event IDs and versions.
+- **Caching:** Permit a Redis cache for hot investigative queries (recent 24h) to accelerate compliance dashboards; cache
+  invalidations are driven by Kafka consumer offsets so caches stay consistent with the index.
+
 ---
 
 ## 4. Implementation Steps
 
 1. **Phase 1:** Audit Integration Across Handlers (2-3 hours)
+
    - Add `auditPublisher.Emit()` calls to:
      - handleAuthorize
      - handleToken
@@ -220,6 +288,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
    - Use appropriate action names and purposes
 
 2. **Phase 2:** Implement handleDataExport (1 hour)
+
    - Extract user from token
    - Call auditPublisher.List()
    - Format as JSON
@@ -282,6 +351,14 @@ curl "http://localhost:8080/me/data-export?action=consent_granted" \
 ---
 
 ## References
+
 - [GDPR Article 15: Right of access](https://gdpr-info.eu/art-15-gdpr/)
 - Tutorial: `docs/TUTORIAL.md` Section 6
 - Existing Code: `internal/audit/`
+
+## Revision History
+
+| Version | Date       | Author       | Changes                                                                                         |
+| ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                     |
+| 1.2     | 2025-12-12 | Engineering  | Add FR-3: Searchable Audit Queries (Investigations) & TR-5: Event Streaming & Indexing Pipeline |

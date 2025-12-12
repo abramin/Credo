@@ -3,16 +3,18 @@
 **Status:** Implementation Required
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
-**Last Updated:** 2025-12-03
+**Last Updated:** 2025-12-12
 
 ---
 
 ## 1. Overview
 
 ### Problem Statement
+
 The gateway must make authorization decisions by combining evidence from multiple sources (registries, VCs, user attributes) and applying business rules. This is the core "allow/deny" logic that answers: "For user U, doing action A, for purpose P, with evidence E, is this allowed?"
 
 ### Goals
+
 - Implement decision evaluation endpoint
 - Orchestrate evidence gathering (registry + VC checks)
 - Apply business rules based on purpose
@@ -21,6 +23,7 @@ The gateway must make authorization decisions by combining evidence from multipl
 - Derive non-PII attributes for decision making
 
 ### Non-Goals
+
 - Machine learning / AI-based decisions
 - Risk scoring algorithms
 - Complex rule engines (Drools, etc.)
@@ -49,11 +52,13 @@ The gateway must make authorization decisions by combining evidence from multipl
 ## 3. Functional Requirements
 
 ### FR-1: Evaluate Decision
+
 **Endpoint:** `POST /decision/evaluate`
 
 **Description:** Evaluate an authorization decision by gathering evidence and applying rules for the specified purpose.
 
 **Input:**
+
 ```json
 {
   "purpose": "age_verification",
@@ -64,6 +69,7 @@ The gateway must make authorization decisions by combining evidence from multipl
 ```
 
 **Output (Success - Pass):**
+
 ```json
 {
   "status": "pass",
@@ -80,6 +86,7 @@ The gateway must make authorization decisions by combining evidence from multipl
 ```
 
 **Output (Fail - Sanctioned):**
+
 ```json
 {
   "status": "fail",
@@ -93,6 +100,7 @@ The gateway must make authorization decisions by combining evidence from multipl
 ```
 
 **Output (Pass with Conditions):**
+
 ```json
 {
   "status": "pass_with_conditions",
@@ -108,6 +116,7 @@ The gateway must make authorization decisions by combining evidence from multipl
 ```
 
 **Business Logic:**
+
 1. Extract user from bearer token
 2. Require consent for `ConsentPurposeDecision` (optional for MVP)
 3. Parse purpose and context from request
@@ -152,10 +161,12 @@ The gateway must make authorization decisions by combining evidence from multipl
 9. Return decision outcome
 
 **Validation:**
+
 - purpose is required and non-empty
 - context.national_id is required for age_verification
 
 **Error Cases:**
+
 - 401 Unauthorized: Invalid bearer token
 - 400 Bad Request: Missing purpose or required context
 - 504 Gateway Timeout: Registry unavailable
@@ -168,11 +179,13 @@ The gateway must make authorization decisions by combining evidence from multipl
 ### Purpose: "age_verification"
 
 **Evidence Required:**
+
 - Citizen record (valid, date of birth)
 - Sanctions record (listed status)
 - AgeOver18 VC (optional)
 
 **Rules:**
+
 1. IF sanctions.Listed == true → **FAIL** (reason: "sanctioned")
 2. IF citizen.Valid == false → **FAIL** (reason: "invalid_citizen")
 3. IF derived.IsOver18 == false → **FAIL** (reason: "underage")
@@ -182,20 +195,24 @@ The gateway must make authorization decisions by combining evidence from multipl
 ### Purpose: "sanctions_screening"
 
 **Evidence Required:**
+
 - Sanctions record only
 
 **Rules:**
+
 1. IF sanctions.Listed == true → **FAIL** (reason: "sanctioned")
 2. ELSE → **PASS** (reason: "not_sanctioned")
 
 ### Purpose: "high_value_transfer" (Future)
 
 **Evidence Required:**
+
 - Citizen record
 - Sanctions record
 - Transaction amount from context
 
 **Rules:**
+
 1. IF sanctions.Listed == true → **FAIL** (reason: "sanctioned")
 2. IF citizen.Valid == false → **FAIL** (reason: "invalid_citizen")
 3. IF amount > 10000 AND isPEP == true → **PASS_WITH_CONDITIONS** (reason: "manual_review_required", conditions: ["compliance_review"])
@@ -317,6 +334,22 @@ func (h *Handler) handleDecisionEvaluate(w http.ResponseWriter, r *http.Request)
 }
 ```
 
+### TR-5: CQRS & Read-Optimized Projections
+
+**Objective:** Keep write-side decision orchestration isolated from read-optimized evidence lookups and decision history.
+
+- **Write Model:** The HTTP handler + service orchestrate registry/VC/audit lookups and emit `decision_made` events to the
+  audit/event bus. Canonical decision inputs/outputs remain in the service layer.
+- **Read Model:** Maintain a denormalized projection for "recent decisions by user+purpose" in a NoSQL/TTL store (Redis,
+  DynamoDB, or Mongo) to power fast re-checks and idempotent retries. Projection fields: `user_id`, `purpose`, `status`,
+  `reason`, `conditions`, `evaluated_at`, `evidence_hash`.
+- **Evidence Caches:** Registry and VC results used during evaluation SHOULD be cached in the same NoSQL tier with short TTLs to
+  avoid repeated upstream calls during an evaluation burst.
+- **Event Transport:** Prefer Kafka/NATS for `decision_made` events so downstream risk scoring, audit indexing, and replay tools
+  can subscribe without coupling to HTTP handlers; use an outbox pattern to avoid lost events under failure.
+- **Consistency:** Write path is source of truth; read model is eventually consistent (≤1s lag). On cache miss or suspected
+  staleness, fall back to canonical evaluation or rebuild projection from audit log replay.
+
 ---
 
 ## 6. Implementation Steps
@@ -403,5 +436,14 @@ curl -X POST http://localhost:8080/decision/evaluate \
 ---
 
 ## References
-- Tutorial: `docs/TUTORIAL.md` Section 5
+
 - Existing Code: `internal/decision/`
+
+---
+
+## Revision History
+
+| Version | Date       | Author       | Changes                                    |
+| ------- | ---------- | ------------ | ------------------------------------------ |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                |
+| 1.1     | 2025-12-12 | Engineering  | Add TR-5 CQRS & Read-Optimized Projections |

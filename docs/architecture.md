@@ -426,6 +426,7 @@ type Session struct {
 - Model purpose based consent as first class data.
 - Enforce consent requirements before sensitive operations.
 - Provide a stable enforcement API used by other services.
+- Maintain read-optimized projections for high-volume consent checks.
 
 **Key types**
 
@@ -448,6 +449,20 @@ type ConsentRecord struct {
     RevokedAt *time.Time
 }
 ```
+
+**Service**
+
+- `Grant(userID, []Purpose) error`
+- `Revoke(userID, []Purpose) error`
+- `Require(userID, Purpose) error` - Returns error if no active consent.
+- `List(userID) []ConsentRecord`
+
+**Production Evolution (PRD-002 TR-6):**
+
+- **Write model:** Consent service writes canonical records to `ConsentStore` (SQL/in-memory) and emits `consent_granted`/`consent_revoked` events to Kafka/NATS.
+- **Read model:** Projection workers consume events and maintain a Redis/DynamoDB read model keyed by `user_id:purpose` with `{status, expires_at, revoked_at, version}` for sub-5ms lookups.
+- **Consistency:** Projection lag budget ≤1s; `Require()` checks projection first, falls back to canonical store on cache miss.
+- **Resilience:** Replay tool rebuilds projections from audit log; outbox pattern guarantees event delivery; no-eviction Redis policy for consent projections.
 
 **Services**
 
@@ -593,6 +608,7 @@ The service supports claim minimization in regulated mode using `MinimizeClaims(
 
 - Combine purpose, user, evidence, and context into a decision.
 - Encapsulate business rules for `age_verification`, `sanctions_screening`, and any other purposes.
+- Cache evidence lookups and maintain decision history for idempotent retries.
 
 **Key types**
 
@@ -624,6 +640,14 @@ type DecisionInput struct {
 
 `DecisionInput` keeps the engine dependency-free: derived identity flags, a contract `SanctionsRecord` (listed flag only), and minimized VC claims. No raw PII or registry internals cross the boundary.
 
+**Production Evolution (PRD-005 TR-5):**
+
+- **Write model:** Decision service orchestrates registry/VC/audit lookups and emits `decision_made` events to Kafka/NATS with full input/output context.
+- **Read model:** NoSQL projection (Redis/DynamoDB) stores recent decisions by `user_id+purpose` for fast re-checks and idempotent retries; fields include `status`, `reason`, `conditions`, `evaluated_at`, `evidence_hash`.
+- **Evidence caches:** Registry and VC results cached in Redis with short TTLs (30s-5m) aligned to upstream refresh rates to avoid evaluation bursts.
+- **Event consumers:** Downstream services (risk scoring, audit indexing, analytics) subscribe to `decision_made` events without coupling to HTTP layer.
+- **Consistency:** Write path is source of truth; read projections eventually consistent (≤1s lag); fall back to canonical evaluation on cache miss or staleness.
+
 ---
 
 ### Audit
@@ -633,6 +657,7 @@ type DecisionInput struct {
 - Provide a simple API for other services to publish audit events.
 - Decouple publishing from persistence using a queue or Go channel.
 - Persist events in an `AuditStore` and log them.
+- Stream events to downstream consumers (indexing, analytics, compliance dashboards).
 
 **Key types**
 
@@ -654,10 +679,18 @@ type Event struct {
 - `AuditPublisher` interface for publishing events.
 - Channel based implementation for the prototype.
 - Worker that drains the channel and writes to `AuditStore`.
+- **Event streaming (production):** Outbox pattern to publish events to Kafka/NATS topics for downstream consumers (Elasticsearch indexing, analytics, SIEM export).
 
 **Clients**
 
 - Called by auth, consent, evidence, decision, and transport layers when key actions occur.
+
+**Production Evolution (PRD-006 TR-5):**
+
+- **Write path:** HTTP handlers emit events synchronously to `AuditStore` (append-only SQL/object store) and asynchronously to event bus via outbox worker.
+- **Read path:** Compliance queries hit Elasticsearch/OpenSearch index fed by Kafka consumers; supports cross-user investigations with sub-second latency.
+- **Reliability:** Outbox pattern guarantees at-least-once delivery; consumers use event IDs for idempotent processing.
+- **Storage tiers:** Hot queries (24h) cached in Redis; warm queries (7d) in ES; cold queries (90d+) in object store with presigned export URLs.
 
 ---
 
@@ -735,6 +768,77 @@ The system uses JWT (JSON Web Tokens) for access token authentication:
 - `id_gateway_token_requests_total` - Counter for token exchange requests
 - `id_gateway_auth_failures_total` - Counter for authentication failures
 - `id_gateway_endpoint_latency_seconds` - Histogram for endpoint latency by path
+
+---
+
+## Storage and Caching Architecture
+
+### Evolution Strategy
+
+Credo follows a **progressive enhancement** approach to storage and caching:
+
+**Phase 1 - MVP (Current):**
+
+- In-memory stores with interface-based design for testability
+- Synchronous audit via Go channels
+- Direct service-to-service calls within monolith
+
+**Phase 2 - Production Baseline:**
+
+- Persistent stores (PostgreSQL for canonical data)
+- Redis for hot caches (sessions, consent projections, evidence lookups)
+- Kafka/NATS event bus for audit, consent changes, decision outcomes
+
+**Phase 3 - Scale and Observability:**
+
+- CQRS read models for high-volume queries
+- Elasticsearch/OpenSearch for searchable audit index
+- Outbox/inbox pattern for guaranteed event delivery
+- Distributed tracing with OpenTelemetry
+
+### Storage Tiers
+
+| Tier      | Technology             | Use Cases                                                | TTL Strategy                                  |
+| --------- | ---------------------- | -------------------------------------------------------- | --------------------------------------------- |
+| **Write** | PostgreSQL / In-Memory | Canonical consent, sessions, user data (source of truth) | N/A (durable)                                 |
+| **Hot**   | Redis Cluster          | Consent projections, registry cache, session throttling  | Align with domain expiry (consent, sanctions) |
+| **Warm**  | Elasticsearch          | Audit index, compliance queries, investigations          | Time-based indices (daily/weekly)             |
+| **Cold**  | S3 / Object Store      | Audit archive, GDPR exports, long-term compliance        | Lifecycle policies (90d+ retention)           |
+
+### Event Bus Architecture
+
+**Topics and Consumers:**
+
+```
+consent_events → [projection_worker, audit_indexer, analytics]
+decision_events → [risk_scorer, audit_indexer, compliance_dashboard]
+audit_events → [elasticsearch_indexer, s3_archiver, siem_exporter]
+registry_refresh → [cache_warmer, evidence_projector]
+```
+
+**Reliability Patterns:**
+
+- **Outbox pattern:** Services persist events alongside writes; background workers ship to Kafka
+- **Consumer idempotency:** Event IDs and versions prevent duplicate processing
+- **Dead-letter queues:** Per-topic DLQs with exponential backoff for failed consumers
+- **Offset management:** Consumer groups track offsets for resume-on-failure
+
+### Cache Consistency Model
+
+**Eventual consistency budget:** ≤1s lag for consent/decision projections
+
+**Fallback strategy:**
+
+1. Primary: Read from projection (Redis/DynamoDB)
+2. Cache miss: Query canonical store (PostgreSQL) + refresh projection
+3. Stale detection: Compare version fields; trigger background refresh
+4. Degraded mode: Bypass cache on Redis unavailability; direct canonical store
+
+**Eviction policies:**
+
+- **Consent projections:** No random eviction (allkeys-lru disabled); only TTL-based expiry
+- **Evidence cache:** LRU with 30s-5m TTL aligned to upstream refresh rates
+- **Session throttle:** LRU acceptable; false negatives fail-open with logging
 
 ---
 
@@ -997,12 +1101,15 @@ Key improvements to harden this design:
    - Replace in-memory stores with Postgres repositories per service
    - Add connection pooling and retry logic
    - Implement proper transaction handling for multi-store operations
+   - **CQRS read models:** Deploy Redis projections for consent/decision hot paths (see PRD-002 TR-6, PRD-005 TR-5)
 
-2. **Audit System**
+2. **Event Streaming & Audit System**
 
-   - Replace synchronous audit with buffered channel + background worker
-   - Deploy worker as separate goroutine or process
-   - Consider NATS/Kafka for audit event streaming
+   - ✅ Channel-based audit (implemented for MVP)
+   - ⚠️ **Event bus integration:** Deploy Kafka/NATS for audit, consent change, decision outcomes, and VC issuance events
+   - ⚠️ **Outbox pattern:** Guarantee at-least-once delivery from canonical stores to event bus
+   - ⚠️ **Elasticsearch indexing:** Feed audit events into ES for searchable compliance queries (see PRD-006 FR-3, TR-5)
+   - ⚠️ **Stream consumers:** Deploy projection workers, cache warmers, and analytics subscribers
    - Add audit log encryption and signing for tamper-proofing
 
 3. **Authentication**
@@ -1019,34 +1126,47 @@ Key improvements to harden this design:
    - ✅ Request ID middleware for distributed tracing
    - ✅ Prometheus metrics collection at service boundaries
    - ✅ `/metrics` endpoint for Prometheus scraping
-   - ⚠️ Add distributed tracing with OpenTelemetry (spans, trace propagation)
+   - ⚠️ Add distributed tracing with OpenTelemetry (spans, trace propagation across sync and async boundaries)
    - ⚠️ Add health check endpoints (`/health`, `/ready`)
    - ⚠️ Add metrics dashboard (Grafana) and alerting rules
 
-5. **Policy Engine**
+5. **Policy Engine (PRD-015)**
 
-   - Externalize decision rules to JSON/YAML configuration
-   - Support dynamic rule updates without redeployment
-   - Add A/B testing framework for rule variations
+   - **Phase 1:** Externalize decision rules to YAML/JSON configuration stored in `deploy/credo-policies/`
+   - **Phase 2:** Build Cerbos-compatible PDP with `checkResources` API for drop-in replacement
+   - **Phase 3:** Embed PDP library (`pkg/credope`) for zero-latency local decisions; remote gRPC/HTTP mode for cross-service calls
+   - Support policy versioning, tests (`credope test`), and CI integration
+   - Stamp policy bundle version on decision events for compliance audit trail
+   - Plug-in evaluators for domain predicates (consent state, VC validity, risk signals)
 
 6. **Security Hardening**
 
-   - Add rate limiting per user/IP
-   - Implement circuit breakers for registry calls
-   - Add request signing/verification
-   - Implement API key management
-   - Add CORS configuration
+   - Add rate limiting per user/IP (Redis-backed sliding window)
+   - Implement circuit breakers for registry calls (hystrix-go or similar)
+   - Add request signing/verification for interservice calls
+   - Implement API key management for partner integrations
+   - Add CORS configuration for browser-based clients
+   - Feature flags & kill switches for regulated-mode, cache bypasses, and upstream toggles
 
 7. **Microservices Split**
    The boundaries already match likely service splits:
 
    - `auth` service (users, sessions, tokens)
-   - `consent` service (consent lifecycle)
-   - `evidence` service (registry + VC)
-   - `decision` service (rule evaluation)
-   - `audit` service (event streaming and storage)
+   - `consent` service (consent lifecycle, projection workers)
+   - `evidence` service (registry + VC, cache warmers)
+   - `decision` service (rule evaluation, policy engine)
+   - `audit` service (event streaming, indexing, compliance queries)
 
    Each can be deployed independently with its own database and scaling policy.
+
+8. **Streaming, Caching, and Resilience Patterns** (Detailed in [Storage and Caching Architecture](#storage-and-caching-architecture))
+
+   - **Redis tiers:** Low-latency caches for registry lookups, decision evidence, consent read models, and session throttling; align TTLs with domain expiry (consent TTL, sanctions refresh) and avoid eviction policies that risk losing consent projections.
+   - **Kafka/NATS event bus:** Standardize on a message bus for audit, consent change, decision outcomes, and VC issuance events; supports replay, backfills (e.g., Elasticsearch indexing), and downstream analytics without coupling to HTTP handlers.
+   - **Outbox/inbox pattern:** Persist events alongside writes and ship to Kafka via workers to ensure at-least-once delivery; consumers de-duplicate via event IDs and store offsets for idempotence.
+   - **Dead-letter & retries:** Per-topic DLQs with exponential backoff for registry refresh jobs, audit indexers, and credential issuers; surface backlog metrics.
+   - **Distributed tracing:** OpenTelemetry traces across HTTP handlers, service layer, and async consumers to follow a user request through caches and Kafka pipelines.
+   - **Feature flags & kill switches:** Toggle regulated-mode behavior, upstream registry calls, or cache bypasses without redeploying.
 
 ---
 
@@ -1101,9 +1221,11 @@ The codebase currently has:
 
 ## Revision History
 
-| Version | Date       | Author           | Changes                                                                                                                                                                     |
-| ------- | ---------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.0     | 2025-12-03 | Engineering Team | Initial architecture documentation                                                                                                                                          |
-| 1.1     | 2025-12-10 | Engineering Team | Updated registry structure with contracts and minimization                                                                                                                  |
-| 2.0     | 2025-12-11 | Engineering Team | Added hexagonal architecture, gRPC interservice communication, protobuf contracts, and port/adapter pattern documentation                                                   |
-| 2.1     | 2025-12-11 | Engineering Team | Documented provider abstraction architecture for registry module, added orchestration layer details, error taxonomy, capability negotiation, and contract testing framework |
+| Version | Date       | Author           | Changes                                                                                                                                                                                                                                                             |
+| ------- | ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | 2025-12-03 | Engineering Team | Initial architecture documentation                                                                                                                                                                                                                                  |
+| 1.1     | 2025-12-10 | Engineering Team | Updated registry structure with contracts and minimization                                                                                                                                                                                                          |
+| 2.0     | 2025-12-11 | Engineering Team | Added hexagonal architecture, gRPC interservice communication, protobuf contracts, and port/adapter pattern documentation                                                                                                                                           |
+| 2.1     | 2025-12-11 | Engineering Team | Documented provider abstraction architecture for registry module, added orchestration layer details, error taxonomy, capability negotiation, and contract testing framework                                                                                         |
+| 2.2     | 2025-12-12 | Engineering Team | Add section 8 to production roadmap                                                                                                                                                                                                                                 |
+| 2.3     | 2025-12-12 | Engineering Team | Integrate CQRS/event streaming architecture; expand Consent, Decision, and Audit sections with production evolution patterns; add Storage and Caching Architecture section; update production roadmap with event bus, policy engine (PRD-015), and CQRS read models |

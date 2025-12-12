@@ -4,7 +4,7 @@
 **Priority:** P0 (Critical)
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
-**Last Updated:** 2025-12-03
+**Last Updated:** 2025-12-12
 
 ---
 
@@ -452,6 +452,34 @@ func (h *Handler) handleConsentList(w http.ResponseWriter, r *http.Request)
 - `CodeInvalidConsent` - Consent expired or revoked
 - Both map to HTTP 403 Forbidden
 
+### TR-6: CQRS Read Model & Projection Store
+
+**Objective:** Separate the high-volume "has consent?" reads from write-heavy grant/revoke flows using a dedicated read model ba
+cked by a low-latency NoSQL/TTL store.
+
+**Projection Contents:**
+
+- Key: `user_id:purpose`
+- Value: `{status: active|revoked|expired, expires_at, revoked_at, version}`
+
+**Write Path Responsibilities:**
+
+- Consent service writes canonical records to `ConsentStore` (SQL/in-memory) and emits change events to the audit/event bus.
+- A projection worker consumes these events and updates the read model idempotently (version checks to avoid stale writes).
+
+**Read Path Responsibilities:**
+
+- `Require` calls and other services first read from the projection store (Redis/DynamoDB/Mongo) for sub-5ms lookups; cache
+  misses trigger fallback to `ConsentStore` and projection refresh.
+- Projection lag budget: ≤1s; on stale reads, downstream can re-validate via canonical store.
+
+**Resilience & Ops:**
+
+- Provide a replay tool to rebuild the projection from the append-only audit log.
+- Support in-memory projection implementation for local/dev while keeping interfaces identical to production NoSQL/Redis.
+- Prefer Redis Cluster for low-latency projections; document eviction policy (no random evictions) and TTL alignment with consent expiry plus a safety buffer.
+- Publish consent change events to Kafka/NATS topics with an outbox/inbox worker to guarantee delivery to projection consumers and the audit indexer.
+
 ---
 
 ## 5. API Specifications
@@ -811,3 +839,4 @@ curl -X POST http://localhost:8080/registry/citizen \
 | ------- | ---------- | ------------ | ------------------------------------------------ |
 | 1.0     | 2025-12-03 | Product Team | Initial PRD                                      |
 | 1.1     | 2025-12-10 | Engineering  | Added 5-min idempotency window, ID reuse details |
+| 1.2     | 2025-12-10 | Engineering  | Add TR-6 CQRS Read Model & Projection Store      |
