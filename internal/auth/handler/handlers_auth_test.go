@@ -151,7 +151,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(validRequest, t))
 
-		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, "internal_error")
+		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 }
 
@@ -270,7 +270,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, errors.New("database error"))
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, "internal_error")
+		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 }
 
@@ -347,7 +347,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID.String())
 
-		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, "internal_error")
+		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 }
 

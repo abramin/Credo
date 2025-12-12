@@ -84,7 +84,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent() {
 		w := httptest.NewRecorder()
 		handler.handleGrantConsent(w, req)
 
-		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
+		assertStatusAndError(t, w, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 
 	s.T().Run("400 bad request - empty purposes array", func(t *testing.T) {
@@ -127,7 +127,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent() {
 		w := httptest.NewRecorder()
 		handler.handleGrantConsent(w, req)
 
-		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
+		assertStatusAndError(t, w, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 }
 
@@ -200,7 +200,7 @@ func (s *ConsentHandlerSuite) TestHandleGetConsent_WithFilters() {
 
 		handler.handleGetConsents(w, req)
 
-		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
+		assertStatusAndError(t, w, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 
 	s.T().Run("500 internal server error - store failure", func(t *testing.T) {
@@ -215,7 +215,7 @@ func (s *ConsentHandlerSuite) TestHandleGetConsent_WithFilters() {
 
 		handler.handleGetConsents(w, req)
 
-		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
+		assertStatusAndError(t, w, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 
 	s.T().Run("400 bad request - invalid status filter", func(t *testing.T) {
@@ -271,7 +271,7 @@ func (s *ConsentHandlerSuite) TestHandleRevokeConsent() {
 		w := httptest.NewRecorder()
 		handler.handleRevokeConsent(w, req)
 
-		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
+		assertStatusAndError(t, w, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 
 	s.T().Run("400 bad request - empty purposes array", func(t *testing.T) {
@@ -298,7 +298,7 @@ func (s *ConsentHandlerSuite) TestHandleRevokeConsent() {
 		w := httptest.NewRecorder()
 		handler.handleRevokeConsent(w, req)
 
-		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
+		assertStatusAndError(t, w, http.StatusInternalServerError, string(dErrors.CodeInternal))
 	})
 }
 

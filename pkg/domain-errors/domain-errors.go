@@ -11,7 +11,7 @@ const (
 	CodeBadRequest      Code = "bad_request"
 	CodeInvalidInput    Code = "invalid_input"
 	CodeValidation      Code = "validation_failed"
-	CodeInternal        Code = "internal"
+	CodeInternal        Code = "internal_error"
 	CodeConflict        Code = "conflict"
 	CodeUnauthorized    Code = "unauthorized"
 	CodeInvalidConsent  Code = "invalid_consent"
