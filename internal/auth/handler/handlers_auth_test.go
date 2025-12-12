@@ -53,9 +53,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(validRequest, t))
 
-		assert.Equal(t, http.StatusOK, status)
-		assert.NotNil(t, got)
-		assert.Nil(t, errBody)
+		s.assertSuccessResponse(t, status, got, errBody)
 		assert.Equal(t, expectedResp.Code, got.Code)
 		assert.Equal(t, expectedResp.RedirectURI, got.RedirectURI)
 	})
@@ -67,9 +65,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 		invalidJSON := `{"email": "`
 		status, got, errBody := s.doAuthRequest(t, router, invalidJSON)
 
-		assert.Equal(t, http.StatusBadRequest, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 	})
 
 	s.T().Run("400 error scenarios - invalid input", func(t *testing.T) {
@@ -144,9 +140,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 				status, got, errBody := s.doAuthRequest(t, router, body)
 
-				assert.Equal(t, http.StatusBadRequest, status)
-				assert.Nil(t, got)
-				assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
+				s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 			})
 		}
 	})
@@ -157,9 +151,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(validRequest, t))
 
-		assert.Equal(t, http.StatusInternalServerError, status)
-		assert.Nil(t, got)
-		assert.Equal(t, "internal_error", errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, "internal_error")
 	})
 }
 
@@ -188,9 +180,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-		assert.Equal(t, http.StatusOK, status)
-		assert.NotNil(t, got)
-		assert.Nil(t, errBody)
+		s.assertSuccessResponse(t, status, got, errBody)
 		assert.Equal(t, expectedResp.AccessToken, got.AccessToken)
 		assert.Equal(t, expectedResp.IDToken, got.IDToken)
 		assert.Equal(t, expectedResp.ExpiresIn, got.ExpiresIn)
@@ -205,9 +195,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(&missing, t))
 
-		assert.Equal(t, http.StatusBadRequest, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 	})
 
 	// - 400 Bad Request: Unsupported grant_type (must be "authorization_code")
@@ -219,9 +207,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(&invalid, t))
 
-		assert.Equal(t, http.StatusBadRequest, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 	})
 	// - 401 Unauthorized: Invalid authorization code (not found)
 	// - 401 Unauthorized: Authorization code expired (> 10 minutes old)
@@ -252,9 +238,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 				status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-				assert.Equal(t, http.StatusUnauthorized, status)
-				assert.Nil(t, got)
-				assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
+				s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
 			})
 		}
 	})
@@ -267,9 +251,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-		assert.Equal(t, http.StatusBadRequest, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 	})
 
 	// - 400 Bad Request: client_id mismatch (doesn't match authorize request)
@@ -279,9 +261,8 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, serviceErr)
 
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
-		assert.Equal(t, http.StatusBadRequest, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
+
+		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 	})
 	// - 500 Internal Server Error: Store failure
 	s.T().Run("internal server failure - 500", func(t *testing.T) {
@@ -289,9 +270,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, errors.New("database error"))
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-		assert.Equal(t, http.StatusInternalServerError, status)
-		assert.Nil(t, got)
-		assert.Equal(t, "internal_error", errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, "internal_error")
 	})
 }
 
@@ -311,9 +290,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID.String())
 
-		assert.Equal(t, http.StatusOK, status)
-		assert.NotNil(t, got)
-		assert.Nil(t, errBody)
+		s.assertSuccessResponse(t, status, got, errBody)
 		assert.Equal(t, expectedResp.Sub, got.Sub)
 		assert.Equal(t, expectedResp.Email, got.Email)
 		assert.Equal(t, expectedResp.EmailVerified, got.EmailVerified)
@@ -328,9 +305,8 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 		mockService.EXPECT().UserInfo(gomock.Any(), "").Return(nil, dErrors.New(dErrors.CodeUnauthorized, "missing or invalid session"))
 
 		status, got, errBody := s.doUserInfoRequest(t, router, "")
-		assert.Equal(t, http.StatusUnauthorized, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
+
+		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
 	})
 
 	s.T().Run("invalid session identifier format - 401", func(t *testing.T) {
@@ -339,9 +315,8 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 		mockService.EXPECT().UserInfo(gomock.Any(), invalidSession).Return(nil, dErrors.New(dErrors.CodeUnauthorized, "invalid session ID"))
 
 		status, got, errBody := s.doUserInfoRequest(t, router, invalidSession)
-		assert.Equal(t, http.StatusUnauthorized, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
+
+		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
 	})
 
 	// - 401 Unauthorized: session not found or expired
@@ -352,9 +327,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID.String())
 
-		assert.Equal(t, http.StatusUnauthorized, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
 	})
 
 	// - 401 Unauthorized: User not found
@@ -365,9 +338,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID.String())
 
-		assert.Equal(t, http.StatusUnauthorized, status)
-		assert.Nil(t, got)
-		assert.Equal(t, string(dErrors.CodeUnauthorized), errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
 	})
 
 	s.T().Run("internal server failure - 500", func(t *testing.T) {
@@ -376,9 +347,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID.String())
 
-		assert.Equal(t, http.StatusInternalServerError, status)
-		assert.Nil(t, got)
-		assert.Equal(t, "internal_error", errBody["error"])
+		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, "internal_error")
 	})
 }
 
@@ -475,4 +444,18 @@ func (s *AuthHandlerSuite) mustMarshal(v any, t *testing.T) string {
 	body, err := json.Marshal(v)
 	require.NoError(t, err)
 	return string(body)
+}
+
+func (s *AuthHandlerSuite) assertErrorResponse(t *testing.T, status int, got interface{}, errBody map[string]string, expectedStatus int, expectedCode string) {
+	t.Helper()
+	assert.Equal(t, expectedStatus, status)
+	assert.Nil(t, got)
+	assert.Equal(t, expectedCode, errBody["error"])
+}
+
+func (s *AuthHandlerSuite) assertSuccessResponse(t *testing.T, status int, got interface{}, errBody map[string]string) {
+	t.Helper()
+	assert.Equal(t, http.StatusOK, status)
+	assert.NotNil(t, got)
+	assert.Nil(t, errBody)
 }

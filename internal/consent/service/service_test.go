@@ -50,6 +50,12 @@ func TestServiceSuite(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }
 
+func (s *ServiceSuite) assertValidationError(t *testing.T, err error, expectedCode dErrors.Code, msgContext string) {
+	t.Helper()
+	assert.Error(t, err, msgContext)
+	assert.True(t, dErrors.Is(err, expectedCode), msgContext)
+}
+
 func (s *ServiceSuite) TestGrant() {
 	s.T().Run("creates new consent when not exists", func(t *testing.T) {
 		purposes := []models.Purpose{models.PurposeLogin}
@@ -289,17 +295,14 @@ func (s *ServiceSuite) TestGrant() {
 	})
 
 	s.T().Run("validation errors", func(t *testing.T) {
-		// Missing userID
 		_, err := s.service.Grant(context.Background(), "", []models.Purpose{models.PurposeLogin})
-		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized))
+		s.assertValidationError(t, err, dErrors.CodeUnauthorized, "missing userID")
 
-		// Empty purposes
 		_, err = s.service.Grant(context.Background(), "user123", []models.Purpose{})
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "empty purposes")
 
-		// Invalid purpose
 		_, err = s.service.Grant(context.Background(), "user123", []models.Purpose{"invalid"})
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "invalid purpose")
 	})
 
 	s.T().Run("store error on find", func(t *testing.T) {
@@ -421,13 +424,11 @@ func (s *ServiceSuite) TestRevoke() {
 	})
 
 	s.T().Run("validation errors", func(t *testing.T) {
-		// Missing userID
 		_, err := s.service.Revoke(context.Background(), "", []models.Purpose{models.PurposeLogin})
-		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized))
+		s.assertValidationError(t, err, dErrors.CodeUnauthorized, "missing userID")
 
-		// Invalid purpose
 		_, err = s.service.Revoke(context.Background(), "user123", []models.Purpose{"invalid"})
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "invalid purpose")
 	})
 
 	s.T().Run("with auditor publishes audit event", func(t *testing.T) {
@@ -544,13 +545,11 @@ func (s *ServiceSuite) TestRequire() {
 	})
 
 	s.T().Run("validation errors", func(t *testing.T) {
-		// Missing userID
 		err := s.service.Require(context.Background(), "", models.PurposeVCIssuance)
-		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized))
+		s.assertValidationError(t, err, dErrors.CodeUnauthorized, "missing userID")
 
-		// Invalid purpose
 		err = s.service.Require(context.Background(), "user123", "invalid")
-		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest))
+		s.assertValidationError(t, err, dErrors.CodeBadRequest, "invalid purpose")
 	})
 
 	s.T().Run("store error", func(t *testing.T) {

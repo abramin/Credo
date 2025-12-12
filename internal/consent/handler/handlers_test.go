@@ -78,8 +78,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent() {
 	s.T().Run("401 unauthorized - missing bearer token", func(t *testing.T) {
 		handler, _ := newTestHandler(t)
 		req, err := newRequestWithBody(http.MethodPost, "/auth/consent",
-			consentModel.GrantRequest{Purposes: []consentModel.Purpose{consentModel.PurposeLogin}},
-			"")
+			consentModel.GrantRequest{Purposes: []consentModel.Purpose{consentModel.PurposeLogin}}, "")
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
@@ -91,8 +90,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent() {
 	s.T().Run("400 bad request - empty purposes array", func(t *testing.T) {
 		handler, _ := newTestHandler(t)
 		req, err := newRequestWithBody(http.MethodPost, "/auth/consent",
-			consentModel.GrantRequest{Purposes: []consentModel.Purpose{}},
-			"user123")
+			consentModel.GrantRequest{Purposes: []consentModel.Purpose{}}, "user123")
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
@@ -104,8 +102,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent() {
 	s.T().Run("400 bad request - invalid purpose value", func(t *testing.T) {
 		handler, _ := newTestHandler(t)
 		req, err := newRequestWithBody(http.MethodPost, "/auth/consent",
-			consentModel.GrantRequest{Purposes: []consentModel.Purpose{"invalid_purpose"}},
-			"user123")
+			consentModel.GrantRequest{Purposes: []consentModel.Purpose{"invalid_purpose"}}, "user123")
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
@@ -199,8 +196,8 @@ func (s *ConsentHandlerSuite) TestHandleGetConsent_WithFilters() {
 	s.T().Run("401 unauthorized - missing bearer token", func(t *testing.T) {
 		handler, _ := newTestHandler(t)
 		req := httptest.NewRequest(http.MethodGet, "/auth/consent", nil)
-
 		w := httptest.NewRecorder()
+
 		handler.handleGetConsents(w, req)
 
 		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
@@ -208,17 +205,14 @@ func (s *ConsentHandlerSuite) TestHandleGetConsent_WithFilters() {
 
 	s.T().Run("500 internal server error - store failure", func(t *testing.T) {
 		handler, mockService := newTestHandler(t)
-		mockService.EXPECT().List(
-			gomock.Any(),
-			"user123",
-			gomock.Any(),
-		).Return(nil, dErrors.New(dErrors.CodeInternal, "storage system unavailable"))
+		mockService.EXPECT().List(gomock.Any(), "user123", gomock.Any()).
+			Return(nil, dErrors.New(dErrors.CodeInternal, "storage system unavailable"))
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/consent", nil)
 		ctx := context.WithValue(req.Context(), middleware.ContextKeyUserID, "user123")
 		req = req.WithContext(ctx)
-
 		w := httptest.NewRecorder()
+
 		handler.handleGetConsents(w, req)
 
 		assertStatusAndError(t, w, http.StatusInternalServerError, "internal_error")
@@ -229,8 +223,8 @@ func (s *ConsentHandlerSuite) TestHandleGetConsent_WithFilters() {
 		req := httptest.NewRequest(http.MethodGet, "/auth/consent?status=unknown", nil)
 		ctx := context.WithValue(req.Context(), middleware.ContextKeyUserID, "user123")
 		req = req.WithContext(ctx)
-
 		w := httptest.NewRecorder()
+
 		handler.handleGetConsents(w, req)
 
 		assertStatusAndError(t, w, http.StatusBadRequest, "bad_request")
@@ -271,8 +265,7 @@ func (s *ConsentHandlerSuite) TestHandleRevokeConsent() {
 	s.T().Run("401 unauthorized - missing bearer token", func(t *testing.T) {
 		handler, _ := newTestHandler(t)
 		req, err := newRequestWithBody(http.MethodPost, "/auth/consent/revoke",
-			consentModel.RevokeRequest{Purposes: []consentModel.Purpose{consentModel.PurposeLogin}},
-			"")
+			consentModel.RevokeRequest{Purposes: []consentModel.Purpose{consentModel.PurposeLogin}}, "")
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
@@ -284,8 +277,7 @@ func (s *ConsentHandlerSuite) TestHandleRevokeConsent() {
 	s.T().Run("400 bad request - empty purposes array", func(t *testing.T) {
 		handler, _ := newTestHandler(t)
 		req, err := newRequestWithBody(http.MethodPost, "/auth/consent/revoke",
-			consentModel.RevokeRequest{Purposes: []consentModel.Purpose{}},
-			"user123")
+			consentModel.RevokeRequest{Purposes: []consentModel.Purpose{}}, "user123")
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
@@ -296,15 +288,11 @@ func (s *ConsentHandlerSuite) TestHandleRevokeConsent() {
 
 	s.T().Run("500 internal server error - store failure", func(t *testing.T) {
 		handler, mockService := newTestHandler(t)
-		mockService.EXPECT().Revoke(
-			gomock.Any(),
-			"user123",
-			[]consentModel.Purpose{consentModel.PurposeLogin},
-		).Return(nil, dErrors.New(dErrors.CodeInternal, "storage system unavailable"))
+		mockService.EXPECT().Revoke(gomock.Any(), "user123", []consentModel.Purpose{consentModel.PurposeLogin}).
+			Return(nil, dErrors.New(dErrors.CodeInternal, "storage system unavailable"))
 
 		req, err := newRequestWithBody(http.MethodPost, "/auth/consent/revoke",
-			consentModel.RevokeRequest{Purposes: []consentModel.Purpose{consentModel.PurposeLogin}},
-			"user123")
+			consentModel.RevokeRequest{Purposes: []consentModel.Purpose{consentModel.PurposeLogin}}, "user123")
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()

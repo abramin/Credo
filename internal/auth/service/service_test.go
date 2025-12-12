@@ -328,3 +328,9 @@ func (s *ServiceSuite) TestUserInfo() {
 func TestServiceSuite(t *testing.T) {
 	suite.Run(t, new(ServiceSuite))
 }
+
+func (s *ServiceSuite) assertValidationError(t *testing.T, err error, expectedCode dErrors.Code) {
+	t.Helper()
+	assert.Error(t, err)
+	assert.True(t, dErrors.Is(err, expectedCode))
+}
