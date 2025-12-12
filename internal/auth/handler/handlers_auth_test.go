@@ -44,7 +44,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 		State:       "test-state",
 	}
 	s.T().Run("scopes default to openid when omitted", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		requestBody := `{"email":"user@example.com","client_id":"test-client-id","redirect_uri":"https://example.com/redirect"}`
 		expectedReq := &authModel.AuthorizationRequest{
 			Email:       "user@example.com",
@@ -63,8 +63,8 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 		assert.Equal(t, expectedResp.RedirectURI, got.RedirectURI)
 	})
 
-	s.T().Run("rejects insecure redirect URIs", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+	s.T().Run("rejects insecure redirect URIs if http not allowed", func(t *testing.T) {
+		mockService, router := s.newHandler(t, &[]string{"https"})
 		insecure := &authModel.AuthorizationRequest{
 			Email:       "user@example.com",
 			ClientID:    "test-client-id",
@@ -77,7 +77,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 	})
 	s.T().Run("user is found and authorized - 200", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		expectedResp := &authModel.AuthorizationResult{
 			Code:        "authz_" + uuid.New().String(),
 			RedirectURI: validRequest.RedirectURI,
@@ -92,7 +92,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 	})
 
 	s.T().Run("400 - invalid json body", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		mockService.EXPECT().Authorize(gomock.Any(), gomock.Any()).Times(0)
 
 		invalidJSON := `{"email": "`
@@ -151,7 +151,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				mockService, router := s.newHandler(t)
+				mockService, router := s.newHandler(t, nil)
 				mockService.EXPECT().Authorize(gomock.Any(), gomock.Any()).Times(0)
 
 				var body string
@@ -169,7 +169,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 	})
 
 	s.T().Run("returns 500 when service fails", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		mockService.EXPECT().Authorize(gomock.Any(), validRequest).Return(nil, errors.New("boom"))
 
 		status, got, errBody := s.doAuthRequest(t, router, s.mustMarshal(validRequest, t))
@@ -186,7 +186,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 		ClientID:    "some-client-id",
 	}
 	s.T().Run("happy path - tokens exchanged", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		expectedResp := &authModel.TokenResult{
 			AccessToken: "access-token-123",
 			IDToken:     "id-token-123",
@@ -210,7 +210,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 	})
 
 	s.T().Run("token response includes token_type", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		expectedResp := &authModel.TokenResult{
 			AccessToken: "access-token-123",
 			IDToken:     "id-token-123",
@@ -228,7 +228,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 	//- 400 Bad Request: Missing required fields (grant_type, code, redirect_uri, client_id)
 	s.T().Run("missing required fields - 400", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Times(0)
 		missing := *validRequest
 		missing.ClientID = ""
@@ -240,7 +240,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 	// - 400 Bad Request: Unsupported grant_type (must be "authorization_code")
 	s.T().Run("unsupported grant_type - 400", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		invalid := *validRequest
 		invalid.GrantType = "invalid_grant"
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Times(0)
@@ -273,7 +273,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				mockService, router := s.newHandler(t)
+				mockService, router := s.newHandler(t, nil)
 				mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, tt.serviceErr)
 
 				status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
@@ -285,7 +285,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 	// - 400 Bad Request: redirect_uri mismatch (doesn't match authorize request)
 	s.T().Run("redirect_uri mismatch - 400", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		serviceErr := dErrors.New(dErrors.CodeBadRequest, "redirect_uri mismatch")
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, serviceErr)
 
@@ -296,7 +296,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 	// - 400 Bad Request: client_id mismatch (doesn't match authorize request)
 	s.T().Run("client_id mismatch - 400", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		serviceErr := dErrors.New(dErrors.CodeBadRequest, "client_id mismatch")
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, serviceErr)
 
@@ -306,7 +306,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 	})
 	// - 500 Internal Server Error: Store failure
 	s.T().Run("internal server failure - 500", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, errors.New("database error"))
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
@@ -317,7 +317,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 	validSessionID := uuid.New()
 	s.T().Run("happy path - user info returned", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		expectedResp := &authModel.UserInfoResult{
 			Sub:           "user-123",
 			Email:         "user@example.com",
@@ -341,7 +341,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 	// 	- 401 Unauthorized: Missing or invalid Authorization header
 	s.T().Run("missing or invalid authorization header - 401", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		mockService.EXPECT().UserInfo(gomock.Any(), "").Return(nil, dErrors.New(dErrors.CodeUnauthorized, "missing or invalid session"))
 
 		status, got, errBody := s.doUserInfoRequest(t, router, "")
@@ -350,7 +350,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 	})
 
 	s.T().Run("invalid session identifier format - 401", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		invalidSession := "not-a-uuid"
 		mockService.EXPECT().UserInfo(gomock.Any(), invalidSession).Return(nil, dErrors.New(dErrors.CodeUnauthorized, "invalid session ID"))
 
@@ -361,7 +361,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 	// - 401 Unauthorized: session not found or expired
 	s.T().Run("session not found or expired - 401", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		serviceErr := dErrors.New(dErrors.CodeUnauthorized, "session not found or expired")
 		mockService.EXPECT().UserInfo(gomock.Any(), validSessionID.String()).Return(nil, serviceErr)
 
@@ -372,7 +372,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 
 	// - 401 Unauthorized: User not found
 	s.T().Run("user not found - 401", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		serviceErr := dErrors.New(dErrors.CodeUnauthorized, "user not found")
 		mockService.EXPECT().UserInfo(gomock.Any(), validSessionID.String()).Return(nil, serviceErr)
 
@@ -382,7 +382,7 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 	})
 
 	s.T().Run("internal server failure - 500", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
+		mockService, router := s.newHandler(t, nil)
 		mockService.EXPECT().UserInfo(gomock.Any(), validSessionID.String()).Return(nil, errors.New("database error"))
 
 		status, got, errBody := s.doUserInfoRequest(t, router, validSessionID.String())
@@ -395,14 +395,18 @@ func TestAuthHandlerSuite(t *testing.T) {
 	suite.Run(t, new(AuthHandlerSuite))
 }
 
-func (s *AuthHandlerSuite) newHandler(t *testing.T) (*mocks.MockAuthService, *chi.Mux) {
+func (s *AuthHandlerSuite) newHandler(t *testing.T, allowedSchemes *[]string) (*mocks.MockAuthService, *chi.Mux) {
 	t.Helper()
 	ctrl := gomock.NewController(t)
 	t.Cleanup(ctrl.Finish)
 
+	if allowedSchemes == nil {
+		defaultSchemes := []string{"http", "https"}
+		allowedSchemes = &defaultSchemes
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	mockService := mocks.NewMockAuthService(ctrl)
-	handler := New(mockService, logger, false)
+	handler := New(mockService, logger, *allowedSchemes)
 	r := chi.NewRouter()
 	handler.Register(r)
 	return mockService, r
