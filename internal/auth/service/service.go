@@ -215,12 +215,12 @@ func (s *Service) UserInfo(ctx context.Context, sessionID string) (*models.UserI
 
 	session, err := s.sessions.FindByID(ctx, parsedSessionID)
 	if err != nil {
-		if errors.Is(err, userStore.ErrNotFound) {
+		if errors.Is(err, sessionStore.ErrNotFound) {
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"session_id", parsedSessionID.String(),
 			)
 			s.incrementAuthFailure()
-			return nil, dErrors.New(dErrors.CodeNotFound, "session not found")
+			return nil, dErrors.New(dErrors.CodeUnauthorized, "session not found")
 		}
 		s.logAuthFailure(ctx, "session_lookup_failed", true,
 			"session_id", parsedSessionID.String(),

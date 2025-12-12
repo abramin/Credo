@@ -336,7 +336,7 @@ func (s *ServiceSuite) TestUserInfo() {
 		s.mockSessStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(nil, sessionStore.ErrNotFound)
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
-		assert.ErrorIs(s.T(), err, dErrors.New(dErrors.CodeNotFound, "session not found"))
+		assert.ErrorIs(s.T(), err, dErrors.New(dErrors.CodeUnauthorized, "session not found"))
 		assert.Nil(s.T(), result)
 	})
 

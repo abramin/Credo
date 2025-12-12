@@ -72,6 +72,7 @@ func FromEnv() (Server, error) {
 		}
 	}
 
+	// TODO: revisit this as possible security issue
 	adminAPIToken := os.Getenv("ADMIN_API_TOKEN")
 	if adminAPIToken == "" {
 		switch strings.ToLower(env) {
