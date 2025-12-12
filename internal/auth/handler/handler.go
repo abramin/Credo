@@ -196,7 +196,7 @@ func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) isRedirectSchemeAllowed(uri *url.URL) bool {
 	for _, scheme := range h.allowedRedirectSchemes {
-		if strings.ToLower(uri.Scheme) == strings.ToLower(scheme) {
+		if strings.EqualFold(uri.Scheme, scheme) {
 			return true
 		}
 	}
