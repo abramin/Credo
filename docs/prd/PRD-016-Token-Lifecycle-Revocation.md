@@ -103,7 +103,7 @@ This is a **critical blocker** for production deployment.
    - Format: `"ref_" + uuid.New().String()`
    - Store refresh token in session record
    - Set refresh token expiry: 30 days from issuance
-3. Optionally bind token to device fingerprint (user-agent + IP hash)
+3. Optionally bind token to device fingerprint (user-agent + IP hash) // Future improvement
 4. Return refresh token alongside access token
 5. Emit audit event: `refresh_token_issued`
 
@@ -281,11 +281,29 @@ This is a **critical blocker** for production deployment.
 1. Extract user from bearer token
 2. Query SessionStore for all active sessions for user
 3. For each session:
-   - Parse device from user-agent
-   - Extract IP address from session metadata
-   - Lookup geolocation from IP (optional, use MaxMind GeoIP)
+   - Derive device info from stored metadata (see note below)
    - Mark current session (match session_id from token)
 4. Return session list
+
+**Note on Device Display:**
+
+With privacy-first design (hashed fingerprints), we need to capture device metadata separately for display:
+
+**Option A (Recommended):** Store display-safe metadata on Session:
+```go
+type Session struct {
+    // ... other fields
+    DeviceFingerprintHash string   // For security validation
+    DeviceDisplayName     string   // For UI display: "Chrome on macOS"
+    ApproximateLocation   string   // For UI display: "San Francisco, US" (from IP at creation)
+}
+```
+
+**Option B:** Parse from current request:
+- Display current session device from request headers
+- Other sessions show as "Unknown Device" or generic names
+
+**Recommendation:** Use Option A for better UX while maintaining privacy (no raw UA/IP stored)
 
 ---
 
@@ -365,40 +383,225 @@ This is a **critical blocker** for production deployment.
 
 ## 4. Technical Requirements
 
-### TR-1: Enhanced Session Model
+### Architectural Decision: Separated Lifecycle Models
 
-**Update Session Model** (Location: `internal/auth/models.go`)
+**Context:** The initial design proposed a single `Session` struct containing authorization codes, refresh tokens, and session metadata. However, these have fundamentally different lifetimes:
+
+| Artifact | Lifetime | Purpose |
+|----------|----------|---------|
+| Authorization Code | 10 minutes | Exchange for initial tokens |
+| Refresh Token | 30 days | Renew access tokens |
+| Session | 30+ days | Track user authentication state |
+
+**Problem:** Mixing lifetimes in one struct causes:
+- **Memory waste:** Dead fields occupy space for 30+ days (e.g., `Code` field unused after 10 minutes)
+- **Unclear ownership:** Which expiry matters? `CodeExpiresAt` or `SessionExpiresAt`?
+- **Privacy risks:** Storing raw `UserAgent` and `IPAddress` increases PII exposure
+- **Difficult cleanup:** Cannot delete expired codes without touching sessions
+- **Technical debt:** Pattern calcifies quickly, requiring data migration to fix later
+
+**Decision:** Separate into three focused models with single responsibility.
+
+**Benefits:**
+1. Each model has one clear lifetime and expiry concept
+2. Independent cleanup (delete expired codes without touching sessions)
+3. Privacy-first design (hash device fingerprints, no raw PII)
+4. Easier token rotation (update refresh token without touching session)
+5. Clear upgrade path to persistence (add Redis/Postgres per model)
+6. Reduced memory footprint (no dead fields)
+
+---
+
+### TR-1: Separated Lifecycle Models
+
+**Rationale:** Authorization codes (10 min), refresh tokens (30 days), and sessions (30+ days) have distinct lifetimes. Mixing them in one struct causes:
+- Dead fields occupying memory for extended periods
+- Ambiguous cleanup logic (which expiry matters?)
+- Privacy risks from storing raw user-agent/IP data
+- Difficult token rotation and lifecycle management
+
+**Solution:** Separate models with single responsibility and privacy-first design.
+
+---
+
+#### Session Model (Location: `internal/auth/models.go`)
+
+Core long-lived session representing user authentication state.
 
 ```go
+// Session represents a user's authentication session with the authorization server.
+// Lifetime: 30+ days (configurable)
 type Session struct {
-    ID              uuid.UUID
-    UserID          uuid.UUID
-    Code            string    // Authorization code
-    CodeExpiresAt   time.Time
-    CodeUsed        bool
+    ID             uuid.UUID  `json:"id"`
+    UserID         uuid.UUID  `json:"user_id"`
+    ClientID       string     `json:"client_id"`
+    RequestedScope []string   `json:"requested_scope"`
+    Status         string     `json:"status"` // "active", "revoked"
 
-    // Token management
-    RefreshToken    string    // Format: "ref_<uuid>"
-    RefreshTokenExpiresAt time.Time // 30 days
-    RefreshTokenUsed bool      // For rotation detection
+    // Device binding for security (privacy-first: no raw PII)
+    DeviceFingerprintHash string `json:"device_fingerprint_hash"` // SHA-256(user-agent + IP) for validation
 
-    // Device binding (optional)
-    DeviceFingerprint string  // Hash of user-agent + IP
-    UserAgent       string
-    IPAddress       string
+    // Device display metadata (optional, for session management UI)
+    DeviceDisplayName     string `json:"device_display_name,omitempty"`     // e.g., "Chrome on macOS"
+    ApproximateLocation   string `json:"approximate_location,omitempty"`   // e.g., "San Francisco, US"
 
-    // Session tracking
-    LastRefreshedAt *time.Time
-    RevokedAt       *time.Time
-
-    ClientID        string
-    RedirectURI     string
-    RequestedScope  []string
-    Status          string    // "pending_consent", "active", "revoked"
-    CreatedAt       time.Time
-    ExpiresAt       time.Time
+    // Lifecycle timestamps
+    CreatedAt      time.Time  `json:"created_at"`
+    ExpiresAt      time.Time  `json:"expires_at"`  // Session expiry (30+ days)
+    RevokedAt      *time.Time `json:"revoked_at,omitempty"`
 }
 ```
+
+**Design Notes:**
+- No authorization code or refresh token fields (separated below)
+- `DeviceFingerprintHash` stored instead of raw `UserAgent` and `IPAddress` (privacy-first)
+- Optional `DeviceDisplayName` and `ApproximateLocation` for UI display (parsed at creation, no PII)
+- Single expiry concept: when the session ends
+- Status field for explicit revocation tracking
+
+---
+
+#### AuthorizationCode Model (Location: `internal/auth/models.go`)
+
+Ephemeral authorization code for OAuth 2.0 code exchange flow.
+
+```go
+// AuthorizationCode represents a short-lived OAuth 2.0 authorization code.
+// Lifetime: 10 minutes
+type AuthorizationCode struct {
+    Code        string    `json:"code"`           // Format: "authz_<random>"
+    SessionID   uuid.UUID `json:"session_id"`     // Links to parent Session
+    RedirectURI string    `json:"redirect_uri"`   // Stored for validation at token exchange
+    ExpiresAt   time.Time `json:"expires_at"`     // 10 minutes from creation
+    Used        bool      `json:"used"`           // Prevent replay attacks
+    CreatedAt   time.Time `json:"created_at"`
+}
+```
+
+**Design Notes:**
+- Single purpose: exchange for tokens
+- Self-contained expiry (10 minutes)
+- Links to Session via `SessionID`
+- Can be deleted immediately after use or after expiry
+- Independent cleanup: delete all expired codes without touching sessions
+
+---
+
+#### RefreshToken Model (Location: `internal/auth/models.go`)
+
+Long-lived token for renewing access tokens without re-authentication.
+
+```go
+// RefreshToken represents a long-lived token for access token renewal.
+// Lifetime: 30 days (configurable)
+type RefreshToken struct {
+    Token           string     `json:"token"`             // Format: "ref_<uuid>"
+    SessionID       uuid.UUID  `json:"session_id"`        // Links to parent Session
+    ExpiresAt       time.Time  `json:"expires_at"`        // 30 days from creation
+    Used            bool       `json:"used"`              // For rotation detection
+    LastRefreshedAt *time.Time `json:"last_refreshed_at,omitempty"`
+    CreatedAt       time.Time  `json:"created_at"`
+}
+```
+
+**Design Notes:**
+- Single purpose: renew access tokens
+- Self-contained expiry (30 days)
+- Links to Session via `SessionID`
+- `Used` flag enables rotation detection (replay attack prevention)
+- Independent cleanup: delete used/expired refresh tokens without affecting session
+
+---
+
+#### Device Fingerprinting (Location: `internal/auth/fingerprint.go`)
+
+**Privacy-first approach:** Hash user-agent and IP instead of storing raw values.
+
+```go
+// ComputeDeviceFingerprint creates a privacy-preserving hash for device binding.
+// Uses SHA-256 to avoid storing PII (raw user-agent and IP address).
+func ComputeDeviceFingerprint(userAgent, ipAddress string) string {
+    // Normalize inputs
+    data := fmt.Sprintf("%s|%s", strings.ToLower(userAgent), ipAddress)
+
+    // SHA-256 hash
+    hash := sha256.Sum256([]byte(data))
+
+    // Return hex-encoded hash (64 chars)
+    return hex.EncodeToString(hash[:])
+}
+
+// ValidateDeviceFingerprint checks if the current device matches the session's fingerprint.
+func ValidateDeviceFingerprint(session *Session, userAgent, ipAddress string) bool {
+    if session.DeviceFingerprintHash == "" {
+        return true // Device binding not enabled for this session
+    }
+
+    expected := ComputeDeviceFingerprint(userAgent, ipAddress)
+    return session.DeviceFingerprintHash == expected
+}
+```
+
+**Privacy Benefits:**
+- No raw user-agent or IP address stored in memory/database
+- Cannot be reverse-engineered to extract PII
+- Safe to log, export, or persist without privacy concerns
+- Same security properties (device binding) without privacy risk
+
+---
+
+#### Store Interfaces (Location: `internal/auth/store.go`)
+
+Update store interfaces to handle separated models.
+
+```go
+// SessionStore manages user authentication sessions.
+type SessionStore interface {
+    // Session CRUD
+    CreateSession(ctx context.Context, session *Session) error
+    GetSession(ctx context.Context, id uuid.UUID) (*Session, error)
+    GetSessionsByUserID(ctx context.Context, userID uuid.UUID) ([]*Session, error)
+    UpdateSessionStatus(ctx context.Context, id uuid.UUID, status string, revokedAt *time.Time) error
+    DeleteSession(ctx context.Context, id uuid.UUID) error
+
+    // Cleanup
+    DeleteExpiredSessions(ctx context.Context) (int, error)
+}
+
+// AuthorizationCodeStore manages short-lived authorization codes.
+type AuthorizationCodeStore interface {
+    // AuthorizationCode CRUD
+    CreateAuthorizationCode(ctx context.Context, code *AuthorizationCode) error
+    GetAuthorizationCode(ctx context.Context, code string) (*AuthorizationCode, error)
+    MarkAuthorizationCodeUsed(ctx context.Context, code string) error
+    DeleteAuthorizationCode(ctx context.Context, code string) error
+
+    // Cleanup
+    DeleteExpiredCodes(ctx context.Context) (int, error)
+}
+
+// RefreshTokenStore manages long-lived refresh tokens.
+type RefreshTokenStore interface {
+    // RefreshToken CRUD
+    CreateRefreshToken(ctx context.Context, token *RefreshToken) error
+    GetRefreshToken(ctx context.Context, token string) (*RefreshToken, error)
+    GetRefreshTokensBySessionID(ctx context.Context, sessionID uuid.UUID) ([]*RefreshToken, error)
+    MarkRefreshTokenUsed(ctx context.Context, token string) error
+    UpdateLastRefreshed(ctx context.Context, token string, timestamp time.Time) error
+    DeleteRefreshToken(ctx context.Context, token string) error
+    DeleteRefreshTokensBySessionID(ctx context.Context, sessionID uuid.UUID) error
+
+    // Cleanup
+    DeleteExpiredTokens(ctx context.Context) (int, error)
+    DeleteUsedTokens(ctx context.Context) (int, error)
+}
+```
+
+**Store Design Notes:**
+- Separate stores with independent cleanup methods
+- Clean expired auth codes without touching sessions
+- Revoke refresh tokens independently or cascade from session
+- Each store manages its own lifecycle
 
 ### TR-2: Token Revocation List (TRL)
 
@@ -469,57 +672,210 @@ func (m *Middleware) RequireValidToken(next http.Handler) http.Handler {
 }
 ```
 
-### TR-5: Device Fingerprinting (Optional)
+### TR-5: Cleanup and Lifecycle Management
 
-**Function** (Location: `internal/auth/fingerprint.go`)
+**Background Task** (Location: `internal/auth/cleanup.go`)
+
+Periodic cleanup of expired authorization codes, refresh tokens, and sessions.
 
 ```go
-func ComputeDeviceFingerprint(userAgent, ipAddress string) string {
-    // Hash user-agent + IP for device binding
-    data := fmt.Sprintf("%s|%s", userAgent, ipAddress)
-    hash := sha256.Sum256([]byte(data))
-    return hex.EncodeToString(hash[:16]) // First 16 bytes
+// CleanupService handles periodic deletion of expired authentication artifacts.
+type CleanupService struct {
+    sessionStore  SessionStore
+    codeStore     AuthorizationCodeStore
+    tokenStore    RefreshTokenStore
+    interval      time.Duration
 }
 
-func ValidateDeviceFingerprint(session *Session, userAgent, ipAddress string) bool {
-    if session.DeviceFingerprint == "" {
-        return true // Device binding not enabled
+// Start begins periodic cleanup in a background goroutine.
+func (s *CleanupService) Start(ctx context.Context) error {
+    ticker := time.NewTicker(s.interval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            s.performCleanup(ctx)
+        case <-ctx.Done():
+            return ctx.Err()
+        }
     }
-    expected := ComputeDeviceFingerprint(userAgent, ipAddress)
-    return session.DeviceFingerprint == expected
+}
+
+func (s *CleanupService) performCleanup(ctx context.Context) {
+    // Clean expired authorization codes (10+ minutes old)
+    if deleted, err := s.codeStore.DeleteExpiredCodes(ctx); err != nil {
+        log.Errorf("Failed to clean expired codes: %v", err)
+    } else if deleted > 0 {
+        log.Infof("Cleaned %d expired authorization codes", deleted)
+    }
+
+    // Clean used/expired refresh tokens (30+ days old or already used)
+    if deleted, err := s.tokenStore.DeleteExpiredTokens(ctx); err != nil {
+        log.Errorf("Failed to clean expired tokens: %v", err)
+    } else if deleted > 0 {
+        log.Infof("Cleaned %d expired refresh tokens", deleted)
+    }
+
+    // Clean expired sessions (30+ days old)
+    if deleted, err := s.sessionStore.DeleteExpiredSessions(ctx); err != nil {
+        log.Errorf("Failed to clean expired sessions: %v", err)
+    } else if deleted > 0 {
+        log.Infof("Cleaned %d expired sessions", deleted)
+    }
 }
 ```
+
+**Cleanup Strategy:**
+- Run every 5 minutes (configurable)
+- Authorization codes: Delete after 10 minutes + grace period
+- Refresh tokens: Delete after marked as used OR after expiry
+- Sessions: Delete after expiry OR revocation + grace period
+- Independent cleanup prevents cascading deletion issues
 
 ---
 
 ## 5. Implementation Steps
 
-### Phase 1: Refresh Token Flow (4-5 hours)
+### Phase 1: Model Refactoring & Core Infrastructure (3-4 hours)
 
-1. Update Session model with RefreshToken fields
-2. Modify `POST /auth/token` to issue refresh tokens on code exchange
-3. Add refresh token generation and storage
-4. Implement `grant_type=refresh_token` flow
-5. Add refresh token rotation logic
-6. Update tests for refresh flow
+**Goal:** Separate lifetimes and establish privacy-first foundations.
 
-### Phase 2: Token Revocation (2-3 hours)
+1. **Create new models** in `internal/auth/models/models.go`:
+   - `Session` (core long-lived session)
+   - `AuthorizationCode` (ephemeral 10-min codes)
+   - `RefreshToken` (30-day renewal tokens)
 
-1. Implement TokenRevocationList interface (in-memory)
-2. Create `POST /auth/revoke` endpoint
-3. Add JTI to access token claims
-4. Store revoked JTIs in TRL with TTL
-5. Update middleware to check TRL on every request
-6. Add tests for revocation
+2. **Implement device fingerprinting** in `internal/auth/fingerprint.go`:
+   - `ComputeDeviceFingerprint()` using SHA-256
+   - `ValidateDeviceFingerprint()` for token binding
 
-### Phase 3: Session Management (2-3 hours)
+3. **Create store interfaces** in `internal/auth/store.go`:
+   - `SessionStore` interface
+   - `AuthorizationCodeStore` interface
+   - `RefreshTokenStore` interface
 
-1. Add device tracking fields to Session model
-2. Implement `GET /auth/sessions` endpoint
-3. Implement `DELETE /auth/sessions/{id}` endpoint
-4. Implement `POST /auth/logout-all` endpoint
-5. Add user-agent and IP extraction helpers
-6. Add tests for session management
+4. **Implement in-memory stores**:
+   - `InMemorySessionStore`
+   - `InMemoryAuthorizationCodeStore`
+   - `InMemoryRefreshTokenStore`
+
+5. **Update existing code** to use separated models:
+   - Migrate existing `Session` usage to `AuthorizationCode` for OAuth flow
+   - Update authorization endpoint to create both `Session` and `AuthorizationCode`
+
+6. **Add tests** for new models and stores
+
+**Benefits of This Foundation:**
+- Clear separation prevents future technical debt
+- Privacy-first design (no PII stored)
+- Easy to add persistence layer later
+- Independent lifecycle management
+
+---
+
+### Phase 2: Refresh Token Flow (3-4 hours)
+
+**Goal:** Implement long-lived sessions with token rotation.
+
+1. **Update token exchange endpoint** (`POST /auth/token`):
+   - Issue `RefreshToken` alongside access tokens
+   - Store refresh token with 30-day expiry
+   - Compute and store device fingerprint hash
+
+2. **Implement refresh grant type** (`grant_type=refresh_token`):
+   - Validate refresh token from `RefreshTokenStore`
+   - Check device fingerprint (if enabled)
+   - Implement token rotation (mark old token used, create new one)
+   - Generate new access token with same session
+
+3. **Add rotation detection**:
+   - Detect reused refresh tokens (possible replay attack)
+   - Revoke entire session on rotation violation
+
+4. **Update tests**:
+   - Token issuance with refresh token
+   - Refresh token exchange flow
+   - Token rotation security
+   - Replay attack detection
+
+---
+
+### Phase 3: Token Revocation (2-3 hours)
+
+**Goal:** Enable logout and session invalidation.
+
+1. **Implement TokenRevocationList** in `internal/auth/revocation.go`:
+   - `InMemoryTRL` with expiry tracking
+   - `RevokeToken()`, `IsRevoked()` methods
+
+2. **Add JTI to access tokens**:
+   - Update `AccessTokenClaims` struct
+   - Generate unique JTI on token creation
+
+3. **Create revocation endpoint** (`POST /auth/revoke`):
+   - Parse token (JWT or opaque refresh token)
+   - Extract session ID
+   - Mark session as revoked
+   - Add access token JTI to TRL
+   - Delete refresh tokens for session
+
+4. **Update authentication middleware**:
+   - Check TRL on every request
+   - Return 401 for revoked tokens
+
+5. **Add tests** for revocation flow
+
+---
+
+### Phase 4: Session Management (2-3 hours)
+
+**Goal:** Multi-device session visibility and control.
+
+1. **Implement session listing** (`GET /auth/sessions`):
+   - Query all active sessions for user
+   - Parse device info from fingerprint context (store separately if needed)
+   - Mark current session
+   - Return session metadata
+
+2. **Implement session revocation** (`DELETE /auth/sessions/{id}`):
+   - Validate session ownership
+   - Mark session as revoked
+   - Delete associated refresh tokens
+   - Add access tokens to TRL
+
+3. **Implement global logout** (`POST /auth/logout-all`):
+   - Query all user sessions
+   - Revoke all (except current if `except_current=true`)
+   - Cascade delete refresh tokens
+   - Add all access tokens to TRL
+
+4. **Add tests** for session management
+
+---
+
+### Phase 5: Cleanup & Production Readiness (1-2 hours)
+
+**Goal:** Automatic cleanup and monitoring.
+
+1. **Implement CleanupService** in `internal/auth/cleanup.go`:
+   - Periodic deletion of expired codes (10+ min old)
+   - Periodic deletion of used/expired refresh tokens
+   - Periodic deletion of expired sessions
+
+2. **Add cleanup configuration**:
+   - Configurable cleanup interval (default: 5 minutes)
+   - Grace periods for each artifact type
+
+3. **Add monitoring/metrics**:
+   - Count of active sessions
+   - Count of expired artifacts cleaned
+   - Token revocation rate
+
+4. **Integration tests**:
+   - End-to-end flow: login → refresh → logout
+   - Multi-device session management
+   - Cleanup verification
 
 ---
 
