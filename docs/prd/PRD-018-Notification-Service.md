@@ -77,6 +77,12 @@ type Email struct {
 }
 ```
 
+**Security (OWASP Forgot Password & Authentication Cheat Sheets):**
+- Email domain must enforce SPF, DKIM, and DMARC; use subdomains dedicated to auth (`auth.example.com`).
+- Do not include passwords or shared secrets in messages; OTPs and reset links must have short TTL (≤15 minutes) and single-use tokens.
+- Templates include clear issuer name and anti-phishing copy; avoid clickable links for OTP delivery (numeric codes only) where possible.
+- Sign reset and verification URLs with HMAC + expiration and avoid leaking whether an account exists (generic language).
+
 ### FR-2: SMS Delivery
 
 **Provider Integration:** Twilio, AWS SNS
@@ -96,6 +102,11 @@ type SMSNotifier interface {
     Send(ctx context.Context, phoneNumber string, message string) error
 }
 ```
+
+**Security (OWASP MFA & SMS Guidelines):**
+- OTP messages exclude PII and links; include sender brand and expiry (≤5 minutes) to reduce phishing risk.
+- Enforce per-recipient throttling (5 messages/hour, 10/day) and randomize OTP codes with cryptographic RNG.
+- Use short codes/alphanumeric sender IDs to prevent spoofing where supported; log delivery failures and suspected SIM-swap indicators.
 
 ### FR-3: Webhook Callbacks
 
@@ -337,4 +348,5 @@ err := notifier.SendWebhook(ctx, webhook)
 
 | Version | Date       | Author       | Changes     |
 | ------- | ---------- | ------------ | ----------- |
+| 1.1     | 2025-12-12 | Product Team | Added OWASP-aligned OTP handling, throttling, and anti-phishing controls |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD |

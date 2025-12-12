@@ -156,6 +156,21 @@ Retry-After: 45 (seconds, only on 429 response)
 
 ---
 
+### FR-2b: Authentication-Specific Protections (OWASP Authentication Cheat Sheet)
+
+**Scope:** `/auth/authorize`, `/auth/token`, `/auth/password-reset`, `/mfa/challenge`, `/mfa/enroll`
+
+**Description:** Combine credential-specific throttles with global limits to slow brute force and credential stuffing.
+
+**Controls:**
+- Username/email and IP combined key with sliding window: 5 attempts/15 minutes, hard lock for 15 minutes after 10 failures/day; emit audit `auth.lockout`.
+- Progressive backoff before 401/429 responses (250ms → 500ms → 1s) to reduce online guessing speed.
+- Generic error messaging to prevent account enumeration (same response for invalid username vs password/MFA code).
+- Require CAPTCHA or out-of-band verification after 3 consecutive lockouts within 24 hours.
+- OTP verification endpoints share the same counters to prevent bypassing login limits.
+
+---
+
 ### FR-3: Sliding Window Algorithm
 
 **Implementation:** Token bucket or sliding window counter
@@ -655,4 +670,5 @@ curl -X POST http://localhost:8080/admin/rate-limit/allowlist \
 
 | Version | Date       | Author       | Changes     |
 | ------- | ---------- | ------------ | ----------- |
+| 1.1     | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD |

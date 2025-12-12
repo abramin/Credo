@@ -99,6 +99,13 @@ Single-factor authentication (password/email only) is insufficient for regulated
 }
 ```
 
+**Verification Controls (OWASP MFA & Authentication Cheat Sheets):**
+- Enforce rate limits and lockouts: max 5 failed attempts per method per hour; lock method for 15 minutes after threshold and emit audit `mfa.locked_out`.
+- Reject codes older than 90 seconds (TOTP 30s step, 1 step of clock skew) and block replay of successful codes within the same validity window.
+- Use generic error responses to avoid method or account enumeration (do not reveal whether phone/email exists).
+- Bind challenge to session and device fingerprint; require a new challenge if IP/UA changes between issuance and verification.
+- Apply exponential backoff (250ms, 500ms, 1s…) on consecutive failures to slow credential stuffing.
+
 ---
 
 ### FR-3: Backup Codes
@@ -121,6 +128,7 @@ Single-factor authentication (password/email only) is insufficient for regulated
 - After successful MFA, set device token
 - On subsequent logins from same device, skip MFA for 30 days
 - Revoke on explicit logout or password change
+- Device token must be signed, bound to user agent + key rotation, and validated for replay; do not store shared secrets in the cookie.
 
 ---
 
@@ -182,6 +190,13 @@ secret, err := totp.Generate(totp.GenerateOpts{
 valid := totp.Validate(code, secret.Secret())
 ```
 
+### TR-3: OWASP MFA Alignment
+- **Secret handling:** TOTP seeds encrypted at rest with KMS and only decrypted in-memory for validation; backup codes stored as salted bcrypt hashes.
+- **Channel strength:** SMS/email OTPs must carry a 6–8 digit numeric code with 5-minute TTL, include issuer/domain in the message, and avoid embedding links to reduce phishing risk.
+- **Clock drift:** Allow at most ±1 step skew; monitor for repeated drift and alert.
+- **Auditability:** Record `mfa_enrolled`, `mfa_verified`, `mfa_lockout`, and recovery events with method, IP, and device fingerprint.
+- **User self-service hardening:** Enrollment requires primary-authenticated session + re-prompt of existing factor; recovery enforces backup code + out-of-band verification.
+
 ---
 
 ## 4. Implementation Steps
@@ -241,4 +256,5 @@ curl -X POST http://localhost:8080/mfa/challenge \
 
 | Version | Date       | Author       | Changes     |
 | ------- | ---------- | ------------ | ----------- |
+| 1.1     | 2025-12-12 | Product Team | Added OWASP-aligned MFA verification, lockout, and device token safeguards |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD |
