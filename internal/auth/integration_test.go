@@ -16,7 +16,8 @@ import (
 	auth "credo/internal/auth/handler"
 	"credo/internal/auth/models"
 	"credo/internal/auth/service"
-	"credo/internal/auth/store"
+	sessionStore "credo/internal/auth/store/session"
+	userStore "credo/internal/auth/store/user"
 	jwttoken "credo/internal/jwt_token"
 	"credo/internal/platform/middleware"
 	dErrors "credo/pkg/domain-errors"
@@ -27,11 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemorySessionStore, *jwttoken.JWTService, *audit.InMemoryStore) {
+func SetupSuite(t *testing.T) (*chi.Mux, *userStore.InMemoryUserStore, *sessionStore.InMemorySessionStore, *jwttoken.JWTService, *audit.InMemoryStore) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	userStore := store.NewInMemoryUserStore()
-	sessionStore := store.NewInMemorySessionStore()
+	userStore := userStore.NewInMemoryUserStore()
+	sessionStore := sessionStore.NewInMemorySessionStore()
 	jwtService := jwttoken.NewJWTService(
 		"test-secret-key",
 		"credo",
@@ -58,6 +59,12 @@ func SetupSuite(t *testing.T) (*chi.Mux, *store.InMemoryUserStore, *store.InMemo
 	router.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth(jwtValidator, logger))
 		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
+	})
+
+	// Admin endpoints (admin token required)
+	router.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAdminToken("test-admin-token", logger))
+		authHandler.RegisterAdmin(r)
 	})
 
 	return router, userStore, sessionStore, jwtService, auditStore
@@ -297,6 +304,176 @@ func TestInvalidBearerTokenRejection(t *testing.T) {
 			require.NoError(t, json.NewDecoder(userInfoRes.Body).Decode(&userInfoBody))
 
 			assert.Equal(t, string(dErrors.CodeUnauthorized), userInfoBody["error"])
+		})
+	}
+}
+
+func TestAdminDeleteUser(t *testing.T) {
+	r, userStore, sessionStore, _, auditStore := SetupSuite(t)
+
+	t.Log("Step 1: Create a user with a session via authorization flow")
+	reqBody := models.AuthorizationRequest{
+		Email:       "user-to-delete@example.com",
+		ClientID:    "client-123",
+		Scopes:      []string{"openid"},
+		RedirectURI: "https://client.app/callback",
+	}
+	payload, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/authorize", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+	res := rec.Result()
+	defer res.Body.Close()
+
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+
+	var authRes map[string]string
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&authRes))
+	code := authRes["code"]
+	require.NotEmpty(t, code)
+
+	// Verify user and session were created
+	user, err := userStore.FindByEmail(context.Background(), reqBody.Email)
+	require.NoError(t, err)
+	require.NotNil(t, user)
+
+	session, err := sessionStore.FindByCode(context.Background(), code)
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, user.ID, session.UserID)
+
+	t.Log("Step 2: Delete the user via admin endpoint")
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/auth/users/"+user.ID.String(), nil)
+	deleteReq.Header.Set("X-Admin-Token", "test-admin-token")
+	deleteRec := httptest.NewRecorder()
+
+	r.ServeHTTP(deleteRec, deleteReq)
+	deleteRes := deleteRec.Result()
+	defer deleteRes.Body.Close()
+
+	assert.Equal(t, http.StatusNoContent, deleteRes.StatusCode)
+
+	t.Log("Step 3: Verify user is deleted")
+	_, err = userStore.FindByID(context.Background(), user.ID)
+	assert.Error(t, err, "expected error when looking up deleted user")
+
+	t.Log("Step 4: Verify sessions are deleted")
+	_, err = sessionStore.FindByID(context.Background(), session.ID)
+	assert.Error(t, err, "expected error when looking up deleted session")
+
+	t.Log("Step 5: Verify audit events recorded")
+	auditEvents, err := auditStore.ListByUser(context.Background(), user.ID.String())
+	require.NoError(t, err)
+	// Should have: user_created, session_created, sessions_revoked, user_deleted
+	assert.GreaterOrEqual(t, len(auditEvents), 4)
+
+	actions := make([]string, 0, len(auditEvents))
+	for _, event := range auditEvents {
+		actions = append(actions, event.Action)
+	}
+	assert.Contains(t, actions, "user_deleted")
+	assert.Contains(t, actions, "sessions_revoked")
+}
+
+func TestAdminDeleteUserNotFound(t *testing.T) {
+	r, _, _, _, _ := SetupSuite(t)
+
+	nonExistentUserID := uuid.New()
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/auth/users/"+nonExistentUserID.String(), nil)
+	deleteReq.Header.Set("X-Admin-Token", "test-admin-token")
+	deleteRec := httptest.NewRecorder()
+
+	r.ServeHTTP(deleteRec, deleteReq)
+	deleteRes := deleteRec.Result()
+	defer deleteRes.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, deleteRes.StatusCode)
+
+	var errBody map[string]string
+	require.NoError(t, json.NewDecoder(deleteRes.Body).Decode(&errBody))
+	assert.Equal(t, string(dErrors.CodeNotFound), errBody["error"])
+}
+
+func TestAdminDeleteUserInvalidUUID(t *testing.T) {
+	r, _, _, _, _ := SetupSuite(t)
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/auth/users/invalid-uuid", nil)
+	deleteReq.Header.Set("X-Admin-Token", "test-admin-token")
+	deleteRec := httptest.NewRecorder()
+
+	r.ServeHTTP(deleteRec, deleteReq)
+	deleteRes := deleteRec.Result()
+	defer deleteRes.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, deleteRes.StatusCode)
+
+	var errBody map[string]string
+	require.NoError(t, json.NewDecoder(deleteRes.Body).Decode(&errBody))
+	assert.Equal(t, string(dErrors.CodeBadRequest), errBody["error"])
+}
+
+func TestAdminDeleteUserUnauthorized(t *testing.T) {
+	r, userStore, _, _, _ := SetupSuite(t)
+
+	// Create a user first
+	reqBody := models.AuthorizationRequest{
+		Email:       "user-to-delete@example.com",
+		ClientID:    "client-123",
+		Scopes:      []string{"openid"},
+		RedirectURI: "https://client.app/callback",
+	}
+	payload, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/authorize", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+	res := rec.Result()
+	defer res.Body.Close()
+
+	user, err := userStore.FindByEmail(context.Background(), reqBody.Email)
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name        string
+		adminToken  string
+		expectedMsg string
+	}{
+		{
+			name:        "wrong token",
+			adminToken:  "wrong-token",
+			expectedMsg: "forbidden",
+		},
+		{
+			name:        "empty token",
+			adminToken:  "",
+			expectedMsg: "forbidden",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/auth/users/"+user.ID.String(), nil)
+			if tc.adminToken != "" {
+				deleteReq.Header.Set("X-Admin-Token", tc.adminToken)
+			}
+			deleteRec := httptest.NewRecorder()
+
+			r.ServeHTTP(deleteRec, deleteReq)
+			deleteRes := deleteRec.Result()
+			defer deleteRes.Body.Close()
+
+			assert.Equal(t, http.StatusForbidden, deleteRes.StatusCode)
+
+			var errBody map[string]string
+			require.NoError(t, json.NewDecoder(deleteRes.Body).Decode(&errBody))
+			assert.Equal(t, tc.expectedMsg, errBody["error"])
 		})
 	}
 }

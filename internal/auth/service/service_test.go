@@ -12,7 +12,8 @@ import (
 
 	"credo/internal/auth/models"
 	"credo/internal/auth/service/mocks"
-	"credo/internal/auth/store"
+	sessionStore "credo/internal/auth/store/session"
+	userStore "credo/internal/auth/store/user"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -141,6 +142,73 @@ func (s *ServiceSuite) TestAuthorize() {
 	})
 }
 
+func (s *ServiceSuite) TestDeleteUser() {
+	ctx := context.Background()
+	userID := uuid.New()
+	existingUser := &models.User{ID: userID, Email: "user@example.com"}
+
+	s.T().Run("deletes sessions then user", func(t *testing.T) {
+		gomock.InOrder(
+			s.mockUserStore.EXPECT().FindByID(ctx, userID).Return(existingUser, nil),
+			s.mockSessStore.EXPECT().DeleteSessionsByUser(ctx, userID).Return(nil),
+			s.mockUserStore.EXPECT().Delete(ctx, userID).Return(nil),
+		)
+
+		err := s.service.DeleteUser(ctx, userID)
+		assert.NoError(t, err)
+	})
+
+	s.T().Run("no sessions found still deletes user", func(t *testing.T) {
+		gomock.InOrder(
+			s.mockUserStore.EXPECT().FindByID(ctx, userID).Return(existingUser, nil),
+			s.mockSessStore.EXPECT().DeleteSessionsByUser(ctx, userID).Return(sessionStore.ErrNotFound),
+			s.mockUserStore.EXPECT().Delete(ctx, userID).Return(nil),
+		)
+
+		err := s.service.DeleteUser(ctx, userID)
+		assert.NoError(t, err)
+	})
+
+	s.T().Run("user lookup fails", func(t *testing.T) {
+		s.mockUserStore.EXPECT().FindByID(ctx, userID).Return(nil, errors.New("db down"))
+
+		err := s.service.DeleteUser(ctx, userID)
+		require.Error(t, err)
+		assert.True(t, dErrors.Is(err, dErrors.CodeInternal))
+	})
+
+	s.T().Run("user not found", func(t *testing.T) {
+		s.mockUserStore.EXPECT().FindByID(ctx, userID).Return(nil, userStore.ErrNotFound)
+
+		err := s.service.DeleteUser(ctx, userID)
+		require.Error(t, err)
+		assert.True(t, dErrors.Is(err, dErrors.CodeNotFound))
+	})
+
+	s.T().Run("session delete fails", func(t *testing.T) {
+		gomock.InOrder(
+			s.mockUserStore.EXPECT().FindByID(ctx, userID).Return(existingUser, nil),
+			s.mockSessStore.EXPECT().DeleteSessionsByUser(ctx, userID).Return(errors.New("redis down")),
+		)
+
+		err := s.service.DeleteUser(ctx, userID)
+		require.Error(t, err)
+		assert.True(t, dErrors.Is(err, dErrors.CodeInternal))
+	})
+
+	s.T().Run("user delete fails", func(t *testing.T) {
+		gomock.InOrder(
+			s.mockUserStore.EXPECT().FindByID(ctx, userID).Return(existingUser, nil),
+			s.mockSessStore.EXPECT().DeleteSessionsByUser(ctx, userID).Return(nil),
+			s.mockUserStore.EXPECT().Delete(ctx, userID).Return(errors.New("write fail")),
+		)
+
+		err := s.service.DeleteUser(ctx, userID)
+		require.Error(t, err)
+		assert.True(t, dErrors.Is(err, dErrors.CodeInternal))
+	})
+}
+
 func (s *ServiceSuite) TestToken() {
 	req := models.TokenRequest{
 		GrantType:   "authorization_code",
@@ -184,7 +252,7 @@ func (s *ServiceSuite) TestToken() {
 	})
 
 	s.T().Run("session not found", func(t *testing.T) {
-		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, store.ErrNotFound)
+		s.mockSessStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, sessionStore.ErrNotFound)
 
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
@@ -265,10 +333,10 @@ func (s *ServiceSuite) TestUserInfo() {
 	})
 
 	s.T().Run("session lookup returns not found error", func(t *testing.T) {
-		s.mockSessStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(nil, store.ErrNotFound)
+		s.mockSessStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(nil, sessionStore.ErrNotFound)
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
-		assert.ErrorIs(s.T(), err, dErrors.New(dErrors.CodeNotFound, "session not found"))
+		assert.ErrorIs(s.T(), err, dErrors.New(dErrors.CodeUnauthorized, "session not found"))
 		assert.Nil(s.T(), result)
 	})
 
@@ -277,7 +345,7 @@ func (s *ServiceSuite) TestUserInfo() {
 			UserID: existingUser.ID,
 			Status: StatusActive,
 		}, nil)
-		s.mockUserStore.EXPECT().FindByID(gomock.Any(), existingUser.ID).Return(nil, store.ErrNotFound)
+		s.mockUserStore.EXPECT().FindByID(gomock.Any(), existingUser.ID).Return(nil, userStore.ErrNotFound)
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		assert.ErrorIs(s.T(), err, dErrors.New(dErrors.CodeUnauthorized, "user not found"))

@@ -1,4 +1,4 @@
-package store
+package session
 
 import (
 	"context"
@@ -12,44 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
-
-type InMemoryUserStoreSuite struct {
-	suite.Suite
-	store *InMemoryUserStore
-}
-
-func (s *InMemoryUserStoreSuite) SetupTest() {
-	s.store = NewInMemoryUserStore()
-}
-
-func (s *InMemoryUserStoreSuite) TestSaveAndFind() {
-	user := &models.User{
-		ID:        uuid.New(),
-		Email:     "jane.doe@example.com",
-		FirstName: "Jane",
-		LastName:  "Doe",
-		Verified:  false,
-	}
-
-	err := s.store.Save(context.Background(), user)
-	require.NoError(s.T(), err)
-
-	foundByID, err := s.store.FindByID(context.Background(), user.ID)
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), user, foundByID)
-
-	foundByEmail, err := s.store.FindByEmail(context.Background(), user.Email)
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), user, foundByEmail)
-}
-
-func (s *InMemoryUserStoreSuite) TestFindNotFound() {
-	_, err := s.store.FindByID(context.Background(), uuid.New())
-	assert.ErrorIs(s.T(), err, ErrNotFound)
-
-	_, err = s.store.FindByEmail(context.Background(), "missing@example.com")
-	assert.ErrorIs(s.T(), err, ErrNotFound)
-}
 
 type InMemorySessionStoreSuite struct {
 	suite.Suite
@@ -87,8 +49,27 @@ func (s *InMemorySessionStoreSuite) TestFindNotFound() {
 	assert.ErrorIs(s.T(), err, ErrNotFound)
 }
 
-func TestInMemoryUserStoreSuite(t *testing.T) {
-	suite.Run(t, new(InMemoryUserStoreSuite))
+func (s *InMemorySessionStoreSuite) TestDeleteSessionsByUser() {
+	userID := uuid.New()
+	otherUserID := uuid.New()
+	matching := &models.Session{ID: uuid.New(), UserID: userID}
+	other := &models.Session{ID: uuid.New(), UserID: otherUserID}
+
+	require.NoError(s.T(), s.store.Save(context.Background(), matching))
+	require.NoError(s.T(), s.store.Save(context.Background(), other))
+
+	err := s.store.DeleteSessionsByUser(context.Background(), userID)
+	require.NoError(s.T(), err)
+
+	_, err = s.store.FindByID(context.Background(), matching.ID)
+	assert.ErrorIs(s.T(), err, ErrNotFound)
+
+	fetchedOther, err := s.store.FindByID(context.Background(), other.ID)
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), other, fetchedOther)
+
+	err = s.store.DeleteSessionsByUser(context.Background(), userID)
+	assert.ErrorIs(s.T(), err, ErrNotFound)
 }
 
 func TestInMemorySessionStoreSuite(t *testing.T) {

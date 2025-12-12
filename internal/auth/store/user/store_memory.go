@@ -1,4 +1,4 @@
-package store
+package user
 
 import (
 	"context"
@@ -80,38 +80,13 @@ func (s *InMemoryUserStore) FindOrCreateByEmail(_ context.Context, email string,
 	return user, nil
 }
 
-type InMemorySessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*models.Session
-}
-
-func NewInMemorySessionStore() *InMemorySessionStore {
-	return &InMemorySessionStore{sessions: make(map[string]*models.Session)}
-}
-
-func (s *InMemorySessionStore) Save(_ context.Context, session *models.Session) error {
+func (s *InMemoryUserStore) Delete(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sessions[session.ID.String()] = session
-	return nil
-}
-
-func (s *InMemorySessionStore) FindByID(_ context.Context, id uuid.UUID) (*models.Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if session, ok := s.sessions[id.String()]; ok {
-		return session, nil
+	key := id.String()
+	if _, ok := s.users[key]; ok {
+		delete(s.users, key)
+		return nil
 	}
-	return nil, ErrNotFound
-}
-
-func (s *InMemorySessionStore) FindByCode(_ context.Context, code string) (*models.Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, session := range s.sessions {
-		if session.Code == code {
-			return session, nil
-		}
-	}
-	return nil, ErrNotFound
+	return ErrNotFound
 }

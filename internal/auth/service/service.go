@@ -11,7 +11,8 @@ import (
 
 	"credo/internal/audit"
 	"credo/internal/auth/models"
-	"credo/internal/auth/store"
+	sessionStore "credo/internal/auth/store/session"
+	userStore "credo/internal/auth/store/user"
 	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
 	"credo/pkg/attrs"
@@ -26,6 +27,7 @@ type UserStore interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
 	FindOrCreateByEmail(ctx context.Context, email string, user *models.User) (*models.User, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // SessionStore defines the persistence interface for session data.
@@ -34,6 +36,7 @@ type SessionStore interface {
 	Save(ctx context.Context, session *models.Session) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Session, error)
 	FindByCode(ctx context.Context, code string) (*models.Session, error)
+	DeleteSessionsByUser(ctx context.Context, userID uuid.UUID) error
 }
 
 type TokenGenerator interface {
@@ -212,12 +215,12 @@ func (s *Service) UserInfo(ctx context.Context, sessionID string) (*models.UserI
 
 	session, err := s.sessions.FindByID(ctx, parsedSessionID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, sessionStore.ErrNotFound) {
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"session_id", parsedSessionID.String(),
 			)
 			s.incrementAuthFailure()
-			return nil, dErrors.New(dErrors.CodeNotFound, "session not found")
+			return nil, dErrors.New(dErrors.CodeUnauthorized, "session not found")
 		}
 		s.logAuthFailure(ctx, "session_lookup_failed", true,
 			"session_id", parsedSessionID.String(),
@@ -237,7 +240,7 @@ func (s *Service) UserInfo(ctx context.Context, sessionID string) (*models.UserI
 
 	user, err := s.users.FindByID(ctx, session.UserID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, userStore.ErrNotFound) {
 			s.logAuthFailure(ctx, "user_not_found", false,
 				"session_id", parsedSessionID.String(),
 				"user_id", session.UserID.String(),
@@ -286,7 +289,7 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	// 2. Find session by authorization code
 	session, err := s.sessions.FindByCode(ctx, req.Code)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, sessionStore.ErrNotFound) {
 			s.logAuthFailure(ctx, "session_not_found", false,
 				"client_id", req.ClientID,
 			)
@@ -380,6 +383,39 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 		ExpiresIn:   s.sessionTTL,
 		TokenType:   "Bearer",
 	}, nil
+}
+
+func (s *Service) DeleteUser(ctx context.Context, userID uuid.UUID) error {
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, userStore.ErrNotFound) {
+			return dErrors.New(dErrors.CodeNotFound, "user not found")
+		}
+		return dErrors.Wrap(dErrors.CodeInternal, "failed to lookup user", err)
+	}
+
+	if err := s.sessions.DeleteSessionsByUser(ctx, userID); err != nil {
+		if !errors.Is(err, sessionStore.ErrNotFound) {
+			return dErrors.Wrap(dErrors.CodeInternal, "failed to delete user sessions", err)
+		}
+	}
+	s.logAudit(ctx, string(audit.EventSessionsRevoked),
+		"user_id", userID.String(),
+	)
+
+	if err := s.users.Delete(ctx, userID); err != nil {
+		if errors.Is(err, userStore.ErrNotFound) {
+			return dErrors.New(dErrors.CodeNotFound, "user not found")
+		}
+		return dErrors.Wrap(dErrors.CodeInternal, "failed to delete user", err)
+	}
+
+	s.logAudit(ctx, string(audit.EventUserDeleted),
+		"user_id", userID.String(),
+		"email", user.Email,
+	)
+
+	return nil
 }
 
 func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
