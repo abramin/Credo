@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Session Management - Credo Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/oauth-helpers.js"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <div
+      style="
+        background: #fff3cd;
+        color: #664d03;
+        padding: 10px;
+        font-size: 14px;
+        border-bottom: 1px solid #ffeeba;
+        text-align: center;
+      "
+    >
+      Demo environment only. No real identity data is processed or stored.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-xl font-bold text-gray-900">
+              OAuth2 Demo - Session Management
+            </h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <a
+              href="/demo/index.html"
+              class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >← Demo Home</a
+            >
+            <a
+              href="/demo/authorize.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >New Authorization</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main
+      class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      x-data="sessionManagement()"
+      x-init="init()"
+    >
+      <!-- Information Banner -->
+      <div class="bg-purple-50 border border-purple-200 rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-bold text-purple-900 mb-2">
+          Session Management
+        </h2>
+        <p class="text-sm text-purple-800 mb-2">
+          View and manage your active sessions. You can revoke individual
+          sessions or log out of all other devices.
+        </p>
+        <p class="text-xs text-purple-700">
+          <strong>Requires:</strong> Valid access token from OAuth flow
+        </p>
+      </div>
+
+      <!-- Access Token Input -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Access Token</h3>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Paste Access Token (or complete OAuth flow first)</label
+            >
+            <textarea
+              x-model="accessToken"
+              rows="3"
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+            ></textarea>
+          </div>
+          <div class="flex gap-2">
+            <button
+              @click="loadSessions"
+              :disabled="!accessToken || loading"
+              class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              <span x-show="!loading">Load Sessions</span>
+              <span x-show="loading">
+                <span class="spinner"></span>
+                Loading...
+              </span>
+            </button>
+            <button
+              @click="clearToken"
+              class="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300"
+            >
+              Clear Token
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Display -->
+      <div
+        x-show="error"
+        class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="text-sm font-bold text-red-900 mb-1">Error</h4>
+            <p class="text-sm text-red-800" x-text="error"></p>
+          </div>
+          <button @click="error = null" class="text-red-600 hover:text-red-800">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Success Message -->
+      <div
+        x-show="success"
+        class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="text-sm font-bold text-green-900 mb-1">Success</h4>
+            <p class="text-sm text-green-800" x-text="success"></p>
+          </div>
+          <button
+            @click="success = null"
+            class="text-green-600 hover:text-green-800"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Backend Not Available Notice -->
+      <div
+        x-show="backendNotAvailable"
+        class="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6"
+      >
+        <h3 class="text-lg font-bold text-yellow-900 mb-2">
+          ⚠️ Session Management Endpoints Not Yet Implemented
+        </h3>
+        <p class="text-sm text-yellow-800 mb-3">
+          The session management endpoints (GET /auth/sessions, DELETE
+          /auth/sessions/{id}) are not yet available in the backend.
+        </p>
+        <p class="text-sm text-yellow-800 mb-3">
+          <strong>Expected API Contract:</strong>
+        </p>
+        <div class="bg-white border border-yellow-300 rounded p-3 mb-3">
+          <p class="text-xs font-mono text-gray-700 mb-2">
+            GET /auth/sessions
+          </p>
+          <pre
+            class="text-xs bg-gray-50 p-2 rounded overflow-x-auto"
+          >Headers: Authorization: Bearer {access_token}
+
+Response 200 OK:
+{
+  "sessions": [
+    {
+      "id": "uuid",
+      "device": "Chrome on macOS",
+      "location": "San Francisco, CA",
+      "created_at": "2025-12-13T10:00:00Z",
+      "last_seen": "2025-12-13T11:30:00Z",
+      "is_current": true
+    }
+  ]
+}</pre
+          >
+        </div>
+        <div class="bg-white border border-yellow-300 rounded p-3 mb-3">
+          <p class="text-xs font-mono text-gray-700 mb-2">
+            DELETE /auth/sessions/{session_id}
+          </p>
+          <pre
+            class="text-xs bg-gray-50 p-2 rounded overflow-x-auto"
+          >Headers: Authorization: Bearer {access_token}
+
+Response 204 No Content</pre
+          >
+        </div>
+        <div class="bg-white border border-yellow-300 rounded p-3">
+          <p class="text-xs font-mono text-gray-700 mb-2">
+            POST /auth/logout-all
+          </p>
+          <pre
+            class="text-xs bg-gray-50 p-2 rounded overflow-x-auto"
+          >Headers: Authorization: Bearer {access_token}
+Body: { "except_current": true }
+
+Response 200 OK:
+{ "revoked_count": 3 }</pre
+          >
+        </div>
+      </div>
+
+      <!-- Sessions List -->
+      <div x-show="sessions.length > 0" class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-bold text-gray-900">Active Sessions</h3>
+          <button
+            @click="logoutAllOthers"
+            :disabled="loading"
+            class="bg-red-600 text-white px-3 py-1 text-sm rounded-md hover:bg-red-700 disabled:bg-gray-400"
+          >
+            Logout All Other Sessions
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Location</th>
+                <th>Created</th>
+                <th>Last Seen</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="session in sessions" :key="session.id">
+                <tr>
+                  <td>
+                    <span class="text-sm" x-text="session.device"></span>
+                  </td>
+                  <td>
+                    <span class="text-sm" x-text="session.location"></span>
+                  </td>
+                  <td>
+                    <span class="text-xs text-gray-600" x-text="formatDate(session.created_at)"></span>
+                  </td>
+                  <td>
+                    <span class="text-xs text-gray-600" x-text="formatDate(session.last_seen)"></span>
+                  </td>
+                  <td>
+                    <span
+                      class="status-badge"
+                      :class="session.is_current ? 'pass' : 'pending'"
+                    >
+                      <span x-text="session.is_current ? 'Current' : 'Active'"></span>
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      x-show="!session.is_current"
+                      @click="revokeSession(session.id)"
+                      :disabled="loading"
+                      class="text-red-600 hover:text-red-800 text-sm disabled:text-gray-400"
+                    >
+                      Revoke
+                    </button>
+                    <span
+                      x-show="session.is_current"
+                      class="text-gray-400 text-sm"
+                    >
+                      (current)
+                    </span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Raw API Response -->
+      <div
+        x-show="rawResponse"
+        class="bg-gray-50 border border-gray-200 rounded-lg p-4"
+      >
+        <h4 class="text-sm font-bold text-gray-900 mb-2">
+          Raw API Response
+        </h4>
+        <pre
+          class="text-xs bg-white p-3 rounded border border-gray-200 overflow-x-auto"
+          x-text="JSON.stringify(rawResponse, null, 2)"
+        ></pre>
+        <p class="text-xs text-gray-600 mt-2">
+          HTTP Status: <span class="mono" x-text="httpStatus"></span>
+        </p>
+      </div>
+
+      <!-- API Documentation -->
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-6">
+        <h4 class="text-sm font-bold text-gray-900 mb-2">
+          Session Management API
+        </h4>
+        <ul class="text-xs text-gray-700 space-y-2">
+          <li>
+            <strong>GET /auth/sessions</strong> - List all active sessions for
+            the authenticated user
+          </li>
+          <li>
+            <strong>DELETE /auth/sessions/{id}</strong> - Revoke a specific
+            session
+          </li>
+          <li>
+            <strong>POST /auth/logout-all</strong> - Logout all sessions except
+            current (with except_current=true)
+          </li>
+        </ul>
+      </div>
+    </main>
+
+    <script>
+      function sessionManagement() {
+        return {
+          accessToken: null,
+          loading: false,
+          error: null,
+          success: null,
+          sessions: [],
+          rawResponse: null,
+          httpStatus: null,
+          backendNotAvailable: false,
+
+          init() {
+            // Try to load token from sessionStorage
+            const stored = getStoredTokens();
+            if (stored.accessToken) {
+              this.accessToken = stored.accessToken;
+            }
+          },
+
+          async loadSessions() {
+            this.loading = true;
+            this.error = null;
+            this.success = null;
+            this.rawResponse = null;
+            this.backendNotAvailable = false;
+
+            try {
+              const apiBase = getAPIBase();
+              const res = await fetch(`${apiBase}/auth/sessions`, {
+                method: "GET",
+                headers: {
+                  Authorization: `Bearer ${this.accessToken}`,
+                  "Content-Type": "application/json",
+                },
+              });
+
+              this.httpStatus = res.status;
+
+              // Handle 404 - endpoint not implemented
+              if (res.status === 404) {
+                this.backendNotAvailable = true;
+                this.error = "Session management endpoints not yet implemented in backend";
+                return;
+              }
+
+              const data = await res.json();
+              this.rawResponse = data;
+
+              if (!res.ok) {
+                this.error =
+                  data.error_description ||
+                  data.error ||
+                  data.message ||
+                  "Failed to load sessions";
+                return;
+              }
+
+              if (data.sessions && Array.isArray(data.sessions)) {
+                this.sessions = data.sessions;
+                this.success = `Loaded ${data.sessions.length} session(s)`;
+              } else {
+                this.error = "Unexpected response format";
+              }
+            } catch (err) {
+              this.error = err.message || "Network error";
+              this.backendNotAvailable = true;
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          async revokeSession(sessionId) {
+            if (!confirm("Are you sure you want to revoke this session?")) {
+              return;
+            }
+
+            this.loading = true;
+            this.error = null;
+            this.success = null;
+
+            try {
+              const apiBase = getAPIBase();
+              const res = await fetch(`${apiBase}/auth/sessions/${sessionId}`, {
+                method: "DELETE",
+                headers: {
+                  Authorization: `Bearer ${this.accessToken}`,
+                  "Content-Type": "application/json",
+                },
+              });
+
+              this.httpStatus = res.status;
+
+              if (res.status === 404) {
+                this.backendNotAvailable = true;
+                this.error = "Session revocation endpoint not yet implemented";
+                return;
+              }
+
+              if (!res.ok) {
+                const data = await res.json();
+                this.error =
+                  data.error_description ||
+                  data.error ||
+                  data.message ||
+                  "Failed to revoke session";
+                return;
+              }
+
+              this.success = "Session revoked successfully";
+              // Reload sessions
+              await this.loadSessions();
+            } catch (err) {
+              this.error = err.message || "Network error";
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          async logoutAllOthers() {
+            if (
+              !confirm(
+                "Are you sure you want to logout all other sessions? This will revoke all sessions except your current one."
+              )
+            ) {
+              return;
+            }
+
+            this.loading = true;
+            this.error = null;
+            this.success = null;
+
+            try {
+              const apiBase = getAPIBase();
+              const res = await fetch(`${apiBase}/auth/logout-all`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${this.accessToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ except_current: true }),
+              });
+
+              this.httpStatus = res.status;
+
+              if (res.status === 404) {
+                this.backendNotAvailable = true;
+                this.error = "Logout-all endpoint not yet implemented";
+                return;
+              }
+
+              const data = await res.json();
+              this.rawResponse = data;
+
+              if (!res.ok) {
+                this.error =
+                  data.error_description ||
+                  data.error ||
+                  data.message ||
+                  "Failed to logout other sessions";
+                return;
+              }
+
+              this.success = `Successfully logged out ${data.revoked_count || 0} other session(s)`;
+              // Reload sessions
+              await this.loadSessions();
+            } catch (err) {
+              this.error = err.message || "Network error";
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          clearToken() {
+            this.accessToken = null;
+            this.sessions = [];
+            this.rawResponse = null;
+            clearTokens();
+            this.success = "Token cleared";
+          },
+
+          formatDate(dateString) {
+            if (!dateString) return "N/A";
+            try {
+              const date = new Date(dateString);
+              return date.toLocaleString();
+            } catch {
+              return dateString;
+            }
+          },
+        };
+      }
+    </script>
+  </body>
+</html>

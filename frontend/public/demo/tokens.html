@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Token Lifecycle - Credo Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/oauth-helpers.js"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <div
+      style="
+        background: #fff3cd;
+        color: #664d03;
+        padding: 10px;
+        font-size: 14px;
+        border-bottom: 1px solid #ffeeba;
+        text-align: center;
+      "
+    >
+      Demo environment only. No real identity data is processed or stored.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-xl font-bold text-gray-900">
+              OAuth2 Demo - Token Lifecycle
+            </h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <a
+              href="/demo/index.html"
+              class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >← Demo Home</a
+            >
+            <a
+              href="/demo/authorize.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >New Authorization</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main
+      class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      x-data="tokenLifecycle()"
+      x-init="init()"
+    >
+      <!-- Information Banner -->
+      <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-bold text-indigo-900 mb-2">
+          Token Lifecycle Management
+        </h2>
+        <p class="text-sm text-indigo-800 mb-2">
+          View token metadata, refresh access tokens, and revoke tokens. This
+          page demonstrates the complete token lifecycle.
+        </p>
+        <p class="text-xs text-indigo-700">
+          <strong>Note:</strong> Refresh and revocation endpoints may not be
+          fully implemented yet.
+        </p>
+      </div>
+
+      <!-- Token Input -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Current Tokens</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Access Token</label
+            >
+            <textarea
+              x-model="tokens.access"
+              rows="3"
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+            ></textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Refresh Token (if available)</label
+            >
+            <textarea
+              x-model="tokens.refresh"
+              rows="2"
+              placeholder="Refresh token not yet supported"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs"
+              disabled
+            ></textarea>
+            <p class="text-xs text-gray-500 mt-1">
+              Refresh tokens are not currently issued by the backend
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <button
+              @click="analyzeToken"
+              :disabled="!tokens.access"
+              class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              Analyze Token
+            </button>
+            <button
+              @click="clearAllTokens"
+              class="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300"
+            >
+              Clear All
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Display -->
+      <div
+        x-show="error"
+        class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="text-sm font-bold text-red-900 mb-1">Error</h4>
+            <p class="text-sm text-red-800" x-text="error"></p>
+          </div>
+          <button @click="error = null" class="text-red-600 hover:text-red-800">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Success Message -->
+      <div
+        x-show="success"
+        class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="text-sm font-bold text-green-900 mb-1">Success</h4>
+            <p class="text-sm text-green-800" x-text="success"></p>
+          </div>
+          <button
+            @click="success = null"
+            class="text-green-600 hover:text-green-800"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Token Metadata -->
+      <div
+        x-show="metadata"
+        class="bg-white rounded-lg shadow-md p-6 mb-6"
+      >
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Token Metadata</h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div class="bg-blue-50 border border-blue-200 rounded p-3">
+            <p class="text-xs text-blue-700 font-semibold mb-1">Subject (sub)</p>
+            <p class="text-sm font-mono" x-text="metadata?.sub || 'N/A'"></p>
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded p-3">
+            <p class="text-xs text-blue-700 font-semibold mb-1">Issuer (iss)</p>
+            <p class="text-sm font-mono" x-text="metadata?.iss || 'N/A'"></p>
+          </div>
+          <div class="bg-green-50 border border-green-200 rounded p-3">
+            <p class="text-xs text-green-700 font-semibold mb-1">Issued At</p>
+            <p class="text-sm" x-text="metadata?._iat_readable || 'N/A'"></p>
+          </div>
+          <div class="bg-yellow-50 border border-yellow-200 rounded p-3">
+            <p class="text-xs text-yellow-700 font-semibold mb-1">Expires At</p>
+            <p class="text-sm" x-text="metadata?._exp_readable || 'N/A'"></p>
+          </div>
+        </div>
+
+        <!-- Expiry Countdown -->
+        <div
+          x-show="expiryCountdown"
+          class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4"
+        >
+          <h4 class="text-sm font-bold text-yellow-900 mb-2">
+            ⏱️ Token Expiry Countdown
+          </h4>
+          <p class="text-lg font-mono text-yellow-800" x-text="expiryCountdown"></p>
+        </div>
+
+        <!-- Full Claims -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2"
+            >Full JWT Claims</label
+          >
+          <pre
+            class="text-xs bg-gray-50 p-3 rounded border border-gray-200 overflow-x-auto"
+            x-text="JSON.stringify(metadata, null, 2)"
+          ></pre>
+        </div>
+      </div>
+
+      <!-- Token Actions -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Token Actions</h3>
+
+        <div class="space-y-3">
+          <!-- Refresh Token -->
+          <div class="bg-gray-50 border border-gray-200 rounded p-4">
+            <div class="flex justify-between items-start mb-2">
+              <div>
+                <h4 class="text-sm font-bold text-gray-900">
+                  Refresh Access Token
+                </h4>
+                <p class="text-xs text-gray-600">
+                  Exchange refresh token for a new access token (extends session)
+                </p>
+              </div>
+            </div>
+            <button
+              @click="refreshToken"
+              :disabled="loading || !tokens.refresh"
+              class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
+            >
+              <span x-show="!loading">Refresh Token</span>
+              <span x-show="loading">
+                <span class="spinner"></span>
+                Refreshing...
+              </span>
+            </button>
+            <p class="text-xs text-yellow-700 mt-2">
+              ⚠️ Refresh token grant not yet implemented in backend
+            </p>
+          </div>
+
+          <!-- Revoke Token -->
+          <div class="bg-red-50 border border-red-200 rounded p-4">
+            <div class="flex justify-between items-start mb-2">
+              <div>
+                <h4 class="text-sm font-bold text-red-900">Revoke Token</h4>
+                <p class="text-xs text-red-700">
+                  Invalidate the current access token (logout)
+                </p>
+              </div>
+            </div>
+            <button
+              @click="revokeToken"
+              :disabled="loading || !tokens.access"
+              class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
+            >
+              <span x-show="!loading">Revoke Token</span>
+              <span x-show="loading">
+                <span class="spinner"></span>
+                Revoking...
+              </span>
+            </button>
+            <p class="text-xs text-yellow-700 mt-2">
+              ⚠️ Token revocation endpoint not yet implemented in backend
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Raw API Response -->
+      <div
+        x-show="rawResponse"
+        class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6"
+      >
+        <h4 class="text-sm font-bold text-gray-900 mb-2">
+          Raw API Response
+        </h4>
+        <pre
+          class="text-xs bg-white p-3 rounded border border-gray-200 overflow-x-auto"
+          x-text="JSON.stringify(rawResponse, null, 2)"
+        ></pre>
+        <p class="text-xs text-gray-600 mt-2">
+          HTTP Status: <span class="mono" x-text="httpStatus"></span>
+        </p>
+      </div>
+
+      <!-- API Documentation -->
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+        <h4 class="text-sm font-bold text-gray-900 mb-2">
+          Token Lifecycle API
+        </h4>
+        <ul class="text-xs text-gray-700 space-y-2">
+          <li>
+            <strong>POST /auth/token</strong> (grant_type=refresh_token) -
+            Refresh access token using refresh token
+          </li>
+          <li>
+            <strong>POST /auth/revoke</strong> - Revoke a token (access or
+            refresh)
+          </li>
+          <li>
+            <strong>Note:</strong> Current implementation only supports
+            authorization_code grant type
+          </li>
+        </ul>
+      </div>
+    </main>
+
+    <script>
+      function tokenLifecycle() {
+        return {
+          tokens: {
+            access: null,
+            refresh: null,
+          },
+          loading: false,
+          error: null,
+          success: null,
+          metadata: null,
+          expiryCountdown: null,
+          rawResponse: null,
+          httpStatus: null,
+          countdownInterval: null,
+
+          init() {
+            // Load tokens from sessionStorage
+            const stored = getStoredTokens();
+            if (stored.accessToken) {
+              this.tokens.access = stored.accessToken;
+              this.analyzeToken();
+            }
+
+            // Start expiry countdown
+            this.startExpiryCountdown();
+          },
+
+          analyzeToken() {
+            this.error = null;
+            this.metadata = null;
+
+            if (!this.tokens.access) {
+              this.error = "No access token to analyze";
+              return;
+            }
+
+            try {
+              this.metadata = decodeJWT(this.tokens.access);
+              if (this.metadata.error) {
+                this.error = this.metadata.error;
+                this.metadata = null;
+              } else {
+                this.success = "Token analyzed successfully";
+              }
+            } catch (err) {
+              this.error = "Failed to decode token: " + err.message;
+            }
+          },
+
+          startExpiryCountdown() {
+            if (this.countdownInterval) {
+              clearInterval(this.countdownInterval);
+            }
+
+            this.countdownInterval = setInterval(() => {
+              if (this.metadata && this.metadata.exp) {
+                const now = Math.floor(Date.now() / 1000);
+                const remaining = this.metadata.exp - now;
+
+                if (remaining <= 0) {
+                  this.expiryCountdown = "⚠️ Token expired";
+                  clearInterval(this.countdownInterval);
+                } else {
+                  const minutes = Math.floor(remaining / 60);
+                  const seconds = remaining % 60;
+                  this.expiryCountdown = `${minutes}m ${seconds}s remaining`;
+                }
+              } else {
+                this.expiryCountdown = null;
+              }
+            }, 1000);
+          },
+
+          async refreshToken() {
+            this.loading = true;
+            this.error = null;
+            this.success = null;
+            this.rawResponse = null;
+
+            try {
+              const apiBase = getAPIBase();
+              const res = await fetch(`${apiBase}/auth/token`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  grant_type: "refresh_token",
+                  refresh_token: this.tokens.refresh,
+                }),
+              });
+
+              this.httpStatus = res.status;
+              const data = await res.json();
+              this.rawResponse = data;
+
+              if (!res.ok) {
+                this.error =
+                  data.error_description ||
+                  data.error ||
+                  data.message ||
+                  "Token refresh failed";
+                return;
+              }
+
+              // Update tokens
+              if (data.access_token) {
+                this.tokens.access = data.access_token;
+                storeTokens(data.access_token, data.refresh_token);
+                this.analyzeToken();
+                this.success = "Token refreshed successfully";
+              }
+            } catch (err) {
+              this.error = err.message || "Network error";
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          async revokeToken() {
+            if (
+              !confirm(
+                "Are you sure you want to revoke this token? This will log you out."
+              )
+            ) {
+              return;
+            }
+
+            this.loading = true;
+            this.error = null;
+            this.success = null;
+            this.rawResponse = null;
+
+            try {
+              const apiBase = getAPIBase();
+              const res = await fetch(`${apiBase}/auth/revoke`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${this.tokens.access}`,
+                },
+                body: JSON.stringify({
+                  token: this.tokens.access,
+                  token_type_hint: "access_token",
+                }),
+              });
+
+              this.httpStatus = res.status;
+
+              // 404 means endpoint doesn't exist yet
+              if (res.status === 404) {
+                this.error = "Token revocation endpoint not yet implemented";
+                this.rawResponse = { error: "404 Not Found" };
+                return;
+              }
+
+              if (res.status === 204) {
+                this.success = "Token revoked successfully";
+                this.clearAllTokens();
+                return;
+              }
+
+              const data = await res.json();
+              this.rawResponse = data;
+
+              if (!res.ok) {
+                this.error =
+                  data.error_description ||
+                  data.error ||
+                  data.message ||
+                  "Token revocation failed";
+                return;
+              }
+
+              this.success = "Token revoked successfully";
+              this.clearAllTokens();
+            } catch (err) {
+              this.error = err.message || "Network error";
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          clearAllTokens() {
+            this.tokens.access = null;
+            this.tokens.refresh = null;
+            this.metadata = null;
+            this.expiryCountdown = null;
+            clearTokens();
+            if (this.countdownInterval) {
+              clearInterval(this.countdownInterval);
+            }
+            this.success = "All tokens cleared";
+          },
+        };
+      }
+    </script>
+  </body>
+</html>

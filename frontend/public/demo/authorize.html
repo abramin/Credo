@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OAuth2 Authorization - Credo Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <div
+      style="
+        background: #fff3cd;
+        color: #664d03;
+        padding: 10px;
+        font-size: 14px;
+        border-bottom: 1px solid #ffeeba;
+        text-align: center;
+      "
+    >
+      Demo environment only. No real identity data is processed or stored.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-xl font-bold text-gray-900">
+              OAuth2 Demo - Authorization
+            </h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <a
+              href="/demo/index.html"
+              class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >← Demo Home</a
+            >
+            <a
+              href="/index.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >User Portal</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main
+      class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      x-data="authorizeFlow()"
+    >
+      <!-- Information Banner -->
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-bold text-blue-900 mb-2">
+          OAuth2 Authorization Request
+        </h2>
+        <p class="text-sm text-blue-800 mb-2">
+          This page initiates the OAuth2 authorization code flow. After you
+          submit, you will be redirected to the callback page with an
+          authorization code.
+        </p>
+        <p class="text-xs text-blue-700">
+          <strong>Important:</strong> This demonstrates a real OAuth redirect.
+          The authorization and token exchange happen on separate pages.
+        </p>
+      </div>
+
+      <!-- Authorization Form -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">
+          Authorization Request
+        </h3>
+
+        <form @submit.prevent="authorize" class="space-y-4">
+          <!-- Email -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Email Address</label
+            >
+            <input
+              type="email"
+              x-model="form.email"
+              required
+              placeholder="user@example.com"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              Demo users: alice@example.com, bob@example.com,
+              charlie@example.com
+            </p>
+          </div>
+
+          <!-- Client ID -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Client ID</label
+            >
+            <input
+              type="text"
+              x-model="form.client_id"
+              required
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <!-- Redirect URI -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Redirect URI</label
+            >
+            <input
+              type="text"
+              x-model="form.redirect_uri"
+              required
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              The callback page will receive the authorization code
+            </p>
+          </div>
+
+          <!-- State (optional) -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >State (optional CSRF protection)</label
+            >
+            <input
+              type="text"
+              x-model="form.state"
+              placeholder="random-state-value"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              State parameter for CSRF protection (will be echoed back)
+            </p>
+          </div>
+
+          <!-- Scopes -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Requested Scopes</label
+            >
+            <div class="space-y-2">
+              <label class="flex items-center">
+                <input
+                  type="checkbox"
+                  value="openid"
+                  x-model="form.scopes"
+                  class="mr-2"
+                />
+                <span class="text-sm">openid - OIDC identity</span>
+              </label>
+              <label class="flex items-center">
+                <input
+                  type="checkbox"
+                  value="profile"
+                  x-model="form.scopes"
+                  class="mr-2"
+                />
+                <span class="text-sm">profile - User profile information</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Submit Button -->
+          <div class="pt-4">
+            <button
+              type="submit"
+              :disabled="loading"
+              class="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              <span x-show="!loading">Authorize</span>
+              <span x-show="loading">
+                <span class="spinner"></span>
+                Authorizing...
+              </span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Error Display -->
+      <div
+        x-show="error"
+        class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
+      >
+        <h4 class="text-sm font-bold text-red-900 mb-2">Error</h4>
+        <p class="text-sm text-red-800" x-text="error"></p>
+      </div>
+
+      <!-- Response Display (only shown on error, redirect happens on success) -->
+      <div
+        x-show="response"
+        class="bg-gray-50 border border-gray-200 rounded-lg p-4"
+      >
+        <h4 class="text-sm font-bold text-gray-900 mb-2">
+          Authorization Response
+        </h4>
+        <pre
+          class="text-xs bg-white p-3 rounded border border-gray-200 overflow-x-auto"
+          x-text="JSON.stringify(response, null, 2)"
+        ></pre>
+        <p class="text-xs text-gray-600 mt-2">
+          HTTP Status: <span class="mono" x-text="httpStatus"></span>
+        </p>
+      </div>
+
+      <!-- Debug Info -->
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-6">
+        <h4 class="text-sm font-bold text-gray-900 mb-2">OAuth Flow Info</h4>
+        <ul class="text-xs text-gray-700 space-y-1">
+          <li>
+            <strong>Step 1:</strong> Fill out the form and click "Authorize"
+          </li>
+          <li>
+            <strong>Step 2:</strong> Backend issues authorization code and
+            returns redirect URI
+          </li>
+          <li>
+            <strong>Step 3:</strong> Browser redirects to callback page with
+            code and state
+          </li>
+          <li>
+            <strong>Step 4:</strong> Callback page exchanges code for tokens
+          </li>
+        </ul>
+      </div>
+    </main>
+
+    <script>
+      function authorizeFlow() {
+        return {
+          form: {
+            email: "alice@example.com",
+            client_id: "demo-client",
+            redirect_uri:
+              window.location.protocol +
+              "//" +
+              window.location.host +
+              "/demo/callback.html",
+            state: "demo-state-" + Math.random().toString(36).substring(7),
+            scopes: ["openid", "profile"],
+          },
+          loading: false,
+          error: null,
+          response: null,
+          httpStatus: null,
+
+          async authorize() {
+            this.loading = true;
+            this.error = null;
+            this.response = null;
+            this.httpStatus = null;
+
+            try {
+              // Determine API base URL
+              const apiBase = this.getAPIBase();
+
+              const res = await fetch(`${apiBase}/auth/authorize`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  email: this.form.email,
+                  client_id: this.form.client_id,
+                  redirect_uri: this.form.redirect_uri,
+                  state: this.form.state,
+                  scopes: this.form.scopes,
+                }),
+              });
+
+              this.httpStatus = res.status;
+              const data = await res.json();
+              this.response = data;
+
+              if (!res.ok) {
+                this.error =
+                  data.error_description ||
+                  data.error ||
+                  data.message ||
+                  "Authorization failed";
+                return;
+              }
+
+              // Success - perform real redirect
+              if (data.code && data.redirect_uri) {
+                const redirectUrl = new URL(data.redirect_uri);
+                redirectUrl.searchParams.append("code", data.code);
+                if (this.form.state) {
+                  redirectUrl.searchParams.append("state", this.form.state);
+                }
+
+                // Redirect the browser
+                window.location.href = redirectUrl.toString();
+              } else {
+                this.error = "Invalid response: missing code or redirect_uri";
+              }
+            } catch (err) {
+              this.error = err.message || "Network error";
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          getAPIBase() {
+            // If running on port 3000 (docker frontend), use /api proxy
+            if (window.location.port === "3000") {
+              return "/api";
+            }
+            // If running locally on different port, directly call backend
+            if (
+              window.location.hostname === "localhost" ||
+              window.location.hostname === "127.0.0.1"
+            ) {
+              return "http://localhost:8080";
+            }
+            // Production - use same origin
+            return "";
+          },
+        };
+      }
+    </script>
+  </body>
+</html>

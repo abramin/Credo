@@ -70,7 +70,21 @@ The project includes demo web interfaces:
 
 https://abramin.github.io/Credo/
 
-See [Frontend Readme](frontend/README.md) for details.
+### OAuth2 Demo Suite
+
+A comprehensive OAuth2 authorization code flow demo with true browser redirects:
+
+- **Demo Home**: http://localhost:3000/demo/index.html
+- **Authorization Flow**: `/demo/authorize.html` → `/demo/callback.html`
+- **Session Management**: `/demo/sessions.html`
+- **Token Lifecycle**: `/demo/tokens.html`
+- **Admin Operations**: `/demo/admin.html`
+
+See [OAuth Demo README](frontend/OAUTH_DEMO_README.md) for complete walkthrough.
+
+### Other Demos
+
+See [Frontend Readme](frontend/README.md) for details on other demo interfaces.
 
 ## Testing
 
