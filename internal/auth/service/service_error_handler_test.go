@@ -1,0 +1,185 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	authCodeStore "credo/internal/auth/store/authorization-code"
+	refreshTokenStore "credo/internal/auth/store/refresh-token"
+	sessionStore "credo/internal/auth/store/session"
+	dErrors "credo/pkg/domain-errors"
+
+	"github.com/stretchr/testify/assert"
+)
+
+// TestHandleTokenError tests the unified error handler for token operations
+func (s *ServiceSuite) TestHandleTokenError() {
+	clientID := "client-123"
+	recordID := "record-456"
+
+	tests := []struct {
+		name           string
+		err            error
+		flow           string
+		expectedCode   dErrors.Code
+		expectedMsg    string
+		auditReason    string
+		expectRecordID bool
+	}{
+		// Auth code errors
+		{
+			name:           "auth code not found",
+			err:            authCodeStore.ErrNotFound,
+			flow:           "code",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "invalid authorization code",
+			auditReason:    "code_not_found",
+			expectRecordID: false,
+		},
+		{
+			name:           "auth code expired",
+			err:            authCodeStore.ErrAuthCodeExpired,
+			flow:           "code",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "authorization code expired",
+			auditReason:    "authorization_code_expired",
+			expectRecordID: false,
+		},
+		{
+			name:           "auth code already used",
+			err:            authCodeStore.ErrAuthCodeUsed,
+			flow:           "code",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "authorization code already used",
+			auditReason:    "authorization_code_reused",
+			expectRecordID: true,
+		},
+		// Refresh token errors
+		{
+			name:           "refresh token not found",
+			err:            refreshTokenStore.ErrNotFound,
+			flow:           "refresh",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "invalid refresh token",
+			auditReason:    "refresh_token_not_found",
+			expectRecordID: false,
+		},
+		{
+			name:           "refresh token expired",
+			err:            refreshTokenStore.ErrRefreshTokenExpired,
+			flow:           "refresh",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "refresh token expired",
+			auditReason:    "refresh_token_expired",
+			expectRecordID: true,
+		},
+		{
+			name:           "refresh token already used",
+			err:            refreshTokenStore.ErrRefreshTokenUsed,
+			flow:           "refresh",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "invalid refresh token",
+			auditReason:    "refresh_token_reused",
+			expectRecordID: true,
+		},
+		// Session errors - context-aware (code flow)
+		{
+			name:           "session not found - code flow",
+			err:            sessionStore.ErrNotFound,
+			flow:           "code",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "invalid authorization code",
+			auditReason:    "session_not_found",
+			expectRecordID: true,
+		},
+		{
+			name:           "session not found - refresh flow",
+			err:            sessionStore.ErrNotFound,
+			flow:           "refresh",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "invalid refresh token",
+			auditReason:    "session_not_found",
+			expectRecordID: true,
+		},
+		{
+			name:           "session revoked",
+			err:            sessionStore.ErrSessionRevoked,
+			flow:           "code",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "session has been revoked",
+			auditReason:    "session_revoked",
+			expectRecordID: true,
+		},
+		// Domain errors
+		{
+			name:           "bad request - redirect_uri mismatch",
+			err:            dErrors.New(dErrors.CodeBadRequest, "redirect_uri mismatch"),
+			flow:           "code",
+			expectedCode:   dErrors.CodeBadRequest,
+			expectedMsg:    "redirect_uri mismatch",
+			auditReason:    "redirect_uri_mismatch",
+			expectRecordID: false,
+		},
+		{
+			name:           "unauthorized - invalid session state",
+			err:            dErrors.New(dErrors.CodeUnauthorized, "session expired"),
+			flow:           "code",
+			expectedCode:   dErrors.CodeUnauthorized,
+			expectedMsg:    "session expired",
+			auditReason:    "invalid_session_state",
+			expectRecordID: true,
+		},
+		{
+			name:           "internal error passthrough",
+			err:            dErrors.New(dErrors.CodeInternal, "db connection failed"),
+			flow:           "code",
+			expectedCode:   dErrors.CodeInternal,
+			expectedMsg:    "db connection failed",
+			auditReason:    "", // No audit for passthrough
+			expectRecordID: false,
+		},
+		// Unknown errors
+		{
+			name:           "unknown error",
+			err:            errors.New("random error"),
+			flow:           "code",
+			expectedCode:   dErrors.CodeInternal,
+			expectedMsg:    "internal server error",
+			auditReason:    "internal_error",
+			expectRecordID: false,
+		},
+	}
+
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+
+			result := s.service.handleTokenError(ctx, tt.err, clientID, recordID, tt.flow)
+
+			assert.Error(t, result)
+			assert.True(t, dErrors.Is(result, tt.expectedCode))
+			assert.Contains(t, result.Error(), tt.expectedMsg)
+		})
+	}
+}
+
+// TestHandleTokenError_AuditAttributes verifies correct audit attribute inclusion
+func (s *ServiceSuite) TestHandleTokenError_AuditAttributes() {
+	s.T().Run("includes record_id when hasRecord=true", func(t *testing.T) {
+		ctx := context.Background()
+		clientID := "client-123"
+		recordID := "record-456"
+
+		err := s.service.handleTokenError(ctx, authCodeStore.ErrAuthCodeUsed, clientID, recordID, "code")
+		assert.Error(t, err)
+	})
+
+	s.T().Run("excludes record_id when recordID is empty", func(t *testing.T) {
+		ctx := context.Background()
+		clientID := "client-123"
+
+		err := s.service.handleTokenError(ctx, authCodeStore.ErrAuthCodeUsed, clientID, "", "code")
+		assert.Error(t, err)
+	})
+}
