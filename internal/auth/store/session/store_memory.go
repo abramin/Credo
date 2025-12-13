@@ -48,6 +48,20 @@ func (s *InMemorySessionStore) FindByID(_ context.Context, id uuid.UUID) (*model
 	return nil, ErrNotFound
 }
 
+func (s *InMemorySessionStore) ListByUser(_ context.Context, userID uuid.UUID) ([]*models.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	sessions := make([]*models.Session, 0)
+	for _, session := range s.sessions {
+		if session.UserID == userID {
+			sessions = append(sessions, session)
+		}
+	}
+
+	return sessions, nil
+}
+
 func (s *InMemorySessionStore) UpdateSession(_ context.Context, session *models.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

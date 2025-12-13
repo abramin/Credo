@@ -24,6 +24,7 @@ type Service interface {
 	Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error)
 	Token(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error)
 	UserInfo(ctx context.Context, sessionID string) (*models.UserInfoResult, error)
+	ListSessions(ctx context.Context, userID uuid.UUID, currentSessionID uuid.UUID) (*models.SessionsResult, error)
 	DeleteUser(ctx context.Context, userID uuid.UUID) error
 	RevokeToken(ctx context.Context, token string, tokenTypeHint string) error
 }
@@ -60,6 +61,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/auth/authorize", h.HandleAuthorize)
 	r.Post("/auth/token", h.HandleToken)
 	r.Get("/auth/userinfo", h.HandleUserInfo)
+	r.Get("/auth/sessions", h.HandleListSessions)
 	r.Post("/auth/revoke", h.HandleRevoke)
 }
 
@@ -207,6 +209,49 @@ func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 		"request_id", requestID,
 		"session_id", sessionIDStr,
 	)
+
+	jsonResponse.WriteJSON(w, http.StatusOK, res)
+}
+
+// HandleListSessions implements GET /auth/sessions per PRD-016 FR-4.
+// Lists all active sessions for the authenticated user.
+func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := middleware.GetRequestID(ctx)
+
+	userIDStr := middleware.GetUserID(ctx)
+	sessionIDStr := middleware.GetSessionID(ctx)
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		h.logger.WarnContext(ctx, "invalid user_id in auth context",
+			"user_id", userIDStr,
+			"request_id", requestID,
+		)
+		httpError.WriteError(w, dErrors.New(dErrors.CodeUnauthorized, "invalid token"))
+		return
+	}
+
+	currentSessionID, err := uuid.Parse(sessionIDStr)
+	if err != nil {
+		h.logger.WarnContext(ctx, "invalid session_id in auth context",
+			"session_id", sessionIDStr,
+			"request_id", requestID,
+		)
+		httpError.WriteError(w, dErrors.New(dErrors.CodeUnauthorized, "invalid token"))
+		return
+	}
+
+	res, err := h.auth.ListSessions(ctx, userID, currentSessionID)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "failed to list sessions",
+			"error", err,
+			"request_id", requestID,
+			"user_id", userIDStr,
+		)
+		httpError.WriteError(w, err)
+		return
+	}
 
 	jsonResponse.WriteJSON(w, http.StatusOK, res)
 }

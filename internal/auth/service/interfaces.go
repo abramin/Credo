@@ -25,6 +25,7 @@ type UserStore interface {
 type SessionStore interface {
 	Create(ctx context.Context, session *models.Session) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Session, error)
+	ListByUser(ctx context.Context, userID uuid.UUID) ([]*models.Session, error)
 	UpdateSession(ctx context.Context, session *models.Session) error
 	DeleteSessionsByUser(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error

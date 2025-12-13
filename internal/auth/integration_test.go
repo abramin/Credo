@@ -79,6 +79,7 @@ func SetupSuite(t *testing.T) (
 	router.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth(jwtValidator, authService, logger)) // authService implements TokenRevocationChecker
 		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
+		r.Get("/auth/sessions", authHandler.HandleListSessions)
 	})
 
 	// Admin endpoints (admin token required)

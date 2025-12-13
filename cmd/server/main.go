@@ -166,6 +166,7 @@ func registerRoutes(
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAuth(jwtValidator, authSvc, log))
 		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
+		r.Get("/auth/sessions", authHandler.HandleListSessions)
 		consentHTTPHandler.Register(r)
 	})
 

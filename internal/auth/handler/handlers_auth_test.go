@@ -371,6 +371,61 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 	})
 }
 
+func (s *AuthHandlerSuite) TestHandler_ListSessions() {
+	userID := uuid.New()
+	currentSessionID := uuid.New()
+
+	s.T().Run("happy path - lists sessions", func(t *testing.T) {
+		mockService, router := s.newHandler(t, nil)
+		expected := &authModel.SessionsResult{
+			Sessions: []authModel.SessionSummary{
+				{
+					SessionID: currentSessionID.String(),
+					Device:    "Chrome on macOS",
+					IsCurrent: true,
+				},
+			},
+		}
+
+		mockService.EXPECT().
+			ListSessions(gomock.Any(), userID, currentSessionID).
+			Return(expected, nil)
+
+		status, got, errBody := s.doListSessionsRequest(t, router, userID.String(), currentSessionID.String())
+		s.assertSuccessResponse(t, status, got, errBody)
+		require.NotNil(t, got)
+		require.Len(t, got.Sessions, 1)
+		assert.Equal(t, currentSessionID.String(), got.Sessions[0].SessionID)
+		assert.True(t, got.Sessions[0].IsCurrent)
+	})
+
+	s.T().Run("invalid user id in context - 401", func(t *testing.T) {
+		mockService, router := s.newHandler(t, nil)
+		mockService.EXPECT().ListSessions(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+		status, got, errBody := s.doListSessionsRequest(t, router, "not-a-uuid", currentSessionID.String())
+		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
+	})
+
+	s.T().Run("invalid session id in context - 401", func(t *testing.T) {
+		mockService, router := s.newHandler(t, nil)
+		mockService.EXPECT().ListSessions(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+		status, got, errBody := s.doListSessionsRequest(t, router, userID.String(), "not-a-uuid")
+		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
+	})
+
+	s.T().Run("service error - 500", func(t *testing.T) {
+		mockService, router := s.newHandler(t, nil)
+		mockService.EXPECT().
+			ListSessions(gomock.Any(), userID, currentSessionID).
+			Return(nil, errors.New("boom"))
+
+		status, got, errBody := s.doListSessionsRequest(t, router, userID.String(), currentSessionID.String())
+		s.assertErrorResponse(t, status, got, errBody, http.StatusInternalServerError, string(dErrors.CodeInternal))
+	})
+}
+
 func (s *AuthHandlerSuite) TestHandler_AdminDeleteUser() {
 	userID := uuid.New()
 	validPath := "/admin/auth/users/" + userID.String()
@@ -479,6 +534,36 @@ func (s *AuthHandlerSuite) doUserInfoRequest(t *testing.T, router *chi.Mux, sess
 		require.NoError(t, json.Unmarshal(raw, &errBody))
 		return rr.Code, nil, errBody
 	}
+}
+
+func (s *AuthHandlerSuite) doListSessionsRequest(t *testing.T, router *chi.Mux, userID string, sessionID string) (int, *authModel.SessionsResult, map[string]string) {
+	t.Helper()
+	httpReq := httptest.NewRequest(http.MethodGet, "/auth/sessions", nil)
+
+	ctx := httpReq.Context()
+	if userID != "" {
+		ctx = context.WithValue(ctx, middleware.ContextKeyUserID, userID)
+	}
+	if sessionID != "" {
+		ctx = context.WithValue(ctx, middleware.ContextKeySessionID, sessionID)
+	}
+	httpReq = httpReq.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, httpReq)
+
+	raw, err := io.ReadAll(rr.Body)
+	require.NoError(t, err)
+
+	if rr.Code == http.StatusOK {
+		var res authModel.SessionsResult
+		require.NoError(t, json.Unmarshal(raw, &res))
+		return rr.Code, &res, nil
+	}
+
+	var errBody map[string]string
+	require.NoError(t, json.Unmarshal(raw, &errBody))
+	return rr.Code, nil, errBody
 }
 
 func (s *AuthHandlerSuite) doAuthRequest(t *testing.T, router *chi.Mux, body string) (int, *authModel.AuthorizationResult, map[string]string) {
