@@ -49,6 +49,45 @@ func (s *InMemorySessionStoreSuite) TestFindNotFound() {
 	assert.ErrorIs(s.T(), err, ErrNotFound)
 }
 
+func (s *InMemorySessionStoreSuite) TestUpdateSession() {
+	session := &models.Session{
+		ID:             uuid.New(),
+		UserID:         uuid.New(),
+		RequestedScope: []string{"openid"},
+		Status:         "pending",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(time.Hour),
+	}
+
+	// Create initial session
+	err := s.store.Create(context.Background(), session)
+	require.NoError(s.T(), err)
+
+	// Update session status
+	session.Status = "active"
+	err = s.store.UpdateSession(context.Background(), session)
+	require.NoError(s.T(), err)
+
+	// Verify the update
+	found, err := s.store.FindByID(context.Background(), session.ID)
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), "active", found.Status)
+}
+
+func (s *InMemorySessionStoreSuite) TestUpdateSessionNotFound() {
+	session := &models.Session{
+		ID:             uuid.New(),
+		UserID:         uuid.New(),
+		RequestedScope: []string{"openid"},
+		Status:         "active",
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(time.Hour),
+	}
+
+	err := s.store.UpdateSession(context.Background(), session)
+	assert.ErrorIs(s.T(), err, ErrNotFound)
+}
+
 func (s *InMemorySessionStoreSuite) TestDeleteSessionsByUser() {
 	userID := uuid.New()
 	otherUserID := uuid.New()
