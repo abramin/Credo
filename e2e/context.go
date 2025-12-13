@@ -14,18 +14,23 @@ import (
 
 // TestContext holds state between test steps
 type TestContext struct {
-	BaseURL          string
-	HTTPClient       *http.Client
-	LastResponse     *http.Response
-	LastResponseBody []byte
-	AuthCode         string
-	AccessToken      string
-	IDToken          string
-	State            string
-	ClientID         string
-	RedirectURI      string
-	UserID           string
-	AdminToken       string
+	BaseURL              string
+	HTTPClient           *http.Client
+	LastResponse         *http.Response
+	LastResponseBody     []byte
+	AuthCode             string
+	AccessToken          string
+	IDToken              string
+	RefreshToken         string
+	PreviousRefreshToken string
+	State                string
+	ClientID             string
+	RedirectURI          string
+	UserID               string
+	AdminToken           string
+	AccessTokens         map[string]string
+	RefreshTokens        map[string]string
+	SessionIDs           map[string]string
 }
 
 // NewTestContext creates a new test context
@@ -48,9 +53,12 @@ func NewTestContext() *TestContext {
 				return http.ErrUseLastResponse
 			},
 		},
-		ClientID:    "test-client",
-		RedirectURI: "http://localhost:3000/callback",
-		AdminToken:  adminToken,
+		ClientID:      "test-client",
+		RedirectURI:   "http://localhost:3000/callback",
+		AdminToken:    adminToken,
+		AccessTokens:  make(map[string]string),
+		RefreshTokens: make(map[string]string),
+		SessionIDs:    make(map[string]string),
 	}
 }
 
@@ -198,6 +206,7 @@ func (tc *TestContext) GetAccessToken() string {
 
 func (tc *TestContext) SetAccessToken(token string) {
 	tc.AccessToken = token
+	tc.SetAccessTokenFor("default", token)
 }
 
 func (tc *TestContext) GetLastResponseStatus() int {
@@ -221,4 +230,57 @@ func (tc *TestContext) SetUserID(userID string) {
 
 func (tc *TestContext) GetAdminToken() string {
 	return tc.AdminToken
+}
+
+func (tc *TestContext) GetRefreshToken() string {
+	return tc.RefreshToken
+}
+
+func (tc *TestContext) GetPreviousRefreshToken() string {
+	return tc.PreviousRefreshToken
+}
+
+func (tc *TestContext) SetPreviousRefreshToken(token string) {
+	tc.PreviousRefreshToken = token
+}
+
+func (tc *TestContext) SetRefreshToken(token string) {
+	if tc.RefreshToken != "" && token != tc.RefreshToken {
+		tc.PreviousRefreshToken = tc.RefreshToken
+	}
+	tc.RefreshToken = token
+	tc.SetRefreshTokenFor("default", token)
+}
+
+func (tc *TestContext) SetAccessTokenFor(name, token string) {
+	if tc.AccessTokens == nil {
+		tc.AccessTokens = make(map[string]string)
+	}
+	tc.AccessTokens[name] = token
+}
+
+func (tc *TestContext) GetAccessTokenFor(name string) string {
+	return tc.AccessTokens[name]
+}
+
+func (tc *TestContext) SetRefreshTokenFor(name, token string) {
+	if tc.RefreshTokens == nil {
+		tc.RefreshTokens = make(map[string]string)
+	}
+	tc.RefreshTokens[name] = token
+}
+
+func (tc *TestContext) GetRefreshTokenFor(name string) string {
+	return tc.RefreshTokens[name]
+}
+
+func (tc *TestContext) SetSessionIDFor(name, id string) {
+	if tc.SessionIDs == nil {
+		tc.SessionIDs = make(map[string]string)
+	}
+	tc.SessionIDs[name] = id
+}
+
+func (tc *TestContext) GetSessionIDFor(name string) string {
+	return tc.SessionIDs[name]
 }

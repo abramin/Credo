@@ -11,12 +11,15 @@ Feature: OAuth2 Authorization Code Flow - Normal Path
     When I initiate authorization with email "test@example.com" and scopes "openid,profile"
     Then the response status should be 200
     And the response should contain an authorization code
+    And the response field "redirect_uri" should contain "code="
+    And the response field "redirect_uri" should contain "state="
     And I save the authorization code
     
     When I exchange the authorization code for tokens
     Then the response status should be 200
     And the response should contain "access_token"
     And the response should contain "id_token"
+    And the response should contain "refresh_token"
     And the response should contain "expires_in"
     
     When I request user info with the access token
