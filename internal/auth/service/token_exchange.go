@@ -42,6 +42,7 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 	if err != nil {
 		return nil, err
 	}
+	mutableSession.LastAccessTokenJTI = artifacts.accessTokenJTI
 	if err := s.persistTokenExchange(ctx, &mutableSession, codeRecord, artifacts.refreshRecord); err != nil {
 		return nil, err
 	}

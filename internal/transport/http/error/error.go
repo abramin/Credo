@@ -43,6 +43,8 @@ func DomainCodeToHTTPStatus(code dErrors.Code) int {
 		return http.StatusConflict
 	case dErrors.CodeUnauthorized:
 		return http.StatusUnauthorized
+	case dErrors.CodeForbidden:
+		return http.StatusForbidden
 	case dErrors.CodeInvalidConsent, dErrors.CodeMissingConsent:
 		return http.StatusForbidden
 	case dErrors.CodePolicyViolation:
@@ -71,6 +73,8 @@ func DomainCodeToHTTPCode(code dErrors.Code) string {
 		return "conflict"
 	case dErrors.CodeUnauthorized:
 		return "unauthorized"
+	case dErrors.CodeForbidden:
+		return "forbidden"
 	case dErrors.CodeInvalidConsent:
 		return "invalid_consent"
 	case dErrors.CodeMissingConsent:

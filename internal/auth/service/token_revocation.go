@@ -23,8 +23,21 @@ func (s *Service) RevokeToken(ctx context.Context, token string, tokenTypeHint s
 	if tokenTypeHint == "access_token" || tokenTypeHint == "" {
 		jti, session, err = s.extractSessionFromAccessToken(ctx, token)
 		if err == nil {
-			// Found valid access token, proceed with revocation
-			return s.revokeSession(ctx, session, jti)
+			outcome, err := s.revokeSessionInternal(ctx, session, jti)
+			if err != nil {
+				return err
+			}
+			if outcome == revokeSessionOutcomeAlreadyRevoked {
+				s.logAudit(ctx, "token_revocation_noop",
+					"session_id", session.ID.String(),
+					"reason", "already_revoked")
+				return nil
+			}
+			s.logAudit(ctx, "token_revoked",
+				"user_id", session.UserID.String(),
+				"session_id", session.ID.String(),
+				"client_id", session.ClientID)
+			return nil
 		}
 	}
 
@@ -32,9 +45,21 @@ func (s *Service) RevokeToken(ctx context.Context, token string, tokenTypeHint s
 	if tokenTypeHint == "refresh_token" || tokenTypeHint == "" {
 		session, err = s.findSessionByRefreshToken(ctx, token)
 		if err == nil {
-			// Found session via refresh token, revoke it
-			// For refresh tokens, we don't have a specific JTI, so we revoke all session tokens
-			return s.revokeSession(ctx, session, "")
+			outcome, err := s.revokeSessionInternal(ctx, session, "")
+			if err != nil {
+				return err
+			}
+			if outcome == revokeSessionOutcomeAlreadyRevoked {
+				s.logAudit(ctx, "token_revocation_noop",
+					"session_id", session.ID.String(),
+					"reason", "already_revoked")
+				return nil
+			}
+			s.logAudit(ctx, "token_revoked",
+				"user_id", session.UserID.String(),
+				"session_id", session.ID.String(),
+				"client_id", session.ClientID)
+			return nil
 		}
 	}
 
@@ -83,26 +108,34 @@ func (s *Service) findSessionByRefreshToken(ctx context.Context, token string) (
 	return session, nil
 }
 
-// revokeSession marks a session as revoked and adds tokens to the revocation list.
-func (s *Service) revokeSession(ctx context.Context, session *models.Session, jti string) error {
+type revokeSessionOutcome int
+
+const (
+	revokeSessionOutcomeRevoked revokeSessionOutcome = iota
+	revokeSessionOutcomeAlreadyRevoked
+)
+
+// revokeSessionInternal marks a session as revoked and adds tokens to the revocation list.
+func (s *Service) revokeSessionInternal(ctx context.Context, session *models.Session, jti string) (revokeSessionOutcome, error) {
 	// Already revoked - idempotent success
 	if session.Status == StatusRevoked {
-		s.logAudit(ctx, "token_revocation_noop",
-			"session_id", session.ID.String(),
-			"reason", "already_revoked")
-		return nil
+		return revokeSessionOutcomeAlreadyRevoked, nil
 	}
 
 	// Revoke the session
 	if err := s.sessions.RevokeSession(ctx, session.ID); err != nil {
 		s.logger.Error("failed to revoke session", "error", err, "session_id", session.ID)
-		return fmt.Errorf("failed to revoke session: %w", err)
+		return revokeSessionOutcomeRevoked, fmt.Errorf("failed to revoke session: %w", err)
 	}
 
 	// Add access token JTI to revocation list if provided
-	if jti != "" {
-		if err := s.trl.RevokeToken(ctx, jti, s.TokenTTL); err != nil {
-			s.logger.Error("failed to add token to revocation list", "error", err, "jti", jti)
+	jtiToRevoke := jti
+	if jtiToRevoke == "" {
+		jtiToRevoke = session.LastAccessTokenJTI
+	}
+	if jtiToRevoke != "" {
+		if err := s.trl.RevokeToken(ctx, jtiToRevoke, s.TokenTTL); err != nil {
+			s.logger.Error("failed to add token to revocation list", "error", err, "jti", jtiToRevoke)
 			// Don't fail the revocation if TRL update fails - session is already revoked
 		}
 	}
@@ -112,14 +145,7 @@ func (s *Service) revokeSession(ctx context.Context, session *models.Session, jt
 		s.logger.Error("failed to delete refresh tokens", "error", err, "session_id", session.ID)
 		// Don't fail - session is already revoked
 	}
-
-	// Emit audit event
-	s.logAudit(ctx, "token_revoked",
-		"user_id", session.UserID.String(),
-		"session_id", session.ID.String(),
-		"client_id", session.ClientID)
-
-	return nil
+	return revokeSessionOutcomeRevoked, nil
 }
 
 // IsTokenRevoked checks if a token JTI is in the revocation list.

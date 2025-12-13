@@ -59,7 +59,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 
 		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID).Return("mock-access-token", nil)
+		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID, []string{"openid", "profile"}).Return("mock-access-token", nil)
 		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientID).Return("mock-id-token", nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().Return("ref_mock-refresh-token", nil)
 		// Inside RunInTx: UpdateSession, Create, MarkUsed
@@ -98,7 +98,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 
 		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID).Return("mock-access-token", nil)
+		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID, []string{"openid", "profile"}).Return("mock-access-token", nil)
 		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientID).Return("mock-id-token", nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().Return("ref_mock-refresh-token", nil)
 		// Inside RunInTx: UpdateSession (to update LastSeenAt), Create, MarkUsed
@@ -356,7 +356,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 
 		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any()).Return("mock-access-token", nil)
+		s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any(), []string{"openid", "profile"}).Return("mock-access-token", nil)
 		s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any()).Return("mock-id-token", nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().Return("ref_mock-refresh-token", nil)
 		// Inside RunInTx, MarkUsed fails
@@ -379,7 +379,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 			{
 				name: "access token generation fails",
 				setupMocks: func() {
-					s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any()).
+					s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("", errors.New("jwt error"))
 				},
 				expectedErr: "failed to generate access token",
@@ -387,7 +387,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 			{
 				name: "id token generation fails",
 				setupMocks: func() {
-					s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any()).
+					s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("mock-access", nil)
 					s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("", errors.New("jwt error"))
@@ -397,7 +397,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 			{
 				name: "refresh token generation fails",
 				setupMocks: func() {
-					s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any()).
+					s.mockJWT.EXPECT().GenerateAccessToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("mock-access", nil)
 					s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("mock-id", nil)
@@ -434,7 +434,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 
 		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID).Return("mock-access", nil)
+		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID, []string{"openid", "profile"}).Return("mock-access", nil)
 		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientID).Return("mock-id", nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().Return("ref_mock", nil)
 		// Inside RunInTx, Create fails

@@ -54,10 +54,11 @@ type Config struct {
 }
 
 type tokenArtifacts struct {
-	accessToken   string
-	idToken       string
-	refreshToken  string
-	refreshRecord *models.RefreshTokenRecord
+	accessToken    string
+	accessTokenJTI string
+	idToken        string
+	refreshToken   string
+	refreshRecord  *models.RefreshTokenRecord
 }
 
 type Option func(*Service)
@@ -130,7 +131,7 @@ func WithTRL(trl revocation.TokenRevocationList) Option {
 
 func (s *Service) generateTokenArtifacts(session *models.Session) (*tokenArtifacts, error) {
 	// Generate tokens before mutating persistence state so failures do not leave partial writes.
-	accessToken, err := s.jwt.GenerateAccessToken(session.UserID, session.ID, session.ClientID)
+	accessToken, err := s.jwt.GenerateAccessToken(session.UserID, session.ID, session.ClientID, session.RequestedScope)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate access token")
 	}

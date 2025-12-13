@@ -23,7 +23,7 @@ var jwtService = NewJWTService(
 )
 
 func Test_GenerateAccessToken(t *testing.T) {
-	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID)
+	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 	claims, err := jwtService.ValidateToken(token)
@@ -41,7 +41,7 @@ func Test_ValidateToken_InvalidToken(t *testing.T) {
 }
 
 func Test_ValidateToken_ExpiredToken(t *testing.T) {
-	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID)
+	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
 	time.Sleep(expiresIn + time.Second)
 	require.NoError(t, err)
 
@@ -50,7 +50,7 @@ func Test_ValidateToken_ExpiredToken(t *testing.T) {
 }
 
 func Test_ValidateToken_ValidTokent(t *testing.T) {
-	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID)
+	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
 	require.NoError(t, err)
 
 	claims, err := jwtService.ValidateToken(token)

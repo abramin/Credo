@@ -89,6 +89,7 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 	if err != nil {
 		return nil, err
 	}
+	mutableSession.LastAccessTokenJTI = artifacts.accessTokenJTI
 
 	now := time.Now()
 	mutableSession.LastRefreshedAt = &now

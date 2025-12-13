@@ -202,6 +202,7 @@ func registerRoutes(
 		r.Use(middleware.RequireAuth(jwtValidator, authSvc, log))
 		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
 		r.Get("/auth/sessions", authHandler.HandleListSessions)
+		r.Delete("/auth/sessions/{session_id}", authHandler.HandleRevokeSession)
 		consentHTTPHandler.Register(r)
 	})
 

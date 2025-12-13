@@ -48,7 +48,7 @@ type RefreshTokenStore interface {
 }
 
 type TokenGenerator interface {
-	GenerateAccessToken(userID uuid.UUID, sessionID uuid.UUID, clientID string) (string, error)
+	GenerateAccessToken(userID uuid.UUID, sessionID uuid.UUID, clientID string, scopes []string) (string, error)
 	GenerateIDToken(userID uuid.UUID, sessionID uuid.UUID, clientID string) (string, error)
 	CreateRefreshToken() (string, error)
 }

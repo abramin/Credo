@@ -257,7 +257,6 @@ This is a **critical blocker** for production deployment.
     {
       "session_id": "sess_abc123",
       "device": "Chrome on macOS",
-      "ip_address": "192.168.1.100",
       "location": "San Francisco, US",
       "created_at": "2025-12-01T10:00:00Z",
       "last_activity": "2025-12-12T15:30:00Z",
@@ -266,7 +265,6 @@ This is a **critical blocker** for production deployment.
     {
       "session_id": "sess_def456",
       "device": "Safari on iPhone",
-      "ip_address": "192.168.1.101",
       "location": "San Francisco, US",
       "created_at": "2025-12-10T08:00:00Z",
       "last_activity": "2025-12-11T12:00:00Z",
@@ -1050,5 +1048,6 @@ curl -X POST http://localhost:8080/auth/logout-all?except_current=true \
 
 | Version | Date       | Author       | Changes                                                                                                                           |
 | ------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1.2     | 2025-12-13 | Engineering  | remove IP Address from List sessions response                                                                                     |
 | 1.1     | 2025-12-13 | Engineering  | Updated device binding to reference DEVICE_BINDING.md; changed to layered security model (device ID + fingerprint, no IP binding) |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                                       |

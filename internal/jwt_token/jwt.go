@@ -3,6 +3,7 @@ package jwttoken
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -14,10 +15,12 @@ import (
 
 // Claims represents the JWT claims for our access tokens
 type Claims struct {
-	UserID    string `json:"user_id"`
-	SessionID string `json:"session_id"`
-	ClientID  string `json:"client_id"`
-	Env       string `json:"env,omitempty"`
+	UserID    string   `json:"user_id"`
+	SessionID string   `json:"session_id"`
+	ClientID  string   `json:"client_id"`
+	Env       string   `json:"env,omitempty"`
+	Scope     []string `json:"scope"`
+	JTI       string   `json:"jti"`
 	jwt.RegisteredClaims
 }
 
@@ -51,12 +54,23 @@ func NewJWTService(signingKey string, issuer string, audience string, tokenTTL t
 func (s *JWTService) GenerateAccessToken(
 	userID uuid.UUID,
 	sessionID uuid.UUID,
-	clientID string) (string, error) {
+	clientID string,
+	scopes []string,
+) (string, error) {
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	jti := hex.EncodeToString(b)
+
 	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
 		UserID:    userID.String(),
 		SessionID: sessionID.String(),
 		ClientID:  clientID,
 		Env:       s.env,
+		Scope:     scopes,
+		JTI:       jti,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.tokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

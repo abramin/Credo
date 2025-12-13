@@ -31,7 +31,8 @@ type Session struct {
 	Status         string    `json:"status"` // "active", "revoked", "pending_consent"
 
 	// Refresh lifecycle
-	LastRefreshedAt *time.Time `json:"last_refreshed_at,omitempty"` // last refresh action timestamp
+	LastRefreshedAt    *time.Time `json:"last_refreshed_at,omitempty"` // last refresh action timestamp
+	LastAccessTokenJTI string     `json:"-"`                           // latest issued access token JTI for revocation
 
 	// Device binding for security - See DEVICE_BINDING.md for full security model
 	DeviceID              string `json:"device_id,omitempty"`               // Primary: UUID from cookie (hard requirement)

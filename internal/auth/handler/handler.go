@@ -25,6 +25,7 @@ type Service interface {
 	Token(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error)
 	UserInfo(ctx context.Context, sessionID string) (*models.UserInfoResult, error)
 	ListSessions(ctx context.Context, userID uuid.UUID, currentSessionID uuid.UUID) (*models.SessionsResult, error)
+	RevokeSession(ctx context.Context, userID uuid.UUID, sessionID uuid.UUID) error
 	DeleteUser(ctx context.Context, userID uuid.UUID) error
 	RevokeToken(ctx context.Context, token string, tokenTypeHint string) error
 }
@@ -62,6 +63,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/auth/token", h.HandleToken)
 	r.Get("/auth/userinfo", h.HandleUserInfo)
 	r.Get("/auth/sessions", h.HandleListSessions)
+	r.Delete("/auth/sessions/{session_id}", h.HandleRevokeSession)
 	r.Post("/auth/revoke", h.HandleRevoke)
 }
 
@@ -254,6 +256,50 @@ func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse.WriteJSON(w, http.StatusOK, res)
+}
+
+// HandleRevokeSession implements DELETE /auth/sessions/{session_id} per PRD-016 FR-5.
+func (h *Handler) HandleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := middleware.GetRequestID(ctx)
+
+	userIDStr := middleware.GetUserID(ctx)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		h.logger.WarnContext(ctx, "invalid user id in context",
+			"error", err,
+			"request_id", requestID,
+		)
+		httpError.WriteError(w, dErrors.New(dErrors.CodeUnauthorized, "invalid user"))
+		return
+	}
+
+	sessionIDStr := chi.URLParam(r, "session_id")
+	sessionID, err := uuid.Parse(sessionIDStr)
+	if err != nil {
+		h.logger.WarnContext(ctx, "invalid session id in path",
+			"error", err,
+			"request_id", requestID,
+		)
+		httpError.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid session_id"))
+		return
+	}
+
+	if err := h.auth.RevokeSession(ctx, userID, sessionID); err != nil {
+		h.logger.ErrorContext(ctx, "failed to revoke session",
+			"error", err,
+			"request_id", requestID,
+			"session_id", sessionIDStr,
+		)
+		httpError.WriteError(w, err)
+		return
+	}
+
+	jsonResponse.WriteJSON(w, http.StatusOK, &models.SessionRevocationResult{
+		Revoked:   true,
+		SessionID: sessionIDStr,
+		Message:   "Session revoked successfully",
+	})
 }
 
 func (h *Handler) HandleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {

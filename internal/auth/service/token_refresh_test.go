@@ -56,7 +56,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		// Expected flow:
 		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID).Return("new-access-token", nil)
+		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID, []string{"openid", "profile"}).Return("new-access-token", nil)
 		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientID).Return("new-id-token", nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().Return("ref_new_token", nil)
 		// Inside RunInTx: UpdateSession, mark old token used, create new token
@@ -222,7 +222,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 
 		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID).Return("new-access-token", nil)
+		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID, []string{"openid", "profile"}).Return("new-access-token", nil)
 		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientID).Return("new-id-token", nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().Return("ref_new_token", nil)
 		s.mockSessionStore.EXPECT().UpdateSession(gomock.Any(), gomock.Any()).DoAndReturn(
