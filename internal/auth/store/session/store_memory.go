@@ -187,7 +187,29 @@ func (s *InMemorySessionStore) DeleteExpiredSessions(ctx context.Context) (int, 
 // * RefreshTokenStore: 1–5 minutes
 // * SessionStore: optional or longer
 
-// This mirrors real systems.
+func (s *InMemorySessionStore) ListAll(_ context.Context) (map[string]*models.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-// Before you implement:
-// Are you planning one shared base store type, or explicitly duplicating this logic per store for clarity in interviews?
+	// Return a copy to avoid concurrent map iteration/write panics
+	copy := make(map[string]*models.Session, len(s.sessions))
+	for k, v := range s.sessions {
+		copy[k] = v
+	}
+	return copy, nil
+}
+
+// ListByUser returns all sessions for a specific user
+func (s *InMemorySessionStore) ListByUser(_ context.Context, userID uuid.UUID) ([]*models.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var sessions []*models.Session
+	for _, session := range s.sessions {
+		if session.UserID == userID {
+			sessions = append(sessions, session)
+		}
+	}
+
+	return sessions, nil
+}
