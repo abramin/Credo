@@ -86,6 +86,20 @@ func (mr *MockServiceMockRecorder) ListSessions(ctx, userID, currentSessionID an
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListSessions", reflect.TypeOf((*MockService)(nil).ListSessions), ctx, userID, currentSessionID)
 }
 
+// RevokeSession mocks base method.
+func (m *MockService) RevokeSession(ctx context.Context, userID, sessionID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeSession", ctx, userID, sessionID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RevokeSession indicates an expected call of RevokeSession.
+func (mr *MockServiceMockRecorder) RevokeSession(ctx, userID, sessionID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeSession", reflect.TypeOf((*MockService)(nil).RevokeSession), ctx, userID, sessionID)
+}
+
 // RevokeToken mocks base method.
 func (m *MockService) RevokeToken(ctx context.Context, token, tokenTypeHint string) error {
 	m.ctrl.T.Helper()

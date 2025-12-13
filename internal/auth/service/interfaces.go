@@ -29,13 +29,16 @@ type SessionStore interface {
 	UpdateSession(ctx context.Context, session *models.Session) error
 	DeleteSessionsByUser(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
+	RevokeSessionIfActive(ctx context.Context, id uuid.UUID, now time.Time) error
+	AdvanceLastSeen(ctx context.Context, id uuid.UUID, clientID string, at time.Time, accessTokenJTI string, activate bool, deviceID string, deviceFingerprintHash string) (*models.Session, error)
+	AdvanceLastRefreshed(ctx context.Context, id uuid.UUID, clientID string, at time.Time, accessTokenJTI string, deviceID string, deviceFingerprintHash string) (*models.Session, error)
 }
 
 type AuthCodeStore interface {
 	Create(ctx context.Context, authCode *models.AuthorizationCodeRecord) error
 	FindByCode(ctx context.Context, code string) (*models.AuthorizationCodeRecord, error)
 	MarkUsed(ctx context.Context, code string) error
-	Delete(ctx context.Context, code string) error
+	ConsumeAuthCode(ctx context.Context, code string, redirectURI string, now time.Time) (*models.AuthorizationCodeRecord, error)
 	DeleteExpiredCodes(ctx context.Context) (int, error)
 }
 
@@ -43,12 +46,13 @@ type RefreshTokenStore interface {
 	Create(ctx context.Context, token *models.RefreshTokenRecord) error
 	FindBySessionID(ctx context.Context, id uuid.UUID) (*models.RefreshTokenRecord, error)
 	Find(ctx context.Context, tokenString string) (*models.RefreshTokenRecord, error)
-	Consume(ctx context.Context, token string, timestamp time.Time) error
+	ConsumeRefreshToken(ctx context.Context, token string, now time.Time) (*models.RefreshTokenRecord, error)
 	DeleteBySessionID(ctx context.Context, sessionID uuid.UUID) error
 }
 
 type TokenGenerator interface {
-	GenerateAccessToken(userID uuid.UUID, sessionID uuid.UUID, clientID string) (string, error)
+	GenerateAccessToken(userID uuid.UUID, sessionID uuid.UUID, clientID string, scopes []string) (string, error)
+	GenerateAccessTokenWithJTI(userID uuid.UUID, sessionID uuid.UUID, clientID string, scopes []string) (string, string, error)
 	GenerateIDToken(userID uuid.UUID, sessionID uuid.UUID, clientID string) (string, error)
 	CreateRefreshToken() (string, error)
 }

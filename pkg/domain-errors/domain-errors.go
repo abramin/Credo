@@ -14,6 +14,7 @@ const (
 	CodeInternal        Code = "internal_error"
 	CodeConflict        Code = "conflict"
 	CodeUnauthorized    Code = "unauthorized"
+	CodeForbidden       Code = "forbidden"
 	CodeInvalidConsent  Code = "invalid_consent"
 	CodeMissingConsent  Code = "missing_consent"
 	CodePolicyViolation Code = "policy_violation"

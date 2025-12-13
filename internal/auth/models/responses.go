@@ -35,7 +35,6 @@ type UserInfoResult struct {
 type SessionSummary struct {
 	SessionID    string    `json:"session_id"`
 	Device       string    `json:"device"`
-	IPAddress    string    `json:"ip_address,omitempty"`
 	Location     string    `json:"location,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	LastActivity time.Time `json:"last_activity"`
@@ -46,4 +45,10 @@ type SessionSummary struct {
 // containing a collection of active sessions for the authenticated user.
 type SessionsResult struct {
 	Sessions []SessionSummary `json:"sessions"`
+}
+
+type SessionRevocationResult struct {
+	Revoked   bool   `json:"revoked"`
+	SessionID string `json:"session_id"`
+	Message   string `json:"message"`
 }

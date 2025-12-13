@@ -257,7 +257,6 @@ This is a **critical blocker** for production deployment.
     {
       "session_id": "sess_abc123",
       "device": "Chrome on macOS",
-      "ip_address": "192.168.1.100",
       "location": "San Francisco, US",
       "created_at": "2025-12-01T10:00:00Z",
       "last_activity": "2025-12-12T15:30:00Z",
@@ -266,7 +265,6 @@ This is a **critical blocker** for production deployment.
     {
       "session_id": "sess_def456",
       "device": "Safari on iPhone",
-      "ip_address": "192.168.1.101",
       "location": "San Francisco, US",
       "created_at": "2025-12-10T08:00:00Z",
       "last_activity": "2025-12-11T12:00:00Z",
@@ -898,18 +896,18 @@ func (s *CleanupService) performCleanup(ctx context.Context) {
 
 ## 6. Acceptance Criteria
 
-- [ ] Users receive refresh tokens on login
-- [ ] Refresh tokens can be exchanged for new access tokens
-- [ ] Refresh tokens rotate on each use (old token invalidated)
-- [ ] Reusing old refresh token revokes entire session (security)
-- [ ] Users can log out and invalidate their session
-- [ ] Revoked tokens fail authentication checks
-- [ ] Users can list all active sessions
-- [ ] Users can revoke individual sessions
-- [ ] Users can revoke all sessions at once
+- [x] Users receive refresh tokens on login
+- [x] Refresh tokens can be exchanged for new access tokens
+- [x] Refresh tokens rotate on each use (old token invalidated)
+- [x] Reusing old refresh token revokes entire session (security)
+- [x] Users can log out and invalidate their session
+- [x] Revoked tokens fail authentication checks
+- [x] Users can list all active sessions
+- [x] Users can revoke individual sessions
+- [x] Users can revoke all sessions at once
 - [ ] Password change triggers global session revocation
-- [ ] Token revocation list uses TTL (no memory leak)
-- [ ] All token lifecycle events emit audit events
+- [x] Token revocation list uses TTL (no memory leak)
+- [x] All token lifecycle events emit audit events
 - [ ] Concurrent session limits enforced (optional)
 
 ---
@@ -943,6 +941,8 @@ See [DEVICE_BINDING.md](../DEVICE_BINDING.md) for complete security model and im
 - Prevent account sharing by limiting active sessions
 - Configurable per user or globally
 - Oldest session auto-revoked when limit exceeded
+
+Related Future Requirements: See [docs/requirements-wishlist.md](docs/requirements-wishlist.md) for the evolving specification and policy options (evict-oldest vs deny-new), audit and metrics.
 
 ---
 
@@ -1050,5 +1050,6 @@ curl -X POST http://localhost:8080/auth/logout-all?except_current=true \
 
 | Version | Date       | Author       | Changes                                                                                                                           |
 | ------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1.2     | 2025-12-13 | Engineering  | remove IP Address from List sessions response                                                                                     |
 | 1.1     | 2025-12-13 | Engineering  | Updated device binding to reference DEVICE_BINDING.md; changed to layered security model (device ID + fingerprint, no IP binding) |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                                       |

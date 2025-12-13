@@ -44,32 +44,57 @@ func (s *InMemoryAuthorizationCodeStoreSuite) TestFindNotFound() {
 	assert.ErrorIs(s.T(), err, ErrNotFound)
 }
 
-func (s *InMemoryAuthorizationCodeStoreSuite) TestDelete() {
-	sessionID := uuid.New()
-	otherSessionID := uuid.New()
-	matching := &models.AuthorizationCodeRecord{Code: "authz_match", SessionID: sessionID}
-	other := &models.AuthorizationCodeRecord{Code: "authz_other", SessionID: otherSessionID}
+func TestInMemoryAuthorizationCodeStoreSuite(t *testing.T) {
+	suite.Run(t, new(InMemoryAuthorizationCodeStoreSuite))
+}
 
-	require.NoError(s.T(), s.store.Create(context.Background(), matching))
-	require.NoError(s.T(), s.store.Create(context.Background(), other))
+func (s *InMemoryAuthorizationCodeStoreSuite) TestConsumeAuthCode() {
+	ctx := context.Background()
+	now := time.Now()
+	record := &models.AuthorizationCodeRecord{
+		Code:        "authz_consume",
+		SessionID:   uuid.New(),
+		RedirectURI: "https://app/callback",
+		ExpiresAt:   now.Add(time.Minute),
+		Used:        false,
+		CreatedAt:   now.Add(-time.Minute),
+	}
+	require.NoError(s.T(), s.store.Create(ctx, record))
 
-	err := s.store.Delete(context.Background(), matching.Code)
+	consumed, err := s.store.ConsumeAuthCode(ctx, record.Code, record.RedirectURI, now)
 	require.NoError(s.T(), err)
+	assert.True(s.T(), consumed.Used)
 
-	_, err = s.store.FindByCode(context.Background(), matching.Code)
-	assert.ErrorIs(s.T(), err, ErrNotFound)
+	_, err = s.store.ConsumeAuthCode(ctx, record.Code, record.RedirectURI, now)
+	assert.ErrorIs(s.T(), err, ErrAuthCodeUsed)
 
-	fetchedOther, err := s.store.FindByCode(context.Background(), other.Code)
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), other, fetchedOther)
-
-	err = s.store.Delete(context.Background(), other.Code)
-	require.NoError(s.T(), err)
-
-	err = s.store.Delete(context.Background(), other.Code)
+	_, err = s.store.ConsumeAuthCode(ctx, "missing", record.RedirectURI, now)
 	assert.ErrorIs(s.T(), err, ErrNotFound)
 }
 
-func TestInMemoryAuthorizationCodeStoreSuite(t *testing.T) {
-	suite.Run(t, new(InMemoryAuthorizationCodeStoreSuite))
+func (s *InMemoryAuthorizationCodeStoreSuite) TestConsumeAuthCodeRejectsInvalid() {
+	ctx := context.Background()
+	now := time.Now()
+	record := &models.AuthorizationCodeRecord{
+		Code:        "authz_expired",
+		SessionID:   uuid.New(),
+		RedirectURI: "https://app/callback",
+		ExpiresAt:   now.Add(-time.Minute),
+		Used:        false,
+		CreatedAt:   now.Add(-2 * time.Minute),
+	}
+	require.NoError(s.T(), s.store.Create(ctx, record))
+
+	_, err := s.store.ConsumeAuthCode(ctx, record.Code, record.RedirectURI, now)
+	assert.ErrorIs(s.T(), err, ErrAuthCodeExpired)
+
+	record2 := *record
+	record2.Code = "authz_redirect"
+	record2.ExpiresAt = now.Add(time.Minute)
+	record2.RedirectURI = "https://expected"
+	require.NoError(s.T(), s.store.Create(ctx, &record2))
+
+	_, err = s.store.ConsumeAuthCode(ctx, record2.Code, "https://wrong", now)
+	assert.Error(s.T(), err)
+	assert.Contains(s.T(), err.Error(), "redirect_uri mismatch")
 }

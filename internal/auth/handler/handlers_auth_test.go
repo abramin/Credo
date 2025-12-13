@@ -21,6 +21,7 @@ import (
 
 	"credo/internal/auth/handler/mocks"
 	authModel "credo/internal/auth/models"
+	"credo/internal/auth/service"
 	"credo/internal/platform/middleware"
 	dErrors "credo/pkg/domain-errors"
 )
@@ -160,7 +161,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 
 func (s *AuthHandlerSuite) TestHandler_Token() {
 	validRequest := &authModel.TokenRequest{
-		GrantType:   "authorization_code",
+		GrantType:   service.GrantTypeAuthorizationCode,
 		Code:        "authz_code_123",
 		RedirectURI: "https://example.com/callback",
 		ClientID:    "some-client-id",
@@ -426,6 +427,38 @@ func (s *AuthHandlerSuite) TestHandler_ListSessions() {
 	})
 }
 
+func (s *AuthHandlerSuite) TestHandler_RevokeSession() {
+	userID := uuid.New()
+	sessionID := uuid.New()
+	path := "/auth/sessions/" + sessionID.String()
+
+	s.T().Run("happy path - revokes session", func(t *testing.T) {
+		mockService, router := s.newHandler(t, nil)
+		mockService.EXPECT().RevokeSession(gomock.Any(), userID, sessionID).Return(nil)
+
+		status, got, errBody := s.doRevokeSessionRequest(t, router, path, userID.String())
+		s.assertSuccessResponse(t, status, got, errBody)
+		assert.True(t, got.Revoked)
+		assert.Equal(t, sessionID.String(), got.SessionID)
+	})
+
+	s.T().Run("invalid user id in context - 401", func(t *testing.T) {
+		mockService, router := s.newHandler(t, nil)
+		mockService.EXPECT().RevokeSession(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+		status, got, errBody := s.doRevokeSessionRequest(t, router, path, "not-a-uuid")
+		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
+	})
+
+	s.T().Run("invalid session id in path - 400", func(t *testing.T) {
+		mockService, router := s.newHandler(t, nil)
+		mockService.EXPECT().RevokeSession(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+
+		status, got, errBody := s.doRevokeSessionRequest(t, router, "/auth/sessions/not-a-uuid", userID.String())
+		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
+	})
+}
+
 func (s *AuthHandlerSuite) TestHandler_AdminDeleteUser() {
 	userID := uuid.New()
 	validPath := "/admin/auth/users/" + userID.String()
@@ -557,6 +590,33 @@ func (s *AuthHandlerSuite) doListSessionsRequest(t *testing.T, router *chi.Mux, 
 
 	if rr.Code == http.StatusOK {
 		var res authModel.SessionsResult
+		require.NoError(t, json.Unmarshal(raw, &res))
+		return rr.Code, &res, nil
+	}
+
+	var errBody map[string]string
+	require.NoError(t, json.Unmarshal(raw, &errBody))
+	return rr.Code, nil, errBody
+}
+
+func (s *AuthHandlerSuite) doRevokeSessionRequest(t *testing.T, router *chi.Mux, path string, userID string) (int, *authModel.SessionRevocationResult, map[string]string) {
+	t.Helper()
+	httpReq := httptest.NewRequest(http.MethodDelete, path, nil)
+
+	ctx := httpReq.Context()
+	if userID != "" {
+		ctx = context.WithValue(ctx, middleware.ContextKeyUserID, userID)
+	}
+	httpReq = httpReq.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, httpReq)
+
+	raw, err := io.ReadAll(rr.Body)
+	require.NoError(t, err)
+
+	if rr.Code == http.StatusOK {
+		var res authModel.SessionRevocationResult
 		require.NoError(t, json.Unmarshal(raw, &res))
 		return rr.Code, &res, nil
 	}

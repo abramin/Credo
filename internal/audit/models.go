@@ -20,6 +20,7 @@ type AuditEvent string
 const (
 	EventUserCreated      AuditEvent = "user_created"
 	EventSessionCreated   AuditEvent = "session_created"
+	EventSessionRevoked   AuditEvent = "session_revoked"
 	EventTokenIssued      AuditEvent = "token_issued"
 	EventTokenRefreshed   AuditEvent = "token_refreshed"
 	EventUserInfoAccessed AuditEvent = "userinfo_accessed"
