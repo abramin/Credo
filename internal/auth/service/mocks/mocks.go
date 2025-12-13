@@ -198,6 +198,20 @@ func (mr *MockSessionStoreMockRecorder) RevokeSession(ctx, id any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeSession", reflect.TypeOf((*MockSessionStore)(nil).RevokeSession), ctx, id)
 }
 
+// UpdateSession mocks base method.
+func (m *MockSessionStore) UpdateSession(ctx context.Context, session *models.Session) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateSession", ctx, session)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateSession indicates an expected call of UpdateSession.
+func (mr *MockSessionStoreMockRecorder) UpdateSession(ctx, session any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateSession", reflect.TypeOf((*MockSessionStore)(nil).UpdateSession), ctx, session)
+}
+
 // MockAuthCodeStore is a mock of AuthCodeStore interface.
 type MockAuthCodeStore struct {
 	ctrl     *gomock.Controller

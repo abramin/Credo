@@ -48,6 +48,17 @@ func (s *InMemorySessionStore) FindByID(_ context.Context, id uuid.UUID) (*model
 	return nil, ErrNotFound
 }
 
+func (s *InMemorySessionStore) UpdateSession(_ context.Context, session *models.Session) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := session.ID.String()
+	if _, ok := s.sessions[key]; !ok {
+		return ErrNotFound
+	}
+	s.sessions[key] = session
+	return nil
+}
+
 func (s *InMemorySessionStore) FindByCode(_ context.Context, code string) (*models.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
