@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"credo/internal/auth/models"
 	sessionStore "credo/internal/auth/store/session"
-	jwttoken "credo/internal/jwt_token"
 )
 
 const (
@@ -78,13 +76,11 @@ func (s *Service) RevokeToken(ctx context.Context, token string, tokenTypeHint s
 
 // extractSessionFromAccessToken parses a JWT access token and returns the JTI and session.
 func (s *Service) extractSessionFromAccessToken(ctx context.Context, token string) (string, *models.Session, error) {
-	// Parse JWT without full validation to extract claims
-	// We only need to extract session_id and jti, token might be expired
-	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
-	claims := &jwttoken.Claims{}
-	_, _, err := parser.ParseUnverified(token, claims)
+	// Parse JWT with signature verification, but skip claims validation (e.g., exp)
+	// We need to extract session_id and jti even if the token is expired
+	claims, err := s.jwt.ParseTokenSkipClaimsValidation(token)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid jwt format: %w", err)
+		return "", nil, err
 	}
 
 	// Get session
