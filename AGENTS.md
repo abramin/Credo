@@ -84,12 +84,54 @@ Helpers may be used for repeated setup inside a module.
 - Maintain small, focused files; avoid god objects.
 - Refer to docs/architecture.md and the prd folder for details of implementation
 
-## Other Guidelines
+## Implementation Patterns
+
+### 1. Service Construction
 
 - Config + options: constructors accept required config plus functional options (e.g., inject logger, JWT service, feature flags) instead of globals.
+- Validate required dependencies in constructor; return error if stores or critical config missing.
+- Apply sensible defaults for optional fields (TTLs, allowed schemes, etc.).
 
-- Domain errors: wrap failures with domain-errors codes; prefer dErrors.Wrap/dErrors.New to keep client-safe messages and telemetry alignment.
+### 2. Error Handling
 
-- Middleware data flow: rely on middleware helpers to attach request metadata (client IP, user agent, device ID) into context.Context; services read from context rather than parameters.
+- Domain errors: wrap failures with `pkg/domain-errors` codes; prefer `dErrors.Wrap`/`dErrors.New` to keep client-safe messages and telemetry alignment.
+- Map store-specific errors (e.g., `sessionStore.ErrNotFound`) to domain error codes (e.g., `dErrors.CodeUnauthorized`) at service boundary.
+- Never expose internal implementation details in error messages sent to clients.
 
-- Transactions: group multi-store writes with RunInTx to avoid partial persistence on failure.
+### 3. Audit & Observability
+
+- Audit first: emit audit events at key state transitions (user/session/token lifecycle).
+- Keep audit publishing inside services, not handlers.
+- Include contextual fields: `user_id`, `session_id`, `client_id`, `request_id` when available.
+- Use structured logging (slog) with context for correlation; emit security events to both logs and audit streams.
+
+### 4. Context & Middleware
+
+- Middleware data flow: rely on middleware helpers to attach request metadata (client IP, user agent, device ID) into `context.Context`.
+- Services read from context rather than accepting parameters for cross-cutting concerns.
+- Never store sensitive data in context; use it only for request-scoped metadata and tracing.
+
+### 5. Transactions & State Management
+
+- Transactions: group multi-store writes with `RunInTx` to avoid partial persistence on failure.
+- Update session timestamps (`LastSeenAt`, `LastRefreshedAt`) and statuses atomically with token persistence.
+- Mark resources as used/consumed (codes, refresh tokens) within the same transaction as token generation.
+
+### 6. Feature Flags & Testing
+
+- Feature flags: default tests/config keep flags off; enable them only in specific scenarios that exercise the feature (e.g., device binding).
+- Minimize test boilerplate by keeping default contexts clean; inject feature-specific metadata only where needed.
+- Use functional options to enable features, not global state.
+
+### 7. Integration Testing
+
+- Focus on happy-path journeys that verify end-to-end flows required by PRDs.
+- Use subtests for error scenarios (400, 401, 404, 500) within the same journey.
+- Avoid duplicating unit test coverage; integration tests should validate HTTP-layer wiring, store persistence, and middleware interactions.
+- Each integration test suite corresponds to one PRD functional requirement or user journey.
+
+### 8. Mocks & Interfaces
+
+- Keep gomock-generated mocks under `internal/<module>/mocks`.
+- Co-locate `//go:generate mockgen` hints with interface definitions for discoverability.
+- Regenerate mocks after interface changes and include in same commit.
