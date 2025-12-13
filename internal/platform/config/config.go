@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,6 +23,8 @@ type Server struct {
 	SessionTTL             time.Duration
 	AdminAPIToken          string
 	DeviceBindingEnabled   bool
+	DeviceCookieName       string
+	DeviceCookieMaxAge     int
 }
 
 // RegistryCacheTTL enforces retention for sensitive registry data.
@@ -83,6 +86,16 @@ func FromEnv() (Server, error) {
 	}
 
 	deviceBindingEnabled := os.Getenv("DEVICE_BINDING_ENABLED") == "true"
+	deviceCookieName := os.Getenv("DEVICE_COOKIE_NAME")
+	if deviceCookieName == "" {
+		deviceCookieName = "__Secure-Device-ID"
+	}
+	deviceCookieMaxAge := 31536000 // 1 year
+	if v := os.Getenv("DEVICE_COOKIE_MAX_AGE"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			deviceCookieMaxAge = parsed
+		}
+	}
 
 	jwtSigningKey := os.Getenv("JWT_SIGNING_KEY")
 	if jwtSigningKey == "" {
@@ -115,22 +128,24 @@ func FromEnv() (Server, error) {
 		}
 	}
 
-	return Server{
-		Addr:                   addr,
-		RegulatedMode:          regulated,
-		DemoMode:               demoMode,
-		Environment:            env,
+		return Server{
+			Addr:                   addr,
+			RegulatedMode:          regulated,
+			DemoMode:               demoMode,
+			Environment:            env,
 		JWTSigningKey:          jwtSigningKey,
 		JWTIssuer:              JWTIssuer,
 		AllowedRedirectSchemes: allowedRedirectSchemes,
 		TokenTTL:               TokenTTL,
 		ConsentTTL:             ConsentTTL,
 		ConsentGrantWindow:     ConsentGrantWindow,
-		SessionTTL:             SessionTTL,
-		AdminAPIToken:          adminAPIToken,
-		DeviceBindingEnabled:   deviceBindingEnabled,
-	}, nil
-}
+			SessionTTL:             SessionTTL,
+			AdminAPIToken:          adminAPIToken,
+			DeviceBindingEnabled:   deviceBindingEnabled,
+			DeviceCookieName:       deviceCookieName,
+			DeviceCookieMaxAge:     deviceCookieMaxAge,
+		}, nil
+	}
 
 func parseAllowedRedirectSchemes(raw, env string) []string {
 	if raw != "" {
