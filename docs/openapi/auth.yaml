@@ -56,23 +56,31 @@ paths:
   /auth/token:
     post:
       security: []
-      summary: Exchange authorization code for tokens
+      summary: Exchange code or refresh token for new tokens
       description: |
-        Exchanges a valid authorization code for an ID token and an access
-        token. The `redirect_uri` and `client_id` must match the authorize
-        request.
+        Exchanges a valid authorization code (FR-1) or refresh token (FR-2)
+        for new tokens. For authorization code exchange, the `redirect_uri`
+        and `client_id` must match the authorize request. For refresh grant,
+        provide a valid refresh token and the `client_id`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TokenRequest"
+              oneOf:
+                - $ref: "#/components/schemas/TokenRequestAuthCode"
+                - $ref: "#/components/schemas/TokenRequestRefresh"
             examples:
               default:
                 value:
                   grant_type: authorization_code
                   code: authz_cafedeadbeef
                   redirect_uri: https://app.example.com/callback
+                  client_id: demo-client
+              refresh_grant:
+                value:
+                  grant_type: refresh_token
+                  refresh_token: ref_7c9e6679-7425-40de-944b-e07fc1f90ae7
                   client_id: demo-client
       responses:
         "200":
@@ -86,9 +94,110 @@ paths:
                   value:
                     access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
                     id_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                    refresh_token: ref_7c9e6679-7425-40de-944b-e07fc1f90ae7
+                    token_type: Bearer
                     expires_in: 3600
+                    scope: openid profile
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/revoke:
+    post:
+      summary: Revoke access or refresh token (logout)
+      security: []
+      description: |
+        Implements RFC 7009 token revocation (FR-3). Accepts either access
+        token (JWT) or refresh token (opaque). Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeRequest"
+            examples:
+              refresh:
+                value:
+                  token: ref_7c9e6679-7425-40de-944b-e07fc1f90ae7
+                  token_type_hint: refresh_token
+      responses:
+        "200":
+          description: Revocation succeeded or token already invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/sessions:
+    get:
+      summary: List active sessions for current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/sessions/{session_id}:
+    delete:
+      summary: Revoke a specific session by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+          description: Target session identifier
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeSessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Forbidden — session does not belong to user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/logout-all:
+    post:
+      summary: Revoke all sessions for current user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: except_current
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: Keep the current session active when true
+      responses:
+        "200":
+          description: Global logout completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutAllResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "500":
@@ -166,7 +275,7 @@ components:
           type: string
           format: uri
           description: Redirect URI to invoke after successful authorization
-    TokenRequest:
+    TokenRequestAuthCode:
       type: object
       required: [grant_type, code, redirect_uri, client_id]
       properties:
@@ -184,6 +293,20 @@ components:
         client_id:
           type: string
           description: OAuth client identifier used during authorization
+    TokenRequestRefresh:
+      type: object
+      required: [grant_type, refresh_token, client_id]
+      properties:
+        grant_type:
+          type: string
+          enum: [refresh_token]
+          description: Must be `refresh_token`
+        refresh_token:
+          type: string
+          description: Opaque refresh token issued previously
+        client_id:
+          type: string
+          description: OAuth client identifier
     TokenResponse:
       type: object
       required: [access_token, id_token, expires_in]
@@ -194,11 +317,77 @@ components:
         id_token:
           type: string
           description: ID token containing authenticated user claims
+        refresh_token:
+          type: string
+          description: New refresh token when using refresh grant (rotation); also issued on initial exchange
+        token_type:
+          type: string
+          description: Token type indicator; always "Bearer"
+          example: Bearer
         expires_in:
           type: integer
           description: Token expiration in seconds
           minimum: 1
           example: 3600
+        scope:
+          type: string
+          description: Space-delimited scopes granted
+          example: openid profile
+    RevokeRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: Token to revoke (access or refresh)
+        token_type_hint:
+          type: string
+          enum: [access_token, refresh_token]
+          description: Optional hint for token type
+    RevokeResponse:
+      type: object
+      required: [revoked]
+      properties:
+        revoked:
+          type: boolean
+        message:
+          type: string
+    SessionsResponse:
+      type: object
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionItem"
+    SessionItem:
+      type: object
+      properties:
+        session_id:
+          type: string
+        device_display_name:
+          type: string
+          description: Display-safe device label
+        approximate_location:
+          type: string
+          description: Display-safe approximate location
+        is_current:
+          type: boolean
+    RevokeSessionResponse:
+      type: object
+      properties:
+        revoked:
+          type: boolean
+        session_id:
+          type: string
+        message:
+          type: string
+    LogoutAllResponse:
+      type: object
+      properties:
+        revoked_count:
+          type: integer
+        message:
+          type: string
     UserInfo:
       type: object
       required: [sub, email, email_verified]
