@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"time"
 
+	"credo/internal/admin"
 	"credo/internal/audit"
 	authHandler "credo/internal/auth/handler"
 	authService "credo/internal/auth/service"
@@ -23,6 +24,7 @@ import (
 	"credo/internal/platform/logger"
 	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
+	"credo/internal/seeder"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -50,21 +52,56 @@ func main() {
 
 	m := metrics.New()
 	jwtService, jwtValidator := initializeJWTService(&cfg)
-	authSvc := initializeAuthService(m, log, jwtService, &cfg)
 
+	// Create stores
+	users := userStore.NewInMemoryUserStore()
+	sessions := sessionStore.NewInMemorySessionStore()
+	auditStore := audit.NewInMemoryStore()
+
+	// Seed demo data if in demo mode
+	if cfg.DemoMode {
+		seederSvc := seeder.New(users, sessions, auditStore, log)
+		if err := seederSvc.SeedAll(context.Background()); err != nil {
+			log.Warn("failed to seed demo data", "error", err)
+		}
+	}
+
+	// Initialize services
+	authSvc := initializeAuthServiceWithStores(m, log, jwtService, &cfg, users, sessions)
+	adminSvc := admin.NewService(users, sessions, auditStore)
+
+	// Setup main API router
 	r := setupRouter(log, m)
 	registerRoutes(r, authSvc, jwtValidator, log, &cfg, m)
 
-	srv := httpserver.New(cfg.Addr, r)
-	startServer(srv, log)
-	waitForShutdown(srv, log)
+	// Start main API server
+	mainSrv := httpserver.New(cfg.Addr, r)
+	startServer(mainSrv, log, "main API")
+
+	// Start admin server on separate port if admin token is configured
+	var adminSrv *http.Server
+	if cfg.AdminAPIToken != "" {
+		adminRouter := setupAdminRouter(log, adminSvc, &cfg)
+		adminSrv = httpserver.New(":8081", adminRouter)
+		startServer(adminSrv, log, "admin")
+	}
+
+	// Wait for shutdown signal and gracefully shut down both servers
+	waitForShutdown([]*http.Server{mainSrv, adminSrv}, log)
 }
 
-// initializeAuthService creates and configures the authentication service
-func initializeAuthService(m *metrics.Metrics, log *slog.Logger, jwtService *jwttoken.JWTService, cfg *config.Server) *authService.Service {
+// initializeAuthServiceWithStores creates and configures the authentication service with provided stores
+func initializeAuthServiceWithStores(
+	m *metrics.Metrics,
+	log *slog.Logger,
+	jwtService *jwttoken.JWTService,
+	cfg *config.Server,
+	users *userStore.InMemoryUserStore,
+	sessions *sessionStore.InMemorySessionStore,
+) *authService.Service {
 	return authService.NewService(
-		userStore.NewInMemoryUserStore(),
-		sessionStore.NewInMemorySessionStore(),
+		users,
+		sessions,
 		authService.WithSessionTTL(cfg.SessionTTL),
 		authService.WithMetrics(m),
 		authService.WithLogger(log),
@@ -151,6 +188,7 @@ func registerRoutes(
 		consentHTTPHandler.Register(r)
 	})
 
+	// Admin routes on main server (user deletion only)
 	if cfg.AdminAPIToken != "" {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAdminToken(cfg.AdminAPIToken, log))
@@ -159,32 +197,75 @@ func registerRoutes(
 	}
 }
 
+// setupAdminRouter creates a router for the admin server
+func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, cfg *config.Server) *chi.Mux {
+	r := chi.NewRouter()
+
+	// Common middleware for all routes
+	r.Use(middleware.Recovery(log))
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Logger(log))
+	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(middleware.ContentTypeJSON)
+
+	// Health check and metrics
+	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	// Admin info endpoint (unauthenticated)
+	r.Get("/admin/info", func(w http.ResponseWriter, _ *http.Request) {
+		resp := map[string]any{
+			"service": "admin",
+			"version": "1.0.0",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	// All admin routes require authentication
+	adminHandler := admin.New(adminSvc, log)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireAdminToken(cfg.AdminAPIToken, log))
+		adminHandler.Register(r)
+	})
+
+	return r
+}
+
 // startServer starts the HTTP server in a goroutine
-func startServer(srv *http.Server, log *slog.Logger) {
-	log.Info("starting http server", "addr", srv.Addr)
+func startServer(srv *http.Server, log *slog.Logger, name string) {
+	log.Info("starting http server", "name", name, "addr", srv.Addr)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error("server error", "error", err)
+			log.Error("server error", "name", name, "error", err)
 			os.Exit(1)
 		}
 	}()
 }
 
-// waitForShutdown waits for an interrupt signal and gracefully shuts down the server
-func waitForShutdown(srv *http.Server, log *slog.Logger) {
+// waitForShutdown waits for an interrupt signal and gracefully shuts down all servers
+func waitForShutdown(servers []*http.Server, log *slog.Logger) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	<-quit
 
-	log.Info("shutting down server gracefully")
+	log.Info("shutting down servers gracefully")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Error("graceful shutdown failed", "error", err)
-		os.Exit(1)
+
+	// Shutdown all servers
+	for _, srv := range servers {
+		if srv != nil {
+			if err := srv.Shutdown(ctx); err != nil {
+				log.Error("graceful shutdown failed", "addr", srv.Addr, "error", err)
+			}
+		}
 	}
 
-	log.Info("server stopped")
+	log.Info("servers stopped")
 }
