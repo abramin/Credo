@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OAuth2 Demo Home - Credo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <div
+      style="
+        background: #fff3cd;
+        color: #664d03;
+        padding: 10px;
+        font-size: 14px;
+        border-bottom: 1px solid #ffeeba;
+        text-align: center;
+      "
+    >
+      Demo environment only. No real identity data is processed or stored.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-xl font-bold text-gray-900">
+              Credo OAuth2 Demo Suite
+            </h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <a
+              href="/index.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >User Portal</a
+            >
+            <a
+              href="/demo.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >Legacy Demo</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <!-- Hero Section -->
+      <div class="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg shadow-lg p-8 mb-8 text-white">
+        <h2 class="text-3xl font-bold mb-4">OAuth2 Authorization Code Flow Demo</h2>
+        <p class="text-lg mb-4">
+          A comprehensive demonstration of OAuth2 authorization code flow with
+          real redirects, token management, and session controls.
+        </p>
+        <p class="text-sm opacity-90">
+          This demo suite shows proper OAuth2 implementation with separate pages
+          for authorization, callback, and resource management. No SPA routing,
+          no localStorage - just pure OAuth2 semantics.
+        </p>
+      </div>
+
+      <!-- Quick Start Guide -->
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
+        <h3 class="text-lg font-bold text-blue-900 mb-3">
+          🚀 Quick Start: Complete OAuth Flow
+        </h3>
+        <ol class="text-sm text-blue-800 space-y-2 list-decimal list-inside">
+          <li>
+            Click <strong>"Start Authorization"</strong> below to begin the OAuth flow
+          </li>
+          <li>You'll be redirected to the callback page with an authorization code</li>
+          <li>Click "Exchange Code for Tokens" to get access and ID tokens</li>
+          <li>Use the tokens to explore session management and token lifecycle</li>
+        </ol>
+        <div class="mt-4">
+          <a
+            href="/demo/authorize.html"
+            class="inline-block bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 font-semibold"
+          >
+            ▶ Start Authorization Flow
+          </a>
+        </div>
+      </div>
+
+      <!-- Demo Pages -->
+      <div class="mb-8">
+        <h3 class="text-2xl font-bold text-gray-900 mb-4">Demo Pages</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Authorize -->
+          <div class="bg-white rounded-lg shadow-md p-6 hover-card">
+            <div class="flex items-start mb-4">
+              <div class="bg-blue-100 rounded-lg p-3 mr-4">
+                <svg
+                  class="w-6 h-6 text-blue-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                  />
+                </svg>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-bold text-gray-900 mb-2">
+                  1. Authorization Request
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  Initiate OAuth2 flow with user credentials and client
+                  information. Performs a real browser redirect.
+                </p>
+                <a
+                  href="/demo/authorize.html"
+                  class="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                  >Open Authorize Page →</a
+                >
+              </div>
+            </div>
+            <div class="bg-gray-50 rounded p-3 text-xs">
+              <p class="font-mono text-gray-700">
+                POST /auth/authorize<br />
+                → redirect to callback with code
+              </p>
+            </div>
+          </div>
+
+          <!-- Callback -->
+          <div class="bg-white rounded-lg shadow-md p-6 hover-card">
+            <div class="flex items-start mb-4">
+              <div class="bg-green-100 rounded-lg p-3 mr-4">
+                <svg
+                  class="w-6 h-6 text-green-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                  />
+                </svg>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-bold text-gray-900 mb-2">
+                  2. OAuth Callback
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  Receives authorization code and exchanges it for access and ID
+                  tokens. Decodes JWTs and shows metadata.
+                </p>
+                <a
+                  href="/demo/callback.html"
+                  class="text-green-600 hover:text-green-800 text-sm font-medium"
+                  >Open Callback Page →</a
+                >
+              </div>
+            </div>
+            <div class="bg-gray-50 rounded p-3 text-xs">
+              <p class="font-mono text-gray-700">
+                POST /auth/token<br />
+                grant_type=authorization_code
+              </p>
+            </div>
+          </div>
+
+          <!-- Sessions -->
+          <div class="bg-white rounded-lg shadow-md p-6 hover-card">
+            <div class="flex items-start mb-4">
+              <div class="bg-purple-100 rounded-lg p-3 mr-4">
+                <svg
+                  class="w-6 h-6 text-purple-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-bold text-gray-900 mb-2">
+                  3. Session Management
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  View active sessions, revoke specific sessions, or logout all
+                  other devices. Requires valid access token.
+                </p>
+                <a
+                  href="/demo/sessions.html"
+                  class="text-purple-600 hover:text-purple-800 text-sm font-medium"
+                  >Open Sessions Page →</a
+                >
+              </div>
+            </div>
+            <div class="bg-gray-50 rounded p-3 text-xs">
+              <p class="font-mono text-gray-700">
+                GET /auth/sessions<br />
+                DELETE /auth/sessions/{id}
+              </p>
+            </div>
+          </div>
+
+          <!-- Tokens -->
+          <div class="bg-white rounded-lg shadow-md p-6 hover-card">
+            <div class="flex items-start mb-4">
+              <div class="bg-indigo-100 rounded-lg p-3 mr-4">
+                <svg
+                  class="w-6 h-6 text-indigo-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                  />
+                </svg>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-bold text-gray-900 mb-2">
+                  4. Token Lifecycle
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  Analyze token metadata, refresh access tokens, and revoke
+                  tokens. Shows expiry countdown and JWT claims.
+                </p>
+                <a
+                  href="/demo/tokens.html"
+                  class="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                  >Open Tokens Page →</a
+                >
+              </div>
+            </div>
+            <div class="bg-gray-50 rounded p-3 text-xs">
+              <p class="font-mono text-gray-700">
+                POST /auth/token (refresh)<br />
+                POST /auth/revoke
+              </p>
+            </div>
+          </div>
+
+          <!-- Admin -->
+          <div class="bg-white rounded-lg shadow-md p-6 hover-card border-2 border-red-200">
+            <div class="flex items-start mb-4">
+              <div class="bg-red-100 rounded-lg p-3 mr-4">
+                <svg
+                  class="w-6 h-6 text-red-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-bold text-red-900 mb-2">
+                  ⚠️ Admin Operations
+                </h4>
+                <p class="text-sm text-gray-600 mb-3">
+                  Destructive admin operations including user deletion. Requires
+                  admin token. Use with caution!
+                </p>
+                <a
+                  href="/demo/admin.html"
+                  class="text-red-600 hover:text-red-800 text-sm font-medium"
+                  >Open Admin Panel →</a
+                >
+              </div>
+            </div>
+            <div class="bg-red-50 rounded p-3 text-xs">
+              <p class="font-mono text-red-700">
+                DELETE /admin/auth/users/{id}<br />
+                X-Admin-Token required
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OAuth Flow Diagram -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+        <h3 class="text-xl font-bold text-gray-900 mb-4">
+          OAuth2 Authorization Code Flow
+        </h3>
+        <div class="space-y-3">
+          <div class="flex items-start">
+            <div class="bg-blue-100 text-blue-800 rounded-full w-8 h-8 flex items-center justify-center font-bold text-sm mr-3 flex-shrink-0">
+              1
+            </div>
+            <div>
+              <p class="font-semibold text-gray-900">Authorization Request</p>
+              <p class="text-sm text-gray-600">
+                User provides credentials → Server issues authorization code →
+                Browser redirects to callback
+              </p>
+              <p class="text-xs font-mono text-gray-500 mt-1">
+                /demo/authorize.html
+              </p>
+            </div>
+          </div>
+          <div class="flex items-start">
+            <div class="bg-green-100 text-green-800 rounded-full w-8 h-8 flex items-center justify-center font-bold text-sm mr-3 flex-shrink-0">
+              2
+            </div>
+            <div>
+              <p class="font-semibold text-gray-900">Code Exchange</p>
+              <p class="text-sm text-gray-600">
+                Callback page receives code → User clicks to exchange → Server
+                issues tokens
+              </p>
+              <p class="text-xs font-mono text-gray-500 mt-1">
+                /demo/callback.html
+              </p>
+            </div>
+          </div>
+          <div class="flex items-start">
+            <div class="bg-purple-100 text-purple-800 rounded-full w-8 h-8 flex items-center justify-center font-bold text-sm mr-3 flex-shrink-0">
+              3
+            </div>
+            <div>
+              <p class="font-semibold text-gray-900">Resource Access</p>
+              <p class="text-sm text-gray-600">
+                Use access token to view sessions, manage tokens, or access
+                protected resources
+              </p>
+              <p class="text-xs font-mono text-gray-500 mt-1">
+                /demo/sessions.html, /demo/tokens.html
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Technical Details -->
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">
+          Technical Implementation
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+          <div>
+            <h4 class="font-semibold text-gray-900 mb-2">Stack</h4>
+            <ul class="text-gray-700 space-y-1 list-disc list-inside">
+              <li>Plain HTML + CSS</li>
+              <li>Alpine.js for reactivity</li>
+              <li>Tailwind CSS for styling</li>
+              <li>No build tools, no SPA routing</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold text-gray-900 mb-2">Key Features</h4>
+            <ul class="text-gray-700 space-y-1 list-disc list-inside">
+              <li>True browser redirects</li>
+              <li>Separate authorization & callback pages</li>
+              <li>No localStorage (sessionStorage only)</li>
+              <li>Raw JSON and HTTP status display</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold text-gray-900 mb-2">OAuth Semantics</h4>
+            <ul class="text-gray-700 space-y-1 list-disc list-inside">
+              <li>State parameter for CSRF protection</li>
+              <li>Redirect URI validation</li>
+              <li>Code single-use enforcement</li>
+              <li>JWT token validation</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold text-gray-900 mb-2">Demo Users</h4>
+            <ul class="text-gray-700 space-y-1 list-disc list-inside">
+              <li>alice@example.com</li>
+              <li>bob@example.com</li>
+              <li>charlie@example.com</li>
+              <li>Any email auto-creates user</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="bg-white border-t border-gray-200 mt-12">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <p class="text-center text-sm text-gray-600">
+          Credo OAuth2 Demo Suite - Built with Alpine.js and plain HTML
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

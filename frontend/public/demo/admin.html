@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Operations - Credo Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/oauth-helpers.js"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <div
+      style="
+        background: #fee;
+        color: #c00;
+        padding: 10px;
+        font-size: 14px;
+        border-bottom: 2px solid #c00;
+        text-align: center;
+        font-weight: bold;
+      "
+    >
+      ⚠️ ADMIN PANEL - DESTRUCTIVE OPERATIONS - DEMO ENVIRONMENT ONLY
+    </div>
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-red-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-xl font-bold text-red-900">
+              🔒 Admin Operations
+            </h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <a
+              href="/demo/index.html"
+              class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >← Demo Home</a
+            >
+            <a
+              href="/index.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >User Portal</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main
+      class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      x-data="adminPanel()"
+    >
+      <!-- Warning Banner -->
+      <div class="bg-red-50 border-2 border-red-400 rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-bold text-red-900 mb-2 flex items-center">
+          <span class="text-2xl mr-2">⚠️</span>
+          ADMIN - DESTRUCTIVE ACTIONS
+        </h2>
+        <p class="text-sm text-red-800 mb-2">
+          This panel allows you to perform administrative operations that
+          <strong>permanently delete data</strong>.
+        </p>
+        <ul class="text-xs text-red-700 space-y-1 list-disc list-inside">
+          <li>User deletion removes all user data</li>
+          <li>All sessions for the user are revoked</li>
+          <li>All refresh tokens are deleted</li>
+          <li>These operations cannot be undone</li>
+        </ul>
+      </div>
+
+      <!-- Admin Token Input -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">
+          Admin Authentication
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Admin API Token</label
+            >
+            <input
+              type="password"
+              x-model="adminToken"
+              placeholder="Enter admin token (X-Admin-Token header)"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 font-mono text-sm"
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              Required for all admin operations. Set via ADMIN_API_TOKEN
+              environment variable.
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <button
+              @click="testAuth"
+              :disabled="!adminToken || loading"
+              class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
+            >
+              Test Authentication
+            </button>
+            <button
+              @click="clearAuth"
+              class="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 text-sm"
+            >
+              Clear Token
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Display -->
+      <div
+        x-show="error"
+        class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="text-sm font-bold text-red-900 mb-1">Error</h4>
+            <p class="text-sm text-red-800" x-text="error"></p>
+          </div>
+          <button @click="error = null" class="text-red-600 hover:text-red-800">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Success Message -->
+      <div
+        x-show="success"
+        class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6"
+      >
+        <div class="flex items-start">
+          <div class="flex-1">
+            <h4 class="text-sm font-bold text-green-900 mb-1">Success</h4>
+            <p class="text-sm text-green-800" x-text="success"></p>
+          </div>
+          <button
+            @click="success = null"
+            class="text-green-600 hover:text-green-800"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Delete User Operation -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Delete User</h3>
+
+        <div class="space-y-4">
+          <div class="bg-yellow-50 border border-yellow-200 rounded p-3">
+            <h4 class="text-sm font-bold text-yellow-900 mb-1">
+              What happens when you delete a user?
+            </h4>
+            <ul class="text-xs text-yellow-800 space-y-1 list-disc list-inside">
+              <li>User record is permanently deleted from the database</li>
+              <li>All active sessions are revoked</li>
+              <li>All refresh tokens are invalidated</li>
+              <li>User will be immediately logged out from all devices</li>
+              <li>User data export is <strong>not</strong> automatically performed (must be done separately per PRD-001B)</li>
+            </ul>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >User ID (UUID)</label
+            >
+            <input
+              type="text"
+              x-model="deleteUserId"
+              placeholder="e.g., 123e4567-e89b-12d3-a456-426614174000"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 font-mono text-sm"
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              Enter the UUID of the user to delete
+            </p>
+          </div>
+
+          <!-- Confirmation Checklist -->
+          <div
+            x-show="showConfirmation"
+            class="bg-red-50 border border-red-300 rounded p-4"
+          >
+            <h4 class="text-sm font-bold text-red-900 mb-2">
+              ⚠️ Confirmation Required
+            </h4>
+            <p class="text-xs text-red-800 mb-3">
+              Please confirm you understand the consequences:
+            </p>
+            <div class="space-y-2">
+              <label class="flex items-start text-xs">
+                <input
+                  type="checkbox"
+                  x-model="confirmChecks.dataDeleted"
+                  class="mr-2 mt-0.5"
+                />
+                <span
+                  >I understand this will permanently delete the user
+                  record</span
+                >
+              </label>
+              <label class="flex items-start text-xs">
+                <input
+                  type="checkbox"
+                  x-model="confirmChecks.sessionsRevoked"
+                  class="mr-2 mt-0.5"
+                />
+                <span>I understand all sessions will be revoked</span>
+              </label>
+              <label class="flex items-start text-xs">
+                <input
+                  type="checkbox"
+                  x-model="confirmChecks.cannotUndo"
+                  class="mr-2 mt-0.5"
+                />
+                <span
+                  >I understand this action <strong>cannot be undone</strong></span
+                >
+              </label>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <button
+              x-show="!showConfirmation"
+              @click="showConfirmation = true"
+              :disabled="!adminToken || !deleteUserId || loading"
+              class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              Delete User
+            </button>
+            <button
+              x-show="showConfirmation"
+              @click="executeDeleteUser"
+              :disabled="!allConfirmed() || loading"
+              class="bg-red-700 text-white px-4 py-2 rounded-md hover:bg-red-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              <span x-show="!loading">⚠️ Confirm Deletion</span>
+              <span x-show="loading">
+                <span class="spinner"></span>
+                Deleting...
+              </span>
+            </button>
+            <button
+              x-show="showConfirmation"
+              @click="cancelDelete"
+              :disabled="loading"
+              class="bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Raw API Response -->
+      <div
+        x-show="rawResponse"
+        class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6"
+      >
+        <h4 class="text-sm font-bold text-gray-900 mb-2">
+          Raw API Response
+        </h4>
+        <pre
+          class="text-xs bg-white p-3 rounded border border-gray-200 overflow-x-auto"
+          x-text="JSON.stringify(rawResponse, null, 2)"
+        ></pre>
+        <p class="text-xs text-gray-600 mt-2">
+          HTTP Status: <span class="mono" x-text="httpStatus"></span>
+        </p>
+      </div>
+
+      <!-- API Documentation -->
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+        <h4 class="text-sm font-bold text-gray-900 mb-2">Admin API</h4>
+        <div class="text-xs text-gray-700 space-y-2">
+          <div>
+            <p class="font-mono mb-1">DELETE /admin/auth/users/{user_id}</p>
+            <p class="ml-4">
+              Deletes a user and all associated sessions and tokens.
+            </p>
+            <pre
+              class="ml-4 mt-1 bg-white p-2 rounded border text-xs"
+            >Headers:
+  X-Admin-Token: {admin_token}
+
+Response 204 No Content (success)
+Response 401 Unauthorized (invalid admin token)
+Response 404 Not Found (user not found)</pre
+            >
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      function adminPanel() {
+        return {
+          adminToken: null,
+          deleteUserId: null,
+          loading: false,
+          error: null,
+          success: null,
+          rawResponse: null,
+          httpStatus: null,
+          showConfirmation: false,
+          confirmChecks: {
+            dataDeleted: false,
+            sessionsRevoked: false,
+            cannotUndo: false,
+          },
+
+          async testAuth() {
+            this.loading = true;
+            this.error = null;
+            this.success = null;
+
+            try {
+              // Try to make an admin API call to test auth
+              // We'll try to get a non-existent user as a test
+              const apiBase = getAPIBase();
+              const res = await fetch(
+                `${apiBase}/admin/auth/users/00000000-0000-0000-0000-000000000000`,
+                {
+                  method: "DELETE",
+                  headers: {
+                    "X-Admin-Token": this.adminToken,
+                  },
+                }
+              );
+
+              // 401 = bad auth, 404 = good auth but user not found
+              if (res.status === 401 || res.status === 403) {
+                this.error = "Invalid admin token";
+              } else if (res.status === 404) {
+                this.success = "Admin token is valid";
+              } else {
+                this.success = "Admin authentication test completed";
+              }
+            } catch (err) {
+              this.error = "Network error: " + err.message;
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          clearAuth() {
+            this.adminToken = null;
+            this.deleteUserId = null;
+            this.showConfirmation = false;
+            this.resetConfirmation();
+            this.success = "Admin token cleared";
+          },
+
+          async executeDeleteUser() {
+            this.loading = true;
+            this.error = null;
+            this.success = null;
+            this.rawResponse = null;
+
+            try {
+              const apiBase = getAPIBase();
+              const res = await fetch(
+                `${apiBase}/admin/auth/users/${this.deleteUserId}`,
+                {
+                  method: "DELETE",
+                  headers: {
+                    "X-Admin-Token": this.adminToken,
+                  },
+                }
+              );
+
+              this.httpStatus = res.status;
+
+              // Handle different status codes
+              if (res.status === 204) {
+                this.success = `User ${this.deleteUserId} deleted successfully. All sessions and tokens have been revoked.`;
+                this.rawResponse = { status: "204 No Content" };
+                this.deleteUserId = null;
+                this.cancelDelete();
+                return;
+              }
+
+              // Try to parse error response
+              try {
+                const data = await res.json();
+                this.rawResponse = data;
+
+                if (res.status === 401 || res.status === 403) {
+                  this.error = "Unauthorized: Invalid admin token";
+                } else if (res.status === 404) {
+                  this.error = "User not found";
+                } else if (res.status === 400) {
+                  this.error =
+                    data.error_description ||
+                    data.error ||
+                    data.message ||
+                    "Invalid user ID format";
+                } else {
+                  this.error =
+                    data.error_description ||
+                    data.error ||
+                    data.message ||
+                    "User deletion failed";
+                }
+              } catch {
+                // No JSON response
+                if (res.status === 401 || res.status === 403) {
+                  this.error = "Unauthorized: Invalid admin token";
+                } else {
+                  this.error = `HTTP ${res.status}: ${res.statusText}`;
+                }
+              }
+            } catch (err) {
+              this.error = "Network error: " + err.message;
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          cancelDelete() {
+            this.showConfirmation = false;
+            this.resetConfirmation();
+          },
+
+          resetConfirmation() {
+            this.confirmChecks.dataDeleted = false;
+            this.confirmChecks.sessionsRevoked = false;
+            this.confirmChecks.cannotUndo = false;
+          },
+
+          allConfirmed() {
+            return (
+              this.confirmChecks.dataDeleted &&
+              this.confirmChecks.sessionsRevoked &&
+              this.confirmChecks.cannotUndo
+            );
+          },
+        };
+      }
+    </script>
+  </body>
+</html>

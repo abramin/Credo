@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OAuth2 Callback - Credo Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"
+    ></script>
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <div
+      style="
+        background: #fff3cd;
+        color: #664d03;
+        padding: 10px;
+        font-size: 14px;
+        border-bottom: 1px solid #ffeeba;
+        text-align: center;
+      "
+    >
+      Demo environment only. No real identity data is processed or stored.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center h-16">
+          <div class="flex items-center">
+            <h1 class="text-xl font-bold text-gray-900">
+              OAuth2 Demo - Callback
+            </h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <a
+              href="/demo/index.html"
+              class="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >← Demo Home</a
+            >
+            <a
+              href="/demo/authorize.html"
+              class="text-sm text-gray-600 hover:text-gray-900"
+              >Start New Flow</a
+            >
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main
+      class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      x-data="callbackFlow()"
+      x-init="init()"
+    >
+      <!-- Information Banner -->
+      <div class="bg-green-50 border border-green-200 rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-bold text-green-900 mb-2">
+          OAuth2 Callback Page
+        </h2>
+        <p class="text-sm text-green-800 mb-2">
+          You have been redirected here with an authorization code. Click
+          "Exchange Code for Tokens" to complete the OAuth flow.
+        </p>
+        <p class="text-xs text-green-700">
+          <strong>Note:</strong> This page parses the code and state from URL
+          query parameters.
+        </p>
+      </div>
+
+      <!-- URL Parameters Display -->
+      <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">
+          Received Parameters
+        </h3>
+
+        <div class="space-y-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1"
+              >Authorization Code</label
+            >
+            <div
+              class="px-3 py-2 bg-gray-50 border border-gray-300 rounded-md mono text-sm break-all"
+              x-text="params.code || '(not found)'"
+            ></div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1"
+              >State</label
+            >
+            <div
+              class="px-3 py-2 bg-gray-50 border border-gray-300 rounded-md mono text-sm break-all"
+              x-text="params.state || '(not found)'"
+            ></div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1"
+              >Client ID</label
+            >
+            <input
+              type="text"
+              x-model="tokenRequest.client_id"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1"
+              >Redirect URI (must match)</label
+            >
+            <input
+              type="text"
+              x-model="tokenRequest.redirect_uri"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        <!-- Exchange Button -->
+        <div class="mt-6">
+          <button
+            @click="exchangeCode"
+            :disabled="!params.code || loading"
+            class="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+          >
+            <span x-show="!loading">Exchange Code for Tokens</span>
+            <span x-show="loading">
+              <span class="spinner"></span>
+              Exchanging...
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Error Display -->
+      <div
+        x-show="error"
+        class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6"
+      >
+        <h4 class="text-sm font-bold text-red-900 mb-2">Error</h4>
+        <p class="text-sm text-red-800" x-text="error"></p>
+      </div>
+
+      <!-- Token Response Display -->
+      <div
+        x-show="tokenResponse"
+        class="bg-white rounded-lg shadow-md p-6 mb-6"
+      >
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Token Response</h3>
+
+        <div class="space-y-4">
+          <!-- Raw JSON Response -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Raw JSON Response</label
+            >
+            <pre
+              class="text-xs bg-gray-50 p-3 rounded border border-gray-200 overflow-x-auto"
+              x-text="JSON.stringify(tokenResponse, null, 2)"
+            ></pre>
+            <p class="text-xs text-gray-600 mt-1">
+              HTTP Status: <span class="mono" x-text="httpStatus"></span>
+            </p>
+          </div>
+
+          <!-- Decoded Access Token -->
+          <div x-show="decodedAccessToken">
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Decoded Access Token (JWT Claims)</label
+            >
+            <pre
+              class="text-xs bg-blue-50 p-3 rounded border border-blue-200 overflow-x-auto"
+              x-text="JSON.stringify(decodedAccessToken, null, 2)"
+            ></pre>
+          </div>
+
+          <!-- Decoded ID Token -->
+          <div x-show="decodedIDToken">
+            <label class="block text-sm font-medium text-gray-700 mb-2"
+              >Decoded ID Token (JWT Claims)</label
+            >
+            <pre
+              class="text-xs bg-green-50 p-3 rounded border border-green-200 overflow-x-auto"
+              x-text="JSON.stringify(decodedIDToken, null, 2)"
+            ></pre>
+          </div>
+
+          <!-- Token Expiry Info -->
+          <div x-show="expiryInfo" class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h4 class="text-sm font-bold text-yellow-900 mb-2">Token Expiry</h4>
+            <p class="text-sm text-yellow-800">
+              Expires in: <span class="font-mono" x-text="expiryInfo"></span>
+            </p>
+          </div>
+
+          <!-- Next Steps -->
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <h4 class="text-sm font-bold text-blue-900 mb-2">Next Steps</h4>
+            <div class="space-y-2 text-sm text-blue-800">
+              <p>
+                ✓ You now have access and ID tokens. You can use these to:
+              </p>
+              <ul class="list-disc list-inside ml-4 space-y-1">
+                <li>
+                  <a
+                    href="/demo/tokens.html"
+                    class="text-blue-600 underline hover:text-blue-800"
+                    @click="storeTokens"
+                    >Manage tokens (refresh, revoke)</a
+                  >
+                </li>
+                <li>
+                  <a
+                    href="/demo/sessions.html"
+                    class="text-blue-600 underline hover:text-blue-800"
+                    @click="storeTokens"
+                    >View and manage sessions</a
+                  >
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Debug Info -->
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-6">
+        <h4 class="text-sm font-bold text-gray-900 mb-2">OAuth Flow Steps</h4>
+        <ul class="text-xs text-gray-700 space-y-1">
+          <li>✓ <strong>Step 1:</strong> Authorization request submitted</li>
+          <li>✓ <strong>Step 2:</strong> Authorization code received</li>
+          <li>✓ <strong>Step 3:</strong> Redirected to callback page</li>
+          <li
+            x-bind:class="tokenResponse ? 'text-green-700 font-bold' : ''"
+          >
+            <span x-show="!tokenResponse">⏳</span>
+            <span x-show="tokenResponse">✓</span>
+            <strong>Step 4:</strong> Exchange code for tokens
+          </li>
+        </ul>
+      </div>
+    </main>
+
+    <script>
+      function callbackFlow() {
+        return {
+          params: {
+            code: null,
+            state: null,
+          },
+          tokenRequest: {
+            grant_type: "authorization_code",
+            code: null,
+            redirect_uri: null,
+            client_id: "demo-client",
+          },
+          loading: false,
+          error: null,
+          tokenResponse: null,
+          httpStatus: null,
+          decodedAccessToken: null,
+          decodedIDToken: null,
+          expiryInfo: null,
+
+          init() {
+            // Parse query parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            this.params.code = urlParams.get("code");
+            this.params.state = urlParams.get("state");
+
+            // Pre-fill token request
+            this.tokenRequest.code = this.params.code;
+            this.tokenRequest.redirect_uri =
+              window.location.protocol +
+              "//" +
+              window.location.host +
+              window.location.pathname;
+          },
+
+          async exchangeCode() {
+            this.loading = true;
+            this.error = null;
+            this.tokenResponse = null;
+            this.httpStatus = null;
+            this.decodedAccessToken = null;
+            this.decodedIDToken = null;
+            this.expiryInfo = null;
+
+            try {
+              const apiBase = this.getAPIBase();
+
+              const res = await fetch(`${apiBase}/auth/token`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(this.tokenRequest),
+              });
+
+              this.httpStatus = res.status;
+              const data = await res.json();
+
+              if (!res.ok) {
+                this.error =
+                  data.error_description ||
+                  data.error ||
+                  data.message ||
+                  "Token exchange failed";
+                this.tokenResponse = data;
+                return;
+              }
+
+              this.tokenResponse = data;
+
+              // Decode JWTs
+              if (data.access_token) {
+                this.decodedAccessToken = this.decodeJWT(data.access_token);
+              }
+              if (data.id_token) {
+                this.decodedIDToken = this.decodeJWT(data.id_token);
+              }
+
+              // Calculate expiry
+              if (data.expires_in) {
+                const seconds = parseInt(data.expires_in) / 1000000000; // Convert nanoseconds to seconds
+                const minutes = Math.floor(seconds / 60);
+                const remainingSeconds = Math.floor(seconds % 60);
+                this.expiryInfo = `${minutes}m ${remainingSeconds}s`;
+              }
+
+              // Store tokens in sessionStorage for other demo pages
+              sessionStorage.setItem("access_token", data.access_token);
+              if (data.id_token) {
+                sessionStorage.setItem("id_token", data.id_token);
+              }
+            } catch (err) {
+              this.error = err.message || "Network error";
+            } finally {
+              this.loading = false;
+            }
+          },
+
+          decodeJWT(token) {
+            try {
+              const parts = token.split(".");
+              if (parts.length !== 3) {
+                return { error: "Invalid JWT format" };
+              }
+              const payload = parts[1];
+              const decoded = JSON.parse(atob(payload));
+
+              // Convert timestamps to readable dates
+              if (decoded.exp) {
+                decoded._exp_readable = new Date(decoded.exp * 1000).toISOString();
+              }
+              if (decoded.iat) {
+                decoded._iat_readable = new Date(decoded.iat * 1000).toISOString();
+              }
+              if (decoded.nbf) {
+                decoded._nbf_readable = new Date(decoded.nbf * 1000).toISOString();
+              }
+
+              return decoded;
+            } catch (err) {
+              return { error: "Failed to decode JWT", details: err.message };
+            }
+          },
+
+          storeTokens() {
+            // Tokens are already stored in sessionStorage
+            // This just ensures they're available for next page
+          },
+
+          getAPIBase() {
+            if (window.location.port === "3000") {
+              return "/api";
+            }
+            if (
+              window.location.hostname === "localhost" ||
+              window.location.hostname === "127.0.0.1"
+            ) {
+              return "http://localhost:8080";
+            }
+            return "";
+          },
+        };
+      }
+    </script>
+  </body>
+</html>
