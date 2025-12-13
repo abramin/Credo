@@ -38,6 +38,7 @@ type UserStore interface {
 type SessionStore interface {
 	Create(ctx context.Context, session *models.Session) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Session, error)
+	UpdateSession(ctx context.Context, session *models.Session) error
 	DeleteSessionsByUser(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 }
@@ -473,10 +474,11 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	}
 
 	// Step 7: Activate session (transition from pending_consent to active)
-	// Note: In-memory store holds pointers, so this updates the stored session
-	// TODO: Add proper UpdateSession method to SessionStore interface for explicit updates
 	if session.Status == StatusPendingConsent {
 		session.Status = StatusActive
+		if err := s.sessions.UpdateSession(ctx, session); err != nil {
+			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update session status")
+		}
 	}
 
 	// Step 8: Generate tokens
