@@ -39,9 +39,6 @@ func (s *InMemorySessionStoreSuite) TestCreateAndFind() {
 	require.NoError(s.T(), err)
 	assert.Equal(s.T(), session, foundByID)
 
-	foundByCode, err := s.store.FindByCode(context.Background(), "session.Code")
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), session, foundByCode)
 }
 
 func (s *InMemorySessionStoreSuite) TestFindNotFound() {

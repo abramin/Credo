@@ -74,17 +74,6 @@ func (s *InMemorySessionStore) UpdateSession(_ context.Context, session *models.
 	return nil
 }
 
-func (s *InMemorySessionStore) FindByCode(_ context.Context, code string) (*models.Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, session := range s.sessions {
-		if "session.Code" == code {
-			return session, nil
-		}
-	}
-	return nil, ErrNotFound
-}
-
 func (s *InMemorySessionStore) DeleteSessionsByUser(_ context.Context, userID uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
