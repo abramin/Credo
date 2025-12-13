@@ -626,6 +626,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 		assert.Nil(s.T(), result)
 		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInternal))
 	})
+
 }
 
 // TestUserInfo tests the OIDC userinfo endpoint (PRD-001 FR-3)
@@ -841,9 +842,15 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 			func(ctx context.Context, session *models.Session) error {
 				assert.Equal(s.T(), sess.ID, session.ID)
 				assert.NotNil(s.T(), session.LastSeenAt)
+				assert.NotNil(s.T(), session.LastRefreshedAt)
 				return nil
 			})
-		s.mockRefreshStore.EXPECT().UpdateLastRefreshed(gomock.Any(), refreshTokenString, gomock.Any()).Return(nil)
+		s.mockRefreshStore.EXPECT().Consume(gomock.Any(), refreshTokenString, gomock.Any()).DoAndReturn(
+			func(ctx context.Context, tokenString string, timestamp time.Time) error {
+				assert.Equal(s.T(), refreshTokenString, tokenString)
+				assert.False(s.T(), timestamp.IsZero())
+				return nil
+			})
 		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, token *models.RefreshTokenRecord) error {
 				assert.Equal(s.T(), "ref_new_token", token.Token)
@@ -860,6 +867,24 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		assert.Equal(s.T(), "ref_new_token", result.RefreshToken)
 		assert.Equal(s.T(), "Bearer", result.TokenType)
 		assert.Equal(s.T(), s.service.TokenTTL, result.ExpiresIn)
+	})
+
+	s.T().Run("refresh token already used (replay)", func(t *testing.T) {
+		req := models.TokenRequest{
+			GrantType:    "refresh_token",
+			RefreshToken: refreshTokenString,
+			ClientID:     clientID,
+		}
+		refreshRec := *validRefreshToken
+		refreshRec.Used = true
+
+		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
+
+		result, err := s.service.Token(context.Background(), &req)
+		assert.Error(s.T(), err)
+		assert.Nil(s.T(), result)
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeUnauthorized))
+		assert.Contains(s.T(), err.Error(), "invalid refresh token")
 	})
 
 	s.T().Run("refresh token not found", func(t *testing.T) {
@@ -950,6 +975,36 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		assert.Nil(s.T(), result)
 		assert.True(s.T(), dErrors.Is(err, dErrors.CodeUnauthorized))
 		assert.Contains(s.T(), err.Error(), "client_id mismatch")
+	})
+
+	s.T().Run("device binding attaches cookie device_id when missing on session (soft launch)", func(t *testing.T) {
+		req := models.TokenRequest{
+			GrantType:    "refresh_token",
+			RefreshToken: refreshTokenString,
+			ClientID:     clientID,
+		}
+		refreshRec := *validRefreshToken
+		sess := *validSession
+		sess.DeviceID = ""
+		ctx := middleware.WithDeviceID(middleware.WithClientMetadata(context.Background(), "192.168.1.1", "Mozilla/5.0"), "cookie-device-1")
+
+		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
+		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
+		s.mockJWT.EXPECT().GenerateAccessToken(userID, sessionID, clientID).Return("new-access-token", nil)
+		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientID).Return("new-id-token", nil)
+		s.mockJWT.EXPECT().CreateRefreshToken().Return("ref_new_token", nil)
+		s.mockSessionStore.EXPECT().UpdateSession(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, session *models.Session) error {
+				assert.Equal(s.T(), "cookie-device-1", session.DeviceID)
+				return nil
+			})
+		s.mockRefreshStore.EXPECT().Consume(gomock.Any(), refreshTokenString, gomock.Any()).Return(nil)
+		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+
+		result, err := s.service.Token(ctx, &req)
+		require.NoError(s.T(), err)
+		assert.NotNil(s.T(), result)
 	})
 }
 

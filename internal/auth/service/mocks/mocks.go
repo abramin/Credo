@@ -390,18 +390,19 @@ func (mr *MockRefreshTokenStoreMockRecorder) FindBySessionID(ctx, id any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindBySessionID", reflect.TypeOf((*MockRefreshTokenStore)(nil).FindBySessionID), ctx, id)
 }
 
-// UpdateLastRefreshed mocks base method.
-func (m *MockRefreshTokenStore) UpdateLastRefreshed(ctx context.Context, token string, timestamp *time.Time) error {
+// MarkUsed mocks base method.
+// Consume mocks base method.
+func (m *MockRefreshTokenStore) Consume(ctx context.Context, token string, timestamp time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpdateLastRefreshed", ctx, token, timestamp)
+	ret := m.ctrl.Call(m, "Consume", ctx, token, timestamp)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// UpdateLastRefreshed indicates an expected call of UpdateLastRefreshed.
-func (mr *MockRefreshTokenStoreMockRecorder) UpdateLastRefreshed(ctx, token, timestamp any) *gomock.Call {
+// Consume indicates an expected call of Consume.
+func (mr *MockRefreshTokenStoreMockRecorder) Consume(ctx, token, timestamp any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastRefreshed", reflect.TypeOf((*MockRefreshTokenStore)(nil).UpdateLastRefreshed), ctx, token, timestamp)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Consume", reflect.TypeOf((*MockRefreshTokenStore)(nil).Consume), ctx, token, timestamp)
 }
 
 // MockTokenGenerator is a mock of TokenGenerator interface.

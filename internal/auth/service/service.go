@@ -56,7 +56,7 @@ type RefreshTokenStore interface {
 	Create(ctx context.Context, token *models.RefreshTokenRecord) error
 	FindBySessionID(ctx context.Context, id uuid.UUID) (*models.RefreshTokenRecord, error)
 	Find(ctx context.Context, tokenString string) (*models.RefreshTokenRecord, error)
-	UpdateLastRefreshed(ctx context.Context, token string, timestamp *time.Time) error
+	Consume(ctx context.Context, token string, timestamp time.Time) error
 	DeleteBySessionID(ctx context.Context, sessionID uuid.UUID) error
 }
 
@@ -81,11 +81,14 @@ type Service struct {
 }
 
 const (
-	StatusPendingConsent   = "pending_consent"
-	StatusActive           = "active"
-	defaultSessionTTL      = 24 * time.Hour
-	defaultTokenTTL        = 15 * time.Minute
-	defaultRefreshTokenTTL = 30 * 24 * time.Hour
+	StatusPendingConsent       = "pending_consent"
+	StatusActive               = "active"
+	StatusRevoked              = "revoked"
+	GrantTypeAuthorizationCode = "authorization_code"
+	GrantTypeRefreshToken      = "refresh_token"
+	defaultSessionTTL          = 24 * time.Hour
+	defaultTokenTTL            = 15 * time.Minute
+	defaultRefreshTokenTTL     = 30 * 24 * time.Hour
 )
 
 type Config struct {
@@ -397,9 +400,9 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 	}
 
 	switch req.GrantType {
-	case "authorization_code":
+	case GrantTypeAuthorizationCode:
 		return s.exchangeAuthorizationCode(ctx, req)
-	case "refresh_token":
+	case GrantTypeRefreshToken:
 		return s.refreshWithRefreshToken(ctx, req)
 	default:
 		return nil, dErrors.New(dErrors.CodeBadRequest, "unsupported grant_type")
@@ -508,6 +511,17 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to find refresh token")
 	}
 
+	// TODO:
+	// “Reused refresh token → revoke entire session family”: no —
+	// reuse returns 401 but does not revoke the session (or its refresh tokens).
+	if refreshRecord.Used {
+		s.authFailure(ctx, "refresh_token_reused", false,
+			"client_id", req.ClientID,
+			"session_id", refreshRecord.SessionID.String(),
+		)
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid refresh token")
+	}
+
 	if time.Now().After(refreshRecord.ExpiresAt) {
 		s.authFailure(ctx, "refresh_token_expired", false,
 			"client_id", req.ClientID,
@@ -528,7 +542,7 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to find session")
 	}
 
-	if session.Status == "revoked" {
+	if session.Status == StatusRevoked {
 		s.authFailure(ctx, "session_revoked", false,
 			"session_id", session.ID.String(),
 			"user_id", session.UserID.String(),
@@ -567,11 +581,12 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 	}
 
 	now := time.Now()
+	mutableSession.LastRefreshedAt = &now
 	writeErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
 		if err := stores.Sessions.UpdateSession(ctx, &mutableSession); err != nil {
 			return err
 		}
-		if err := stores.RefreshTokens.UpdateLastRefreshed(ctx, req.RefreshToken, &now); err != nil {
+		if err := stores.RefreshTokens.Consume(ctx, req.RefreshToken, now); err != nil {
 			return err
 		}
 		if err := stores.RefreshTokens.Create(ctx, artifacts.refreshRecord); err != nil {

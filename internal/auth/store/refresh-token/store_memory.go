@@ -51,12 +51,27 @@ func (s *InMemoryRefreshTokenStore) Find(_ context.Context, token string) (*mode
 func (s *InMemoryRefreshTokenStore) FindBySessionID(_ context.Context, id uuid.UUID) (*models.RefreshTokenRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	now := time.Now()
+	var best *models.RefreshTokenRecord
 	for _, token := range s.tokens {
-		if token.SessionID == id {
-			return token, nil
+		if token.SessionID != id {
+			continue
+		}
+		if token.Used {
+			continue
+		}
+		if !token.ExpiresAt.IsZero() && token.ExpiresAt.Before(now) {
+			continue
+		}
+		if best == nil || token.CreatedAt.After(best.CreatedAt) {
+			best = token
 		}
 	}
-	return nil, ErrNotFound
+	if best == nil {
+		return nil, ErrNotFound
+	}
+	return best, nil
 }
 
 func (s *InMemoryRefreshTokenStore) Delete(ctx context.Context, id uuid.UUID) error {
@@ -87,11 +102,12 @@ func (s *InMemoryRefreshTokenStore) DeleteBySessionID(ctx context.Context, sessi
 	return nil
 }
 
-func (s *InMemoryRefreshTokenStore) UpdateLastRefreshed(_ context.Context, tokenString string, timestamp *time.Time) error {
+func (s *InMemoryRefreshTokenStore) Consume(_ context.Context, tokenString string, timestamp time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if token, ok := s.tokens[tokenString]; ok {
-		token.LastRefreshedAt = timestamp
+		token.Used = true
+		token.LastRefreshedAt = &timestamp
 		return nil
 	}
 	return ErrNotFound

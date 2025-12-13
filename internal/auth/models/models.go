@@ -30,6 +30,9 @@ type Session struct {
 	RequestedScope []string  `json:"requested_scope"`
 	Status         string    `json:"status"` // "active", "revoked", "pending_consent"
 
+	// Refresh lifecycle
+	LastRefreshedAt *time.Time `json:"last_refreshed_at,omitempty"` // last refresh action timestamp
+
 	// Device binding for security - See DEVICE_BINDING.md for full security model
 	DeviceID              string `json:"device_id,omitempty"`               // Primary: UUID from cookie (hard requirement)
 	DeviceFingerprintHash string `json:"device_fingerprint_hash,omitempty"` // Secondary: SHA-256(browser|os|platform) - no IP
