@@ -74,6 +74,7 @@ func initializeAuthService(m *metrics.Metrics, log *slog.Logger, jwtService *jwt
 		authService.WithLogger(log),
 		authService.WithJWTService(jwtService),
 		authService.WithAllowedRedirectSchemes(cfg.AllowedRedirectSchemes),
+		authService.WithDeviceBindingEnabled(cfg.DeviceBindingEnabled),
 	)
 }
 

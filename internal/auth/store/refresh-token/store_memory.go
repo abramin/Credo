@@ -35,17 +35,15 @@ func NewInMemoryRefreshTokenStore() *InMemoryRefreshTokenStore {
 func (s *InMemoryRefreshTokenStore) Create(_ context.Context, token *models.RefreshTokenRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[token.ID.String()] = token
+	s.tokens[token.Token] = token
 	return nil
 }
 
 func (s *InMemoryRefreshTokenStore) Find(_ context.Context, token string) (*models.RefreshTokenRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, t := range s.tokens {
-		if t.Token == token {
-			return t, nil
-		}
+	if t, ok := s.tokens[token]; ok {
+		return t, nil
 	}
 	return nil, ErrNotFound
 }
@@ -53,8 +51,10 @@ func (s *InMemoryRefreshTokenStore) Find(_ context.Context, token string) (*mode
 func (s *InMemoryRefreshTokenStore) FindBySessionID(_ context.Context, id uuid.UUID) (*models.RefreshTokenRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if token, ok := s.tokens[id.String()]; ok {
-		return token, nil
+	for _, token := range s.tokens {
+		if token.SessionID == id {
+			return token, nil
+		}
 	}
 	return nil, ErrNotFound
 }
@@ -62,9 +62,11 @@ func (s *InMemoryRefreshTokenStore) FindBySessionID(_ context.Context, id uuid.U
 func (s *InMemoryRefreshTokenStore) Delete(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.tokens[id.String()]; ok {
-		delete(s.tokens, id.String())
-		return nil
+	for key, token := range s.tokens {
+		if token.ID == id {
+			delete(s.tokens, key)
+			return nil
+		}
 	}
 	return ErrNotFound
 }
@@ -72,10 +74,15 @@ func (s *InMemoryRefreshTokenStore) Delete(ctx context.Context, id uuid.UUID) er
 func (s *InMemoryRefreshTokenStore) DeleteBySessionID(ctx context.Context, sessionID uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	found := false
 	for key, token := range s.tokens {
 		if token.SessionID == sessionID {
 			delete(s.tokens, key)
+			found = true
 		}
+	}
+	if !found {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -83,11 +90,9 @@ func (s *InMemoryRefreshTokenStore) DeleteBySessionID(ctx context.Context, sessi
 func (s *InMemoryRefreshTokenStore) UpdateLastRefreshed(_ context.Context, tokenString string, timestamp *time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, t := range s.tokens {
-		if t.Token == tokenString {
-			t.LastRefreshedAt = timestamp
-			return nil
-		}
+	if token, ok := s.tokens[tokenString]; ok {
+		token.LastRefreshedAt = timestamp
+		return nil
 	}
 	return ErrNotFound
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"credo/internal/audit"
+	"credo/internal/auth/device"
 	auth "credo/internal/auth/handler"
 	"credo/internal/auth/models"
 	"credo/internal/auth/service"
@@ -34,6 +35,7 @@ func SetupSuite(t *testing.T) (
 	*chi.Mux,
 	*userStore.InMemoryUserStore,
 	*sessionStore.InMemorySessionStore,
+	*authCodeStore.InMemoryAuthorizationCodeStore,
 	*jwttoken.JWTService,
 	*audit.InMemoryStore,
 ) {
@@ -53,12 +55,15 @@ func SetupSuite(t *testing.T) (
 	jwtValidator := jwttoken.NewJWTServiceAdapter(jwtService)
 	authService := service.NewService(userStore, sessionStore, authCodeStore, refreshTokenStore,
 		service.WithSessionTTL(5*time.Minute),
+		service.WithDeviceBindingEnabled(true),
+		service.WithAllowedRedirectSchemes([]string{"http", "https"}),
 		service.WithLogger(logger),
 		service.WithJWTService(jwtService),
 		service.WithAuditPublisher(audit.NewPublisher(auditStore)),
 	)
 
 	router := chi.NewRouter()
+	router.Use(middleware.ClientMetadata)
 	authHandler := auth.New(authService, logger)
 
 	// Public endpoints (no auth required) - mirrors production setup
@@ -77,11 +82,11 @@ func SetupSuite(t *testing.T) (
 		authHandler.RegisterAdmin(r)
 	})
 
-	return router, userStore, sessionStore, jwtService, auditStore
+	return router, userStore, sessionStore, authCodeStore, jwtService, auditStore
 }
 
 func TestCompleteAuthFlow(t *testing.T) {
-	r, userStore, sessionStore, _, auditStore := SetupSuite(t)
+	r, userStore, sessionStore, codeStore, _, auditStore := SetupSuite(t)
 	reqBody := models.AuthorizationRequest{
 		Email:       "jane.doe@example.com",
 		ClientID:    "client-123",
@@ -94,6 +99,8 @@ func TestCompleteAuthFlow(t *testing.T) {
 	t.Log("Step 1: Authorization Request")
 	req := httptest.NewRequest(http.MethodPost, "/auth/authorize", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("X-Real-IP", "192.168.1.1")
 	rec := httptest.NewRecorder()
 
 	r.ServeHTTP(rec, req)
@@ -112,10 +119,13 @@ func TestCompleteAuthFlow(t *testing.T) {
 	assert.Contains(t, redirectURI, "state=state-xyz")
 
 	t.Log("Verifying session created with pending consent status")
-	session, err := sessionStore.FindByCode(context.Background(), code)
+	codeRecord, err := codeStore.FindByCode(context.Background(), code)
+	require.NoError(t, err)
+	session, err := sessionStore.FindByID(context.Background(), codeRecord.SessionID)
 	require.NoError(t, err)
 	assert.Equal(t, service.StatusPendingConsent, session.Status)
 	assert.Equal(t, reqBody.Scopes, session.RequestedScope)
+	assert.Equal(t, device.ComputeDeviceFingerprint("Mozilla/5.0", "192.168.1.1"), session.DeviceFingerprintHash)
 
 	user, err := userStore.FindByEmail(context.Background(), reqBody.Email)
 	require.NoError(t, err)
@@ -124,9 +134,10 @@ func TestCompleteAuthFlow(t *testing.T) {
 	t.Log("Step 2: Token Request")
 	tokenRequest := &models.TokenRequest{
 		GrantType: "authorization_code",
-		// Code:        session.Code,
-		// RedirectURI: session.RedirectURI,
-		ClientID: session.ClientID,
+		Code:      code,
+		ClientID:  session.ClientID,
+		// RedirectURI must match what was used at /auth/authorize
+		RedirectURI: reqBody.RedirectURI,
 	}
 	tokenPayload, err := json.Marshal(tokenRequest)
 	require.NoError(t, err)
@@ -168,7 +179,9 @@ func TestCompleteAuthFlow(t *testing.T) {
 	assert.Equal(t, user.ID.String(), userInfo.Sub)
 
 	t.Log("Verifying session is updated to active status")
-	session, err = sessionStore.FindByCode(context.Background(), code)
+	codeRecord, err = codeStore.FindByCode(context.Background(), code)
+	require.NoError(t, err)
+	session, err = sessionStore.FindByID(context.Background(), codeRecord.SessionID)
 	require.NoError(t, err)
 	assert.Equal(t, service.StatusActive, session.Status)
 
@@ -200,7 +213,7 @@ func TestConcurrentUserCreation(t *testing.T) {
 	// This test would simulate multiple concurrent requests to create
 	// the same user and ensure that the user store handles it correctly
 	// without creating duplicate users.
-	r, userStore, _, _, _ := SetupSuite(t)
+	r, userStore, _, _, _, _ := SetupSuite(t)
 	concurrentRequests := 10
 	errCh := make(chan error, concurrentRequests)
 
@@ -246,28 +259,34 @@ func TestConcurrentUserCreation(t *testing.T) {
 }
 
 func TestSessionExpiryHandling(t *testing.T) {
-	r, _, sessionStore, _, _ := SetupSuite(t)
-	session := &models.Session{
-		ID:       uuid.New(),
-		UserID:   uuid.New(),
-		ClientID: "client-123",
-		// RedirectURI:   "https://client.app/callback",
-		// Code:          "auth-code-xyz",
-		// CodeExpiresAt: time.Now().Add(1 * time.Second),
-		Status: service.StatusPendingConsent,
-	}
-	err := sessionStore.Create(context.Background(), session)
+	r, _, sessionStore, codeStore, _, _ := SetupSuite(t)
+	sessionID := uuid.New()
+	clientID := "client-123"
+	redirectURI := "https://client.app/callback"
+	code := "authz_expired_code"
+
+	err := sessionStore.Create(context.Background(), &models.Session{
+		ID:        sessionID,
+		UserID:    uuid.New(),
+		ClientID:  clientID,
+		Status:    service.StatusPendingConsent,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+	})
 	require.NoError(t, err)
+	require.NoError(t, codeStore.Create(context.Background(), &models.AuthorizationCodeRecord{
+		Code:        code,
+		SessionID:   sessionID,
+		RedirectURI: redirectURI,
+		ExpiresAt:   time.Now().Add(-1 * time.Minute),
+		Used:        false,
+		CreatedAt:   time.Now().Add(-2 * time.Minute),
+	}))
 
-	// Wait for session to expire
-	time.Sleep(2 * time.Second)
-
-	// Attempt to exchange code for token
 	tokenRequest := &models.TokenRequest{
-		GrantType: "authorization_code",
-		// Code:        session.Code,
-		// RedirectURI: session.RedirectURI,
-		ClientID: session.ClientID,
+		GrantType:   "authorization_code",
+		Code:        code,
+		RedirectURI: redirectURI,
+		ClientID:    clientID,
 	}
 	tokenPayload, err := json.Marshal(tokenRequest)
 	require.NoError(t, err)
@@ -289,7 +308,7 @@ func TestSessionExpiryHandling(t *testing.T) {
 }
 
 func TestInvalidBearerTokenRejection(t *testing.T) {
-	r, _, _, _, _ := SetupSuite(t)
+	r, _, _, _, _, _ := SetupSuite(t)
 	invalidTokens := []string{
 		"",                   // Empty token
 		"invalidtoken",       // Random string
@@ -319,7 +338,7 @@ func TestInvalidBearerTokenRejection(t *testing.T) {
 }
 
 func TestAdminDeleteUser(t *testing.T) {
-	r, userStore, sessionStore, _, auditStore := SetupSuite(t)
+	r, userStore, sessionStore, codeStore, _, auditStore := SetupSuite(t)
 
 	t.Log("Step 1: Create a user with a session via authorization flow")
 	reqBody := models.AuthorizationRequest{
@@ -333,6 +352,8 @@ func TestAdminDeleteUser(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/authorize", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("X-Real-IP", "192.168.1.1")
 	rec := httptest.NewRecorder()
 
 	r.ServeHTTP(rec, req)
@@ -351,7 +372,9 @@ func TestAdminDeleteUser(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, user)
 
-	session, err := sessionStore.FindByCode(context.Background(), code)
+	codeRecord, err := codeStore.FindByCode(context.Background(), code)
+	require.NoError(t, err)
+	session, err := sessionStore.FindByID(context.Background(), codeRecord.SessionID)
 	require.NoError(t, err)
 	require.NotNil(t, session)
 	assert.Equal(t, user.ID, session.UserID)
@@ -390,7 +413,7 @@ func TestAdminDeleteUser(t *testing.T) {
 }
 
 func TestAdminDeleteUserNotFound(t *testing.T) {
-	r, _, _, _, _ := SetupSuite(t)
+	r, _, _, _, _, _ := SetupSuite(t)
 
 	nonExistentUserID := uuid.New()
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/auth/users/"+nonExistentUserID.String(), nil)
@@ -409,7 +432,7 @@ func TestAdminDeleteUserNotFound(t *testing.T) {
 }
 
 func TestAdminDeleteUserInvalidUUID(t *testing.T) {
-	r, _, _, _, _ := SetupSuite(t)
+	r, _, _, _, _, _ := SetupSuite(t)
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/auth/users/invalid-uuid", nil)
 	deleteReq.Header.Set("X-Admin-Token", "test-admin-token")
@@ -427,7 +450,7 @@ func TestAdminDeleteUserInvalidUUID(t *testing.T) {
 }
 
 func TestAdminDeleteUserUnauthorized(t *testing.T) {
-	r, userStore, _, _, _ := SetupSuite(t)
+	r, userStore, _, _, _, _ := SetupSuite(t)
 
 	// Create a user first
 	reqBody := models.AuthorizationRequest{
@@ -441,6 +464,8 @@ func TestAdminDeleteUserUnauthorized(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/authorize", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("X-Real-IP", "192.168.1.1")
 	rec := httptest.NewRecorder()
 
 	r.ServeHTTP(rec, req)

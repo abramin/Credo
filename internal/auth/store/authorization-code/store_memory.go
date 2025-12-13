@@ -75,6 +75,7 @@ func (s *InMemoryAuthorizationCodeStore) MarkUsed(_ context.Context, code string
 	defer s.mu.Unlock()
 	if record, ok := s.authCodes[code]; ok {
 		record.Used = true
+		return nil
 	}
 	return ErrNotFound
 }

@@ -171,6 +171,14 @@ func GetUserAgent(ctx context.Context) string {
 	return ""
 }
 
+// WithClientMetadata injects client IP and User-Agent into a context.
+// Useful for service unit tests that don't run the full HTTP middleware chain.
+func WithClientMetadata(ctx context.Context, clientIP, userAgent string) context.Context {
+	ctx = context.WithValue(ctx, contextKeyClientIP{}, clientIP)
+	ctx = context.WithValue(ctx, contextKeyUserAgent{}, userAgent)
+	return ctx
+}
+
 // getClientIP extracts the real client IP from the request, handling proxies and load balancers.
 func getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header first (standard for proxied requests)

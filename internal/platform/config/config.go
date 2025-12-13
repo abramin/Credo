@@ -21,6 +21,7 @@ type Server struct {
 	ConsentGrantWindow     time.Duration
 	SessionTTL             time.Duration
 	AdminAPIToken          string
+	DeviceBindingEnabled   bool
 }
 
 // RegistryCacheTTL enforces retention for sensitive registry data.
@@ -81,6 +82,8 @@ func FromEnv() (Server, error) {
 		}
 	}
 
+	deviceBindingEnabled := os.Getenv("DEVICE_BINDING_ENABLED") == "true"
+
 	jwtSigningKey := os.Getenv("JWT_SIGNING_KEY")
 	if jwtSigningKey == "" {
 		// Use a default for development - should be overridden in production
@@ -125,6 +128,7 @@ func FromEnv() (Server, error) {
 		ConsentGrantWindow:     ConsentGrantWindow,
 		SessionTTL:             SessionTTL,
 		AdminAPIToken:          adminAPIToken,
+		DeviceBindingEnabled:   deviceBindingEnabled,
 	}, nil
 }
 

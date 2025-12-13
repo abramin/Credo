@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -89,12 +87,6 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		httpError.WriteError(w, err)
 		return
 	}
-
-	// Extract metadata from request
-	userAgent := r.Header.Get("User-Agent")
-	ipAddress := getClientIP(r)
-	ctx = context.WithValue(ctx, models.ContextKeyUserAgent, userAgent)
-	ctx = context.WithValue(ctx, models.ContextKeyIPAddress, ipAddress)
 
 	res, err := h.auth.Authorize(ctx, req)
 	if err != nil {
@@ -213,28 +205,4 @@ func (h *Handler) HandleAdminDeleteUser(w http.ResponseWriter, r *http.Request) 
 	)
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// getClientIP extracts the client IP from the request
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first (for proxied requests)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the list
-		if idx := strings.Index(xff, ","); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-
-	// Fall back to RemoteAddr
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-
-	return r.RemoteAddr
 }

@@ -29,7 +29,7 @@ This is a **critical blocker** for production deployment.
 - Enable session-level and global logout
 - Support concurrent session limits
 - Invalidate tokens on security events
-- Provide token binding to device/IP for enhanced security
+- Provide token binding to devices for enhanced security (see [DEVICE_BINDING.md](../DEVICE_BINDING.md))
 
 ### Non-Goals
 
@@ -103,7 +103,7 @@ This is a **critical blocker** for production deployment.
    - Format: `"ref_" + uuid.New().String()`
    - Store refresh token in session record
    - Set refresh token expiry: 30 days from issuance
-3. Optionally bind token to device fingerprint (user-agent + IP hash) // Future improvement
+3. Bind token to device (see [DEVICE_BINDING.md](../DEVICE_BINDING.md) for security model)
 4. Return refresh token alongside access token
 5. Emit audit event: `refresh_token_issued`
 
@@ -153,7 +153,7 @@ This is a **critical blocker** for production deployment.
 4. If session not found → 401 Invalid refresh token
 5. Validate refresh token has not expired (< 30 days old)
 6. Validate refresh token has not been revoked (session status != "revoked")
-7. **(Optional)** Validate device fingerprint matches (if token binding enabled)
+7. Validate device binding (see [DEVICE_BINDING.md](../DEVICE_BINDING.md) for validation logic)
 8. **Refresh Token Rotation:**
    - Revoke old refresh token (mark as used)
    - Generate new refresh token
@@ -171,7 +171,7 @@ This is a **critical blocker** for production deployment.
 - 401 Unauthorized: Invalid or expired refresh token
 - 401 Unauthorized: Refresh token already used (rotation violation - possible replay attack)
 - 401 Unauthorized: Session revoked
-- 403 Forbidden: Device fingerprint mismatch (if token binding enabled)
+- 401 Unauthorized: Device mismatch (device ID cookie doesn't match session)
 - 500 Internal Server Error: Store failure
 
 **Security - Token Rotation:**
@@ -443,12 +443,12 @@ type Session struct {
     RequestedScope []string   `json:"requested_scope"`
     Status         string     `json:"status"` // "active", "revoked"
 
-    // Device binding for security (privacy-first: no raw PII)
-    DeviceFingerprintHash string `json:"device_fingerprint_hash"` // SHA-256(user-agent + IP) for validation
-
-    // Device display metadata (optional, for session management UI)
-    DeviceDisplayName     string `json:"device_display_name,omitempty"`     // e.g., "Chrome on macOS"
-    ApproximateLocation   string `json:"approximate_location,omitempty"`   // e.g., "San Francisco, US"
+    // Device binding for security - See DEVICE_BINDING.md for full security model
+    DeviceID              string `json:"device_id"`                // Primary: UUID from cookie (hard requirement)
+    DeviceFingerprintHash string `json:"device_fingerprint_hash"` // Secondary: SHA-256(browser|os|platform) - no IP
+    DeviceDisplayName     string `json:"device_display_name,omitempty"` // UI display: "Chrome on macOS"
+    ApproximateLocation   string `json:"approximate_location,omitempty"` // UI display: "San Francisco, US"
+    LastSeenAt            time.Time `json:"last_seen_at"` // Last activity timestamp
 
     // Lifecycle timestamps
     CreatedAt      time.Time  `json:"created_at"`
@@ -460,8 +460,10 @@ type Session struct {
 **Design Notes:**
 
 - No authorization code or refresh token fields (separated below)
-- `DeviceFingerprintHash` stored instead of raw `UserAgent` and `IPAddress` (privacy-first)
-- Optional `DeviceDisplayName` and `ApproximateLocation` for UI display (parsed at creation, no PII)
+- Device binding uses layered security model (see [DEVICE_BINDING.md](../DEVICE_BINDING.md)):
+  - `DeviceID`: UUID from httpOnly cookie (primary binding)
+  - `DeviceFingerprintHash`: SHA-256(browser|os|platform) - **no IP** (soft signal)
+  - Display metadata for UI only, no raw PII stored
 - Single expiry concept: when the session ends
 - Status field for explicit revocation tracking
 
@@ -523,41 +525,28 @@ type RefreshToken struct {
 
 ---
 
-#### Device Fingerprinting (Location: `internal/auth/fingerprint.go`)
+#### Device Binding
 
-**Privacy-first approach:** Hash user-agent and IP instead of storing raw values.
+**See [DEVICE_BINDING.md](../DEVICE_BINDING.md) for complete implementation details.**
 
-```go
-// ComputeDeviceFingerprint creates a privacy-preserving hash for device binding.
-// Uses SHA-256 to avoid storing PII (raw user-agent and IP address).
-func ComputeDeviceFingerprint(userAgent, ipAddress string) string {
-    // Normalize inputs
-    data := fmt.Sprintf("%s|%s", strings.ToLower(userAgent), ipAddress)
+The device binding implementation uses a layered security model:
 
-    // SHA-256 hash
-    hash := sha256.Sum256([]byte(data))
+1. **Primary binding:** Device ID cookie (UUID, httpOnly, stable across IP changes)
+2. **Secondary signal:** Browser fingerprint (SHA-256 of UA components, **no IP**)
+3. **Tertiary signal:** IP change risk scoring (contextual only, not for binding)
 
-    // Return hex-encoded hash (64 chars)
-    return hex.EncodeToString(hash[:])
-}
+**Key design principles:**
 
-// ValidateDeviceFingerprint checks if the current device matches the session's fingerprint.
-func ValidateDeviceFingerprint(session *Session, userAgent, ipAddress string) bool {
-    if session.DeviceFingerprintHash == "" {
-        return true // Device binding not enabled for this session
-    }
+- Privacy-first: No raw PII stored
+- Production-ready: Handles VPN, mobile, CGNAT scenarios
+- Security-focused: Device ID prevents token theft, fingerprint detects browser updates
+- Graceful degradation: Works with legacy sessions
 
-    expected := ComputeDeviceFingerprint(userAgent, ipAddress)
-    return session.DeviceFingerprintHash == expected
-}
-```
-
-**Privacy Benefits:**
-
-- No raw user-agent or IP address stored in memory/database
-- Cannot be reverse-engineered to extract PII
-- Safe to log, export, or persist without privacy concerns
-- Same security properties (device binding) without privacy risk
+Refer to [DEVICE_BINDING.md](../DEVICE_BINDING.md) for:
+- Security rationale (why IP binding fails in production)
+- Complete code implementation
+- Testing strategies
+- Migration path
 
 ---
 
@@ -760,10 +749,11 @@ func (s *CleanupService) performCleanup(ctx context.Context) {
    - `AuthorizationCode` (ephemeral 10-min codes)
    - `RefreshToken` (30-day renewal tokens)
 
-2. **Implement device fingerprinting** in `internal/auth/fingerprint.go`:
+2. **Implement device binding** per [DEVICE_BINDING.md](../DEVICE_BINDING.md):
 
-   - `ComputeDeviceFingerprint()` using SHA-256
-   - `ValidateDeviceFingerprint()` for token binding
+   - Device service with device ID generation
+   - Browser fingerprint computation (UA components, no IP)
+   - Device ID cookie management
 
 3. **Create store interfaces** in `internal/auth/store.go`:
 
@@ -801,12 +791,13 @@ func (s *CleanupService) performCleanup(ctx context.Context) {
 
    - Issue `RefreshToken` alongside access tokens
    - Store refresh token with 30-day expiry
-   - Compute and store device fingerprint hash
+   - Generate device ID and set cookie (per [DEVICE_BINDING.md](../DEVICE_BINDING.md))
+   - Compute and store browser fingerprint
 
 2. **Implement refresh grant type** (`grant_type=refresh_token`):
 
    - Validate refresh token from `RefreshTokenStore`
-   - Check device fingerprint (if enabled)
+   - Validate device binding (per [DEVICE_BINDING.md](../DEVICE_BINDING.md))
    - Implement token rotation (mark old token used, create new one)
    - Generate new access token with same session
 
@@ -945,9 +936,12 @@ func (s *CleanupService) performCleanup(ctx context.Context) {
 
 ### Device Binding
 
-- Optional feature (can be enabled via config)
-- Prevents stolen tokens from being used on different devices
-- Tradeoff: Users on VPN/dynamic IPs may have issues
+See [DEVICE_BINDING.md](../DEVICE_BINDING.md) for complete security model and implementation.
+
+**Summary:**
+- Device ID cookie (primary binding) + fingerprint (soft signal) + IP risk scoring
+- Production-ready: Handles VPN, mobile, CGNAT without false positives
+- Privacy-first: No raw PII stored
 
 ### Concurrent Session Limits
 
@@ -1061,4 +1055,5 @@ curl -X POST http://localhost:8080/auth/logout-all?except_current=true \
 
 | Version | Date       | Author       | Changes     |
 | ------- | ---------- | ------------ | ----------- |
+| 1.1     | 2025-12-13 | Engineering  | Updated device binding to reference DEVICE_BINDING.md; changed to layered security model (device ID + fingerprint, no IP binding) |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD |

@@ -30,17 +30,19 @@ type Session struct {
 	RequestedScope []string  `json:"requested_scope"`
 	Status         string    `json:"status"` // "active", "revoked", "pending_consent"
 
-	// Device binding for security (privacy-first: no raw PII)
-	DeviceFingerprintHash string `json:"device_fingerprint_hash"` // SHA-256(user-agent + IP) for validation
+	// Device binding for security - See DEVICE_BINDING.md for full security model
+	DeviceID              string `json:"device_id,omitempty"`               // Primary: UUID from cookie (hard requirement)
+	DeviceFingerprintHash string `json:"device_fingerprint_hash,omitempty"` // Secondary: SHA-256(browser|os|platform) - no IP
 
 	// Device display metadata (optional, for session management UI)
 	DeviceDisplayName   string `json:"device_display_name,omitempty"`  // e.g., "Chrome on macOS"
 	ApproximateLocation string `json:"approximate_location,omitempty"` // e.g., "San Francisco, US"
 
 	// Lifecycle timestamps
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt time.Time  `json:"expires_at"` // Session expiry (30+ days)
-	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`   // Session expiry (30+ days)
+	LastSeenAt time.Time  `json:"last_seen_at"` // Last activity timestamp
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
 type AuthorizationCodeRecord struct {
@@ -68,7 +70,7 @@ type RefreshTokenRecord struct {
 type AuthorizationRequest struct {
 	Email       string   `json:"email" validate:"required,email,max=255"`
 	ClientID    string   `json:"client_id" validate:"required,min=3,max=100"`
-	Scopes      []string `json:"scopes"`
+	Scopes      []string `json:"scopes" validate:"required,min=1,dive,notblank"`
 	RedirectURI string   `json:"redirect_uri" validate:"required,url,max=2048"`
 	State       string   `json:"state" validate:"max=500"`
 }

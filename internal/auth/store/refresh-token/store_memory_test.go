@@ -23,19 +23,21 @@ func (s *InMemoryRefreshTokenStoreSuite) SetupTest() {
 }
 
 func (s *InMemoryRefreshTokenStoreSuite) TestCreateAndFind() {
-	session := &models.RefreshTokenRecord{
-		ID: uuid.New(),
-
+	sessionID := uuid.New()
+	record := &models.RefreshTokenRecord{
+		ID:        uuid.New(),
+		Token:     "ref_123",
+		SessionID: sessionID,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(time.Hour),
 	}
 
-	err := s.store.Create(context.Background(), session)
+	err := s.store.Create(context.Background(), record)
 	require.NoError(s.T(), err)
 
-	foundByID, err := s.store.FindBySessionID(context.Background(), session.ID)
+	foundByID, err := s.store.FindBySessionID(context.Background(), sessionID)
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), session, foundByID)
+	assert.Equal(s.T(), record, foundByID)
 }
 
 func (s *InMemoryRefreshTokenStoreSuite) TestFindNotFound() {
@@ -46,8 +48,8 @@ func (s *InMemoryRefreshTokenStoreSuite) TestFindNotFound() {
 func (s *InMemoryRefreshTokenStoreSuite) TestDeleteSessionsByUser() {
 	sessionID := uuid.New()
 	otherSessionID := uuid.New()
-	matching := &models.RefreshTokenRecord{ID: uuid.New(), SessionID: sessionID}
-	other := &models.RefreshTokenRecord{ID: uuid.New(), SessionID: otherSessionID}
+	matching := &models.RefreshTokenRecord{ID: uuid.New(), Token: "ref_match", SessionID: sessionID}
+	other := &models.RefreshTokenRecord{ID: uuid.New(), Token: "ref_other", SessionID: otherSessionID}
 
 	require.NoError(s.T(), s.store.Create(context.Background(), matching))
 	require.NoError(s.T(), s.store.Create(context.Background(), other))

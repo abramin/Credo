@@ -71,6 +71,7 @@ type Service struct {
 	refreshTokens          RefreshTokenStore
 	sessionTTL             time.Duration
 	tokenTTL               time.Duration
+	deviceBindingEnabled   bool
 	logger                 *slog.Logger
 	auditPublisher         AuditPublisher
 	jwt                    TokenGenerator
@@ -140,6 +141,12 @@ func WithTokenTTL(ttl time.Duration) Option {
 	}
 }
 
+func WithDeviceBindingEnabled(enabled bool) Option {
+	return func(s *Service) {
+		s.deviceBindingEnabled = enabled
+	}
+}
+
 func NewService(users UserStore, sessions SessionStore, codes AuthCodeStore, refreshTokens RefreshTokenStore, opts ...Option) *Service {
 	svc := &Service{
 		users:         users,
@@ -202,23 +209,25 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to save authorization code")
 	}
 
-	userAgent := ctx.Value(models.ContextKeyUserAgent).(string)
+	userAgent := middleware.GetUserAgent(ctx)
+	ipAddress := middleware.GetClientIP(ctx)
 	deviceDisplayName := device.ParseUserAgent(userAgent)
+	deviceFingerprint := ""
+	if s.deviceBindingEnabled && userAgent != "" && ipAddress != "" && ipAddress != "unknown" {
+		deviceFingerprint = device.ComputeDeviceFingerprint(userAgent, ipAddress)
+	}
 
 	newSession := &models.Session{
-		ID:             authCode.SessionID,
-		UserID:         user.ID,
-		ClientID:       req.ClientID,
-		RequestedScope: scopes,
-		DeviceFingerprintHash: device.ComputeDeviceFingerprint(
-			userAgent,
-			ctx.Value(models.ContextKeyIPAddress).(string),
-		),
-		DeviceDisplayName:   deviceDisplayName,
-		ApproximateLocation: "", // TODO: implement approximate location
-		Status:              StatusPendingConsent,
-		CreatedAt:           now,
-		ExpiresAt:           now.Add(s.sessionTTL),
+		ID:                    authCode.SessionID,
+		UserID:                user.ID,
+		ClientID:              req.ClientID,
+		RequestedScope:        scopes,
+		DeviceFingerprintHash: deviceFingerprint,
+		DeviceDisplayName:     deviceDisplayName,
+		ApproximateLocation:   "",
+		Status:                StatusPendingConsent,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(s.sessionTTL),
 	}
 
 	err = s.sessions.Create(ctx, newSession)

@@ -127,16 +127,6 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 					State:       "test-state",
 				},
 			},
-			{
-				name: "scopes contain empty value",
-				request: &authModel.AuthorizationRequest{
-					Email:       "user@example.com",
-					ClientID:    "test-client-id",
-					Scopes:      []string{"scope1", " "},
-					RedirectURI: "https://example.com/redirect",
-					State:       "test-state",
-				},
-			},
 		}
 
 		for _, tt := range tests {

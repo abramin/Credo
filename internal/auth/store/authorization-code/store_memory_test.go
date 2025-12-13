@@ -64,6 +64,9 @@ func (s *InMemoryAuthorizationCodeStoreSuite) TestDelete() {
 	assert.Equal(s.T(), other, fetchedOther)
 
 	err = s.store.Delete(context.Background(), other.Code)
+	require.NoError(s.T(), err)
+
+	err = s.store.Delete(context.Background(), other.Code)
 	assert.ErrorIs(s.T(), err, ErrNotFound)
 }
 

@@ -14,6 +14,7 @@ import (
 	"credo/internal/auth/service/mocks"
 	sessionStore "credo/internal/auth/store/session"
 	userStore "credo/internal/auth/store/user"
+	"credo/internal/platform/middleware"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -56,6 +57,7 @@ func (s *ServiceSuite) SetupTest() {
 		WithJWTService(s.mockJWT),
 		WithAuditPublisher(s.mockAuditPublisher),
 		WithAllowedRedirectSchemes([]string{"http", "https"}),
+		WithDeviceBindingEnabled(true),
 	)
 }
 
@@ -84,9 +86,7 @@ func (s *ServiceSuite) TestAuthorize() {
 		req := baseReq
 		req.State = "xyz"
 
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, models.ContextKeyUserAgent, "Mozilla/5.0")
-		ctx = context.WithValue(ctx, models.ContextKeyIPAddress, "192.168.1.1")
+		ctx := middleware.WithClientMetadata(context.Background(), "192.168.1.1", "Mozilla/5.0")
 
 		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).DoAndReturn(
 			func(ctx context.Context, email string, user *models.User) (*models.User, error) {
@@ -132,9 +132,7 @@ func (s *ServiceSuite) TestAuthorize() {
 
 	s.T().Run("happy path - user exists", func(t *testing.T) {
 		req := baseReq
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, models.ContextKeyUserAgent, "Mozilla/5.0")
-		ctx = context.WithValue(ctx, models.ContextKeyIPAddress, "192.168.1.1")
+		ctx := middleware.WithClientMetadata(context.Background(), "192.168.1.1", "Mozilla/5.0")
 
 		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(existingUser, nil)
 		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
@@ -169,9 +167,7 @@ func (s *ServiceSuite) TestAuthorize() {
 
 	s.T().Run("user store error", func(t *testing.T) {
 		req := baseReq
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, models.ContextKeyUserAgent, "Mozilla/5.0")
-		ctx = context.WithValue(ctx, models.ContextKeyIPAddress, "192.168.1.1")
+		ctx := middleware.WithClientMetadata(context.Background(), "192.168.1.1", "Mozilla/5.0")
 
 		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(nil, assert.AnError)
 
@@ -182,9 +178,7 @@ func (s *ServiceSuite) TestAuthorize() {
 
 	s.T().Run("session store error", func(t *testing.T) {
 		req := baseReq
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, models.ContextKeyUserAgent, "Mozilla/5.0")
-		ctx = context.WithValue(ctx, models.ContextKeyIPAddress, "192.168.1.1")
+		ctx := middleware.WithClientMetadata(context.Background(), "192.168.1.1", "Mozilla/5.0")
 
 		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(existingUser, nil)
 		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
@@ -489,9 +483,9 @@ func (s *ServiceSuite) TestToken() {
 
 	s.T().Run("JWT generation errors", func(t *testing.T) {
 		tests := []struct {
-			name         string
-			setupMocks   func()
-			expectedErr  string
+			name        string
+			setupMocks  func()
+			expectedErr string
 		}{
 			{
 				name: "access token generation fails",
