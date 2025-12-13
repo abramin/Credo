@@ -1,137 +1,132 @@
-## Overview
+# Credo Module Conventions
 
-Credo is a modular identity and evidence platform composed of small, isolated APIs. Each module exposes a handler layer for HTTP, a service layer for business logic, models for data structures, and a store interface for persistence or caching. The goal is clarity, testability, and interchangeable components.
-
-This document defines the conventions used across all Credo modules.
+Credo is a modular identity and evidence platform composed of small, isolated APIs. Each module follows consistent structural, testing, and implementation conventions to maximise clarity, testability, and interchangeability.
 
 ---
 
-## Module Structure Rules
+## Module Structure
 
 ### 1. Handlers
 
-- Only handle HTTP concerns: parsing, validation, converting service outputs to responses.
-- No business logic in handlers.
+- Handle HTTP concerns only: parsing, validation, and response mapping.
+- No business logic.
 - Always accept and pass through `context.Context`.
 
 ### 2. Services
 
 - All business logic lives in the service layer.
 - Services depend on stores, clients, and publishers via interfaces.
-- Services are responsible for orchestration, validation beyond input shape, and error handling.
-- Optimise for unit testing: dependency injection only, no globals.
+- Services handle orchestration, domain validation, and error mapping.
+- Designed for unit testing via explicit dependency injection.
+- No globals.
 
 ### 3. Models
 
-- Define pure data structures.
+- Pure data structures only.
 - No business logic.
-- Keep domain models separate from transport types when needed.
+- Keep domain models separate from transport types where appropriate.
 
 ### 4. Stores
 
 - Interfaces only.
-- Allow in-memory or SQL-backed implementations.
-- If persistent SQL is used, generate queries using **sqlc** to avoid handwritten SQL and reduce drift.
+- Allow multiple implementations (in-memory, SQL, etc.).
+- For SQL persistence, use **sqlc** to generate queries.
 - Stores return domain models, not DB-specific structs.
 
 ---
 
-## Testing Rules
+## Testing
 
-### 1. gomock
+### Unit Testing
 
-- Use gomock for mocking store, client, publisher, or external dependencies.
-- Mocks should live under `internal/<module>/mocks`.
+- **gomock**
 
-### 2. testify
+  - Used for mocking stores, clients, publishers, and external dependencies.
+  - Mocks live under `internal/<module>/mocks`.
 
-- Use `testify/assert` and `require` for clarity.
-- Avoid deep custom comparisons unless necessary.
+- **testify**
 
-### 3. BDD-style test structure
+  - Use `assert` and `require` for clarity.
 
-Each test follows:
+- **BDD-style structure**
 
-**Given** known state or mocks
-**When** the service method is invoked
-**Then** assert results, interactions, and errors
+  - Tests follow `Given / When / Then`.
 
-Example skeleton:
+- **Test suite layout**
 
-```
-Given(...)
-When(...)
-Then(...)
-```
+  - One test suite per exported function or method.
+  - Use subtests to cover behaviors and edge cases.
+  - Prefer table tests for pure validation logic.
+  - Keep default test contexts minimal.
 
-Helpers may be used for repeated setup inside a module.
+### Integration Testing
 
-### 4. Test suite layout
+- Validate end-to-end flows required by PRDs.
+- One integration suite per PRD journey.
+- Use subtests for error cases (400, 401, 404, 500).
+- Do not duplicate unit test coverage.
+- Focus on HTTP wiring, persistence, middleware, and cross-component interaction.
 
-- Group tests by function: one suite targets one exported method/function.
-- Use subtests to cover behaviours and edge cases instead of separate top-level tests.
-- Default test contexts should stay minimal; only enable feature flags (e.g., device binding) inside the subtests that exercise them.
-- Table tests are preferred for pure validation branches; name cases clearly.
+### Feature Flags
+
+- Feature flags are disabled by default.
+- Enable flags only in tests that exercise the feature.
+- Use functional options, not globals.
 
 ---
 
-## General Principles
-
-- Keep the service layer free from HTTP and DB concerns.
-- Use interfaces for any dependency that may need to be mocked or swapped.
-- Keep modules independent; no cross-module imports except through interfaces.
-- Prefer explicit wiring (constructors) over hidden globals.
-- Maintain small, focused files; avoid god objects.
-- Refer to docs/architecture.md and the prd folder for details of implementation
-
 ## Implementation Patterns
 
-### 1. Service Construction
+### Service Construction
 
-- Config + options: constructors accept required config plus functional options (e.g., inject logger, JWT service, feature flags) instead of globals.
-- Validate required dependencies in constructor; return error if stores or critical config missing.
-- Apply sensible defaults for optional fields (TTLs, allowed schemes, etc.).
+- Constructors accept required config plus functional options.
+- Validate required dependencies and critical config at construction time.
+- Apply sensible defaults for optional fields (e.g. TTLs).
 
-### 2. Error Handling
+### Error Handling
 
-- Domain errors: wrap failures with `pkg/domain-errors` codes; prefer `dErrors.Wrap`/`dErrors.New` to keep client-safe messages and telemetry alignment.
-- Map store-specific errors (e.g., `sessionStore.ErrNotFound`) to domain error codes (e.g., `dErrors.CodeUnauthorized`) at service boundary.
-- Never expose internal implementation details in error messages sent to clients.
+- Use domain error codes via `pkg/domain-errors`.
+- Wrap errors with `dErrors.New` or `dErrors.Wrap`.
+- Map store-specific errors to domain errors at the service boundary.
+- Never expose internal implementation details to clients.
 
-### 3. Audit & Observability
+### Audit & Observability
 
-- Audit first: emit audit events at key state transitions (user/session/token lifecycle).
-- Keep audit publishing inside services, not handlers.
-- Include contextual fields: `user_id`, `session_id`, `client_id`, `request_id` when available.
-- Use structured logging (slog) with context for correlation; emit security events to both logs and audit streams.
+- Emit audit events at key lifecycle transitions.
+- Audit publishing happens in services, not handlers.
+- Include contextual fields where available:
 
-### 4. Context & Middleware
+  - `user_id`, `session_id`, `client_id`, `request_id`
 
-- Middleware data flow: rely on middleware helpers to attach request metadata (client IP, user agent, device ID) into `context.Context`.
-- Services read from context rather than accepting parameters for cross-cutting concerns.
-- Never store sensitive data in context; use it only for request-scoped metadata and tracing.
+- Use structured logging (`slog`) with context.
+- Emit security events to both logs and audit streams.
 
-### 5. Transactions & State Management
+### Context & Middleware
 
-- Transactions: group multi-store writes with `RunInTx` to avoid partial persistence on failure.
-- Update session timestamps (`LastSeenAt`, `LastRefreshedAt`) and statuses atomically with token persistence.
-- Mark resources as used/consumed (codes, refresh tokens) within the same transaction as token generation.
+- Middleware attaches request metadata (IP, user agent, device ID) to `context.Context`.
+- Services read request-scoped metadata from context.
+- Do not store sensitive data in context.
 
-### 6. Feature Flags & Testing
+### Transactions & State Management
 
-- Feature flags: default tests/config keep flags off; enable them only in specific scenarios that exercise the feature (e.g., device binding).
-- Minimize test boilerplate by keeping default contexts clean; inject feature-specific metadata only where needed.
-- Use functional options to enable features, not global state.
+- Use `RunInTx` for multi-store writes.
+- Update related state atomically:
 
-### 7. Integration Testing
+  - session timestamps
+  - token persistence
+  - code or refresh token consumption
 
-- Focus on happy-path journeys that verify end-to-end flows required by PRDs.
-- Use subtests for error scenarios (400, 401, 404, 500) within the same journey.
-- Avoid duplicating unit test coverage; integration tests should validate HTTP-layer wiring, store persistence, and middleware interactions.
-- Each integration test suite corresponds to one PRD functional requirement or user journey.
+- Avoid partial persistence on failure.
 
-### 8. Mocks & Interfaces
+### Mocks & Interfaces
 
-- Keep gomock-generated mocks under `internal/<module>/mocks`.
-- Co-locate `//go:generate mockgen` hints with interface definitions for discoverability.
-- Regenerate mocks after interface changes and include in same commit.
+- Interfaces live with their consuming module.
+- Include `//go:generate mockgen` directives with interface definitions.
+- Regenerate mocks after interface changes and commit together.
+
+---
+
+## References
+
+- `docs/architecture.md`
+- `prd/` directory for feature-specific requirements
