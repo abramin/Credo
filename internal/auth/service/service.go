@@ -328,16 +328,13 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 		return nil, dErrors.New(dErrors.CodeInternal, "token generator not configured")
 	}
 
+	// Validate grant_type (OAuth 2.0 requirement)
+	// Note: This is a client implementation error, not a security attack
 	if req.GrantType != "authorization_code" {
-		s.logAuthFailure(ctx, "invalid_grant_type", false,
-			"client_id", req.ClientID,
-			"grant_type", req.GrantType,
-		)
-		s.incrementAuthFailure()
-		return nil, dErrors.New(dErrors.CodeUnauthorized, "unsupported grant_type")
+		return nil, dErrors.New(dErrors.CodeBadRequest, "unsupported grant_type")
 	}
 
-	// Step 1: Retrieve and validate auth code
+	// Step 1: Retrieve authorization code
 	codeRecord, err := s.codes.FindByCode(ctx, req.Code)
 	if err != nil {
 		if errors.Is(err, sessionStore.ErrNotFound) {
@@ -349,12 +346,45 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to find code")
 	}
-	// Step 3: Retrieve and validate session
+
+	// Step 2: Validate authorization code constraints
+	if time.Now().After(codeRecord.ExpiresAt) {
+		s.logAuthFailure(ctx, "authorization_code_expired", false,
+			"client_id", req.ClientID,
+			"code", req.Code,
+		)
+		s.incrementAuthFailure()
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code expired")
+	}
+
+	if codeRecord.Used {
+		// Security: Code reuse indicates replay attack - revoke the session
+		err = s.sessions.RevokeSession(ctx, codeRecord.SessionID)
+		if err != nil {
+			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to revoke compromised session")
+		}
+		s.logAuthFailure(ctx, "authorization_code_reused", false,
+			"client_id", req.ClientID,
+			"session_id", codeRecord.SessionID.String(),
+		)
+		s.incrementAuthFailure()
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code already used")
+	}
+
+	if codeRecord.RedirectURI != req.RedirectURI {
+		s.logAuthFailure(ctx, "redirect_uri_mismatch", false,
+			"client_id", req.ClientID,
+		)
+		s.incrementAuthFailure()
+		return nil, dErrors.New(dErrors.CodeBadRequest, "redirect_uri mismatch")
+	}
+
+	// Step 3: Retrieve session
 	session, err := s.sessions.FindByID(ctx, codeRecord.SessionID)
 	if err != nil {
 		if errors.Is(err, sessionStore.ErrNotFound) {
-			s.logAuthFailure(ctx, "session not found", false,
-				"client_id", session.ClientID,
+			s.logAuthFailure(ctx, "session_not_found", false,
+				"client_id", req.ClientID,
 			)
 			s.incrementAuthFailure()
 			return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid authorization code")
@@ -362,57 +392,41 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to find session")
 	}
 
-	// 3. Validate code not expired (OAuth 2.0 spec: codes expire quickly)
-	if time.Now().After(codeRecord.ExpiresAt) {
-		s.logAuthFailure(ctx, "authorization_code_expired", false,
-			"session_id", session.ID.String(),
-			"user_id", session.UserID.String(),
-			"client_id", session.ClientID,
-		)
-		s.incrementAuthFailure()
-		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code expired")
-	}
-
-	if codeRecord.RedirectURI != req.RedirectURI {
-		s.logAuthFailure(ctx, "redirect_uri mismatch", false,
-			"session_id", session.ID.String(),
-			"user_id", session.UserID.String(),
-			"client_id", session.ClientID,
-		)
-		s.incrementAuthFailure()
-		return nil, dErrors.New(dErrors.CodeUnauthorized, "redirect_uri mismatch")
-	}
-	//4. Validate code not already used (prevent replay attacks)
-	// Step 2: Validate code constraints
-	if codeRecord.Used {
-		// Security: Mark session as compromised and revoke
-		err = s.sessions.RevokeSession(ctx, codeRecord.SessionID)
-		if err != nil {
-			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to revoke compromised session")
-		}
-		s.logAuthFailure(ctx, "authorization_code_reused", false,
-			"session_id", session.ID.String(),
-			"user_id", session.UserID.String(),
-			"client_id", session.ClientID,
-		)
-		s.incrementAuthFailure()
-		return nil, dErrors.New(dErrors.CodeUnauthorized, "authorization code already used")
-	}
-
-	// 6. Validate client_id matches
+	// Step 4: Validate session and client_id match
 	if req.ClientID != session.ClientID {
 		s.logAuthFailure(ctx, "client_id_mismatch", false,
 			"session_id", session.ID.String(),
 			"user_id", session.UserID.String(),
+			"expected_client_id", session.ClientID,
+			"provided_client_id", req.ClientID,
+		)
+		s.incrementAuthFailure()
+		return nil, dErrors.New(dErrors.CodeBadRequest, "client_id mismatch")
+	}
+
+	// Step 5: Validate session status and expiry
+	if session.Status == "revoked" {
+		s.logAuthFailure(ctx, "session_revoked", false,
+			"session_id", session.ID.String(),
+			"user_id", session.UserID.String(),
 			"client_id", session.ClientID,
 		)
 		s.incrementAuthFailure()
-		return nil, dErrors.New(dErrors.CodeUnauthorized, "client_id mismatch")
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "session has been revoked")
 	}
 
-	if session.Status != "active" {
-		return nil, dErrors.New(dErrors.CodeUnauthorized, "session revoked or expired")
+	// Accept both pending_consent and active (for idempotency if code is exchanged twice)
+	if session.Status != StatusPendingConsent && session.Status != StatusActive {
+		s.logAuthFailure(ctx, "invalid_session_status", false,
+			"session_id", session.ID.String(),
+			"user_id", session.UserID.String(),
+			"client_id", session.ClientID,
+			"status", session.Status,
+		)
+		s.incrementAuthFailure()
+		return nil, dErrors.New(dErrors.CodeUnauthorized, "session in invalid state")
 	}
+
 	if time.Now().After(session.ExpiresAt) {
 		s.logAuthFailure(ctx, "session_expired", false,
 			"session_id", session.ID.String(),
@@ -423,12 +437,19 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "session expired")
 	}
 
-	// Step 4: Mark code as used (prevent replay)
+	// Step 6: Mark code as used (prevent replay attacks)
 	if err := s.codes.MarkUsed(ctx, codeRecord.Code); err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to mark code as used")
 	}
 
-	// Step 5: Generate tokens
+	// Step 7: Activate session (transition from pending_consent to active)
+	// Note: In-memory store holds pointers, so this updates the stored session
+	// TODO: Add proper UpdateSession method to SessionStore interface for explicit updates
+	if session.Status == StatusPendingConsent {
+		session.Status = StatusActive
+	}
+
+	// Step 8: Generate tokens
 	accessToken, err := s.jwt.GenerateAccessToken(session.UserID, session.ID, session.ClientID)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate access token")
