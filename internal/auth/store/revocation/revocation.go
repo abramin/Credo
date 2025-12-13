@@ -22,14 +22,31 @@ type TokenRevocationList interface {
 // InMemoryTRL is an in-memory implementation of TokenRevocationList for MVP/testing.
 // For production, use RedisTRL for distributed token revocation.
 type InMemoryTRL struct {
-	mu      sync.RWMutex
-	revoked map[string]time.Time // jti -> expiry timestamp
+	mu              sync.RWMutex
+	revoked         map[string]time.Time // jti -> expiry timestamp
+	cleanupInterval time.Duration
+}
+
+type InMemoryTRLOption func(*InMemoryTRL)
+
+func WithCleanupInterval(d time.Duration) InMemoryTRLOption {
+	return func(trl *InMemoryTRL) {
+		if d > 0 {
+			trl.cleanupInterval = d
+		}
+	}
 }
 
 // NewInMemoryTRL creates a new in-memory token revocation list.
-func NewInMemoryTRL() *InMemoryTRL {
+func NewInMemoryTRL(opts ...InMemoryTRLOption) *InMemoryTRL {
 	trl := &InMemoryTRL{
-		revoked: make(map[string]time.Time),
+		revoked:         make(map[string]time.Time),
+		cleanupInterval: 5 * time.Minute,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(trl)
+		}
 	}
 	// Start cleanup goroutine to remove expired entries
 	go trl.cleanup()
@@ -77,7 +94,7 @@ func (t *InMemoryTRL) RevokeSessionTokens(ctx context.Context, sessionID string,
 
 // cleanup periodically removes expired entries from the revocation list.
 func (t *InMemoryTRL) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(t.cleanupInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {

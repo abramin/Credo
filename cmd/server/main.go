@@ -14,6 +14,7 @@ import (
 	authService "credo/internal/auth/service"
 	authCodeStore "credo/internal/auth/store/authorization-code"
 	refreshTokenStore "credo/internal/auth/store/refresh-token"
+	revocationStore "credo/internal/auth/store/revocation"
 	sessionStore "credo/internal/auth/store/session"
 	userStore "credo/internal/auth/store/user"
 	consentHandler "credo/internal/consent/handler"
@@ -70,6 +71,7 @@ func initializeAuthService(m *metrics.Metrics, log *slog.Logger, jwtService *jwt
 		AllowedRedirectSchemes: cfg.Auth.AllowedRedirectSchemes,
 		DeviceBindingEnabled:   cfg.Auth.DeviceBindingEnabled,
 	}
+	trl := revocationStore.NewInMemoryTRL(revocationStore.WithCleanupInterval(cfg.Auth.TokenRevocationCleanupInterval))
 
 	authSvc, err := authService.New(
 		userStore.NewInMemoryUserStore(),
@@ -80,6 +82,7 @@ func initializeAuthService(m *metrics.Metrics, log *slog.Logger, jwtService *jwt
 		authService.WithMetrics(m),
 		authService.WithLogger(log),
 		authService.WithJWTService(jwtService),
+		authService.WithTRL(trl),
 	)
 	if err != nil {
 		log.Error("failed to initialize auth service", "error", err)

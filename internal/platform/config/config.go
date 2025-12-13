@@ -25,14 +25,15 @@ type Server struct {
 
 // AuthConfig holds authentication and session configuration
 type AuthConfig struct {
-	JWTSigningKey          string
-	JWTIssuer              string
-	TokenTTL               time.Duration
-	SessionTTL             time.Duration
-	AllowedRedirectSchemes []string
-	DeviceBindingEnabled   bool
-	DeviceCookieName       string
-	DeviceCookieMaxAge     int
+	JWTSigningKey                  string
+	JWTIssuer                      string
+	TokenTTL                       time.Duration
+	SessionTTL                     time.Duration
+	TokenRevocationCleanupInterval time.Duration
+	AllowedRedirectSchemes         []string
+	DeviceBindingEnabled           bool
+	DeviceCookieName               string
+	DeviceCookieMaxAge             int
 }
 
 // ConsentConfig holds consent management configuration
@@ -54,14 +55,15 @@ type SecurityConfig struct {
 
 // Defaults
 var (
-	DefaultTokenTTL           = 15 * time.Minute
-	DefaultSessionTTL         = 24 * time.Hour
-	DefaultConsentTTL         = 365 * 24 * time.Hour
-	DefaultConsentGrantWindow = 5 * time.Minute
-	DefaultRegistryCacheTTL   = 5 * time.Minute
-	DefaultJWTIssuer          = "credo"
-	DefaultDeviceCookieName   = "__Secure-Device-ID"
-	DefaultDeviceCookieMaxAge = 31536000 // 1 year
+	DefaultTokenTTL                       = 15 * time.Minute
+	DefaultSessionTTL                     = 24 * time.Hour
+	DefaultTokenRevocationCleanupInterval = 5 * time.Minute
+	DefaultConsentTTL                     = 365 * 24 * time.Hour
+	DefaultConsentGrantWindow             = 5 * time.Minute
+	DefaultRegistryCacheTTL               = 5 * time.Minute
+	DefaultJWTIssuer                      = "credo"
+	DefaultDeviceCookieName               = "__Secure-Device-ID"
+	DefaultDeviceCookieMaxAge             = 31536000 // 1 year
 )
 
 // FromEnv builds config from environment variables
@@ -100,14 +102,15 @@ func loadAuthConfig(env string, demoMode bool) AuthConfig {
 	}
 
 	return AuthConfig{
-		JWTSigningKey:          jwtSigningKey,
-		JWTIssuer:              jwtIssuer,
-		TokenTTL:               parseDuration("TOKEN_TTL", DefaultTokenTTL),
-		SessionTTL:             parseDuration("SESSION_TTL", DefaultSessionTTL),
-		AllowedRedirectSchemes: parseAllowedRedirectSchemes(os.Getenv("ALLOWED_REDIRECT_SCHEMES"), env),
-		DeviceBindingEnabled:   os.Getenv("DEVICE_BINDING_ENABLED") == "true",
-		DeviceCookieName:       getEnv("DEVICE_COOKIE_NAME", DefaultDeviceCookieName),
-		DeviceCookieMaxAge:     parseInt("DEVICE_COOKIE_MAX_AGE", DefaultDeviceCookieMaxAge),
+		JWTSigningKey:                  jwtSigningKey,
+		JWTIssuer:                      jwtIssuer,
+		TokenTTL:                       parseDuration("TOKEN_TTL", DefaultTokenTTL),
+		SessionTTL:                     parseDuration("SESSION_TTL", DefaultSessionTTL),
+		TokenRevocationCleanupInterval: parseDuration("TOKEN_REVOCATION_CLEANUP_INTERVAL", DefaultTokenRevocationCleanupInterval),
+		AllowedRedirectSchemes:         parseAllowedRedirectSchemes(os.Getenv("ALLOWED_REDIRECT_SCHEMES"), env),
+		DeviceBindingEnabled:           os.Getenv("DEVICE_BINDING_ENABLED") == "true",
+		DeviceCookieName:               getEnv("DEVICE_COOKIE_NAME", DefaultDeviceCookieName),
+		DeviceCookieMaxAge:             parseInt("DEVICE_COOKIE_MAX_AGE", DefaultDeviceCookieMaxAge),
 	}
 }
 
