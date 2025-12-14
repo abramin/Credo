@@ -110,6 +110,7 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		"client_id", req.ClientID,
 	)
 
+	// TODO: Should this be done in middleware or service layer?
 	// Set device ID cookie (Phase 1: soft launch — generate cookie, no enforcement).
 	if res.DeviceID != "" {
 		http.SetCookie(w, &http.Cookie{
@@ -195,7 +196,6 @@ func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
-
 	userIDStr := middleware.GetUserID(ctx)
 	sessionIDStr := middleware.GetSessionID(ctx)
 
@@ -237,8 +237,8 @@ func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleRevokeSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
-
 	userIDStr := middleware.GetUserID(ctx)
+
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		h.logger.WarnContext(ctx, "invalid user id in context",
@@ -326,12 +326,7 @@ func (h *Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 
-	// Parse request body
-	var req struct {
-		Token         string `json:"token"`
-		TokenTypeHint string `json:"token_type_hint,omitempty"`
-	}
-
+	var req models.RevokeTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.WarnContext(ctx, "failed to decode revoke request",
 			"error", err,
@@ -341,7 +336,6 @@ func (h *Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Call service to revoke the token
 	if err := h.auth.RevokeToken(ctx, req.Token, req.TokenTypeHint); err != nil {
 		h.logger.ErrorContext(ctx, "failed to revoke token",
 			"error", err,

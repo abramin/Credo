@@ -29,6 +29,9 @@ import (
 	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
 	"credo/internal/seeder"
+	tenantHandler "credo/internal/tenant/handler"
+	tenantService "credo/internal/tenant/service"
+	tenantStore "credo/internal/tenant/store"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -59,6 +62,13 @@ type consentModule struct {
 	Handler *consentHandler.Handler
 }
 
+type tenantModule struct {
+	Service *tenantService.Service
+	Handler *tenantHandler.Handler
+	Tenants *tenantStore.InMemoryTenantStore
+	Clients *tenantStore.InMemoryClientStore
+}
+
 func main() {
 	infra, err := buildInfra()
 	if err != nil {
@@ -74,18 +84,19 @@ func main() {
 		os.Exit(1)
 	}
 	consentMod := buildConsentModule(infra)
+	tenantMod := buildTenantModule(infra)
 
 	startCleanupWorker(appCtx, infra.Log, authMod.Cleanup)
 
 	r := setupRouter(infra.Log, infra.Metrics)
-	registerRoutes(r, infra, authMod, consentMod)
+	registerRoutes(r, infra, authMod, consentMod, tenantMod)
 
 	mainSrv := httpserver.New(infra.Cfg.Addr, r)
 	startServer(mainSrv, infra.Log, "main API")
 
 	var adminSrv *http.Server
 	if infra.Cfg.Security.AdminAPIToken != "" {
-		adminRouter := setupAdminRouter(infra.Log, authMod.AdminSvc, infra.Cfg)
+		adminRouter := setupAdminRouter(infra.Log, authMod.AdminSvc, tenantMod.Handler, infra.Cfg)
 		adminSrv = httpserver.New(":8081", adminRouter)
 		startServer(adminSrv, infra.Log, "admin")
 	}
@@ -203,6 +214,22 @@ func buildConsentModule(infra *infraBundle) *consentModule {
 	}
 }
 
+func buildTenantModule(infra *infraBundle) *tenantModule {
+	tenants := tenantStore.NewInMemoryTenantStore()
+	clients := tenantStore.NewInMemoryClientStore()
+	service := tenantService.New(tenants, clients, nil)
+
+	// Bootstrap a default tenant/client for backward compatibility with existing flows.
+	tenantStore.SeedBootstrapTenant(tenants, clients)
+
+	return &tenantModule{
+		Service: service,
+		Handler: tenantHandler.New(service, infra.Log),
+		Tenants: tenants,
+		Clients: clients,
+	}
+}
+
 func startCleanupWorker(ctx context.Context, log *slog.Logger, cleanupSvc *cleanupWorker.CleanupService) {
 	go func() {
 		if err := cleanupSvc.Start(ctx); err != nil && err != context.Canceled {
@@ -216,7 +243,7 @@ func initializeJWTService(cfg *config.Server) (*jwttoken.JWTService, *jwttoken.J
 	jwtService := jwttoken.NewJWTService(
 		cfg.Auth.JWTSigningKey,
 		cfg.Auth.JWTIssuer,
-		"credo-client",
+		"credo-client", // TODO: make configurable
 		cfg.Auth.TokenTTL,
 	)
 	if cfg.DemoMode {
@@ -250,7 +277,7 @@ func setupRouter(log *slog.Logger, m *metrics.Metrics) *chi.Mux {
 }
 
 // registerRoutes wires HTTP handlers to the shared router
-func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule) {
+func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule) {
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
@@ -280,12 +307,13 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
 			authMod.Handler.RegisterAdmin(r)
+			tenantMod.Handler.Register(r)
 		})
 	}
 }
 
 // setupAdminRouter creates a router for the admin server
-func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, cfg *config.Server) *chi.Mux {
+func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *tenantHandler.Handler, cfg *config.Server) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Common middleware for all routes
@@ -317,6 +345,7 @@ func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, cfg *config.Ser
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequireAdminToken(cfg.Security.AdminAPIToken, log))
 		adminHandler.Register(r)
+		tenantHandler.Register(r)
 	})
 
 	return r
