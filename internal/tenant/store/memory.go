@@ -26,12 +26,17 @@ func NewInMemoryTenantStore() *InMemoryTenantStore {
 	return &InMemoryTenantStore{tenants: make(map[string]*tenant.Tenant), nameIdx: make(map[string]string)}
 }
 
-func (s *InMemoryTenantStore) Create(_ context.Context, t *tenant.Tenant) error {
+// CreateIfNameAvailable atomically creates the tenant if the name is not already taken (case-insensitive).
+func (s *InMemoryTenantStore) CreateIfNameAvailable(_ context.Context, t *tenant.Tenant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lower := strings.ToLower(t.Name)
+	if _, exists := s.nameIdx[lower]; exists {
+		return dErrors.New(dErrors.CodeConflict, "tenant name must be unique")
+	}
 	key := t.ID.String()
 	s.tenants[key] = t
-	s.nameIdx[strings.ToLower(t.Name)] = key
+	s.nameIdx[lower] = key
 	return nil
 }
 
@@ -123,7 +128,7 @@ func (s *InMemoryClientStore) CountByTenant(_ context.Context, tenantID uuid.UUI
 func SeedBootstrapTenant(ts *InMemoryTenantStore, cs *InMemoryClientStore) (*tenant.Tenant, *tenant.Client) {
 	now := time.Now()
 	t := &tenant.Tenant{ID: uuid.New(), Name: "default", CreatedAt: now}
-	_ = ts.Create(context.Background(), t)
+	_ = ts.CreateIfNameAvailable(context.Background(), t)
 
 	c := &tenant.Client{
 		ID:            uuid.New(),

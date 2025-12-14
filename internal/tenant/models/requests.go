@@ -35,7 +35,6 @@ func (r *CreateTenantRequest) Validate() error {
 	return nil
 }
 
-// CreateClientRequest captures required client fields.
 type CreateClientRequest struct {
 	TenantID      uuid.UUID `json:"tenant_id"`
 	Name          string    `json:"name"`
@@ -125,7 +124,6 @@ func validateGrants(grants []string) error {
 	return nil
 }
 
-// UpdateClientRequest supports partial updates.
 type UpdateClientRequest struct {
 	Name          *string   `json:"name,omitempty"`
 	RedirectURIs  *[]string `json:"redirect_uris,omitempty"`
@@ -134,7 +132,6 @@ type UpdateClientRequest struct {
 	RotateSecret  bool      `json:"rotate_secret"`
 }
 
-// Normalize trims provided fields and deduplicates collections.
 func (r *UpdateClientRequest) Normalize() {
 	if r == nil {
 		return

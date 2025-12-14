@@ -11,6 +11,7 @@ import (
 // TenantStore persists tenant records.
 type TenantStore interface {
 	Create(ctx context.Context, tenant *models.Tenant) error
+	CreateIfNameAvailable(ctx context.Context, tenant *models.Tenant) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error)
 	FindByName(ctx context.Context, name string) (*models.Tenant, error)
 	Count(ctx context.Context) (int, error)

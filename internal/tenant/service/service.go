@@ -21,7 +21,7 @@ const (
 )
 
 type TenantStore interface {
-	Create(ctx context.Context, tenant *models.Tenant) error
+	CreateIfNameAvailable(ctx context.Context, tenant *models.Tenant) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error)
 	FindByName(ctx context.Context, name string) (*models.Tenant, error)
 	Count(ctx context.Context) (int, error)
@@ -51,7 +51,6 @@ func New(tenants TenantStore, clients ClientStore, users UserCounter) *Service {
 	return &Service{tenants: tenants, clients: clients, userCounter: users}
 }
 
-// CreateTenant registers a new tenant with validation.
 func (s *Service) CreateTenant(ctx context.Context, name string) (*models.Tenant, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -60,18 +59,17 @@ func (s *Service) CreateTenant(ctx context.Context, name string) (*models.Tenant
 	if len(name) > 128 {
 		return nil, dErrors.New(dErrors.CodeValidation, "name must be 128 characters or less")
 	}
-	existing, err := s.tenants.FindByName(ctx, name)
-	if err != nil && !dErrors.Is(err, dErrors.CodeNotFound) {
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to verify tenant uniqueness")
-	}
-	if existing != nil {
-		return nil, dErrors.New(dErrors.CodeConflict, "tenant name must be unique")
-	}
 
 	t := &models.Tenant{ID: uuid.New(), Name: name, CreatedAt: time.Now()}
-	if err := s.tenants.Create(ctx, t); err != nil {
+	if err := s.tenants.CreateIfNameAvailable(ctx, t); err != nil {
+		if dErrors.Is(err, dErrors.CodeConflict) {
+			return nil, dErrors.New(dErrors.CodeConflict, "tenant name must be unique")
+		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create tenant")
 	}
+
+	// TODO: Emit tenant.created with the admin actor ID in the service
+	// after successful create to satisfy FR-1.
 
 	return t, nil
 }
