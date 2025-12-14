@@ -62,15 +62,15 @@ func (s *InMemoryUserStore) FindByEmail(ctx context.Context, email string) (*mod
 	return nil, ErrNotFound
 }
 
-// FindOrCreateByEmail atomically finds a user by email or creates it if not found.
-// This prevents duplicate user creation in concurrent scenarios.
-func (s *InMemoryUserStore) FindOrCreateByEmail(_ context.Context, email string, user *models.User) (*models.User, error) {
+// FindOrCreateByTenantAndEmail atomically finds a user by tenant and email or creates it if not found.
+// This prevents duplicate user creation in concurrent scenarios while enforcing tenant isolation.
+func (s *InMemoryUserStore) FindOrCreateByTenantAndEmail(_ context.Context, tenantID uuid.UUID, email string, user *models.User) (*models.User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check if user already exists
+	// Check if user already exists for this tenant and email
 	for _, existingUser := range s.users {
-		if existingUser.Email == email {
+		if existingUser.Email == email && existingUser.TenantID == tenantID {
 			return existingUser, nil
 		}
 	}

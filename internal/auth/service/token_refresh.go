@@ -6,6 +6,7 @@ import (
 
 	"credo/internal/audit"
 	"credo/internal/auth/models"
+	dErrors "credo/pkg/domain-errors"
 )
 
 func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error) {
@@ -26,6 +27,16 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 		session, err = stores.Sessions.FindByID(ctx, refreshRecord.SessionID)
 		if err != nil {
 			return err
+		}
+
+		// Validate client and user status before issuing new tokens (PRD-026A FR-4.5.4)
+		tc, err := s.resolveTokenContext(ctx, session)
+		if err != nil {
+			return dErrors.Wrap(err, dErrors.CodeUnauthorized, "invalid token context")
+		}
+
+		if models.UserStatus(tc.Client.Status) != models.UserStatusActive {
+			return dErrors.New(dErrors.CodeForbidden, "client is not active")
 		}
 
 		mutableSession := *session

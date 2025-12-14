@@ -10,6 +10,7 @@ import (
 	"credo/internal/auth/models"
 	"credo/internal/auth/service/mocks"
 	"credo/internal/platform/middleware"
+	tenant "credo/internal/tenant/models"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -19,12 +20,30 @@ import (
 
 // TestAuthorize tests the OAuth 2.0 authorization code flow (PRD-001 FR-1)
 func (s *ServiceSuite) TestAuthorize() {
+	tenantID := uuid.New()
+	clientID := uuid.New()
+
+	mockClient := &tenant.Client{
+		ID:       clientID,
+		TenantID: tenantID,
+		ClientID: "client-123",
+		Name:     "Test Client",
+		Status:   "active",
+	}
+
+	mockTenant := &tenant.Tenant{
+		ID:   tenantID,
+		Name: "Test Tenant",
+	}
+
 	var existingUser = &models.User{
 		ID:        uuid.New(),
+		TenantID:  tenantID,
 		Email:     "email@test.com",
 		FirstName: "Existing",
 		LastName:  "User",
 		Verified:  true,
+		Status:    models.UserStatusActive,
 	}
 
 	var baseReq = models.AuthorizationRequest{
@@ -40,10 +59,14 @@ func (s *ServiceSuite) TestAuthorize() {
 
 		ctx := context.Background()
 
-		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).DoAndReturn(
-			func(ctx context.Context, email string, user *models.User) (*models.User, error) {
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+
+		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).DoAndReturn(
+			func(ctx context.Context, tid uuid.UUID, email string, user *models.User) (*models.User, error) {
+				assert.Equal(s.T(), tenantID, tid)
 				assert.Equal(s.T(), req.Email, email)
 				assert.Equal(s.T(), req.Email, user.Email)
+				assert.Equal(s.T(), tenantID, user.TenantID)
 				assert.NotNil(s.T(), user.ID)
 				return user, nil
 			})
@@ -64,6 +87,8 @@ func (s *ServiceSuite) TestAuthorize() {
 		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, session *models.Session) error {
 				assert.NotNil(s.T(), session.UserID)
+				assert.Equal(s.T(), clientID, session.ClientID)
+				assert.Equal(s.T(), tenantID, session.TenantID)
 				assert.True(s.T(), session.ExpiresAt.After(time.Now()))
 				assert.Equal(s.T(), string(models.SessionStatusPendingConsent), session.Status)
 				assert.NotNil(s.T(), session.ID)
@@ -87,11 +112,14 @@ func (s *ServiceSuite) TestAuthorize() {
 		req := baseReq
 		ctx := context.Background()
 
-		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(existingUser, nil)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
 		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, session *models.Session) error {
 				assert.Equal(s.T(), existingUser.ID, session.UserID)
+				assert.Equal(s.T(), clientID, session.ClientID)
+				assert.Equal(s.T(), tenantID, session.TenantID)
 				assert.True(s.T(), session.ExpiresAt.After(time.Now()))
 				assert.Equal(s.T(), string(models.SessionStatusPendingConsent), session.Status)
 				assert.NotNil(s.T(), session.ID)
@@ -117,6 +145,7 @@ func (s *ServiceSuite) TestAuthorize() {
 		mockRefreshStore := mocks.NewMockRefreshTokenStore(ctrl)
 		mockJWT := mocks.NewMockTokenGenerator(ctrl)
 		mockAuditPublisher := mocks.NewMockAuditPublisher(ctrl)
+		mockClientResolver := mocks.NewMockClientResolver(ctrl)
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		cfg := &Config{
 			SessionTTL:             2 * time.Hour,
@@ -136,14 +165,17 @@ func (s *ServiceSuite) TestAuthorize() {
 			WithJWTService(mockJWT),
 			WithAuditPublisher(mockAuditPublisher),
 			WithDeviceBindingEnabled(true),
+			WithClientResolver(mockClientResolver),
 		)
 
 		req := baseReq
 		req.State = "xyz"
 		ctx := middleware.WithClientMetadata(context.Background(), "192.168.1.1", "Mozilla/5.0")
 
-		mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).DoAndReturn(
-			func(ctx context.Context, email string, user *models.User) (*models.User, error) {
+		mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+
+		mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).DoAndReturn(
+			func(ctx context.Context, tid uuid.UUID, email string, user *models.User) (*models.User, error) {
 				return user, nil
 			})
 
@@ -155,6 +187,8 @@ func (s *ServiceSuite) TestAuthorize() {
 			func(ctx context.Context, session *models.Session) error {
 				assert.NotEmpty(t, session.DeviceID)
 				assert.NotEmpty(t, session.DeviceFingerprintHash)
+				assert.Equal(t, clientID, session.ClientID)
+				assert.Equal(t, tenantID, session.TenantID)
 				return nil
 			})
 
@@ -180,7 +214,8 @@ func (s *ServiceSuite) TestAuthorize() {
 		req := baseReq
 		ctx := context.Background()
 
-		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(nil, assert.AnError)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(nil, assert.AnError)
 
 		result, err := s.service.Authorize(ctx, &req)
 		assert.Error(s.T(), err)
@@ -191,7 +226,8 @@ func (s *ServiceSuite) TestAuthorize() {
 		req := baseReq
 		ctx := context.Background()
 
-		s.mockUserStore.EXPECT().FindOrCreateByEmail(gomock.Any(), req.Email, gomock.Any()).Return(existingUser, nil)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
 		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(assert.AnError)
 

@@ -8,6 +8,7 @@ import (
 	"credo/internal/audit"
 	"credo/internal/auth/models"
 	authCodeStore "credo/internal/auth/store/authorization-code"
+	dErrors "credo/pkg/domain-errors"
 )
 
 func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error) {
@@ -17,7 +18,22 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 		session    *models.Session
 		artifacts  *tokenArtifacts
 	)
+	code, err := s.codes.FindByCode(ctx, req.Code)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeUnauthorized, "invalid code")
+	}
+	session, err = s.sessions.FindByID(ctx, code.SessionID)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeUnauthorized, "invalid session")
+	}
+	tc, err := s.resolveTokenContext(ctx, session)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeUnauthorized, "invalid token context")
+	}
 
+	if models.UserStatus(tc.Client.Status) != models.UserStatusActive {
+		return nil, dErrors.New(dErrors.CodeForbidden, "client is not active")
+	}
 	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
 		var err error
 		codeRecord, err = stores.Codes.ConsumeAuthCode(ctx, req.Code, req.RedirectURI, now)
@@ -36,6 +52,7 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 		mutableSession := *session
 		s.applyDeviceBinding(ctx, &mutableSession)
 		mutableSession.LastSeenAt = now
+		mutableSession.TenantID = tc.Tenant.ID
 		activate := false
 		if mutableSession.Status == string(models.SessionStatusPendingConsent) {
 			mutableSession.Status = string(models.SessionStatusActive)

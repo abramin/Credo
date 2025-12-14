@@ -25,6 +25,7 @@ type ServiceSuite struct {
 	mockJWT            *mocks.MockTokenGenerator
 	mockAuditPublisher *mocks.MockAuditPublisher
 	mockTRL            *mocks.MockTokenRevocationList
+	mockClientResolver *mocks.MockClientResolver
 	service            *Service
 }
 
@@ -37,6 +38,7 @@ func (s *ServiceSuite) SetupTest() {
 	s.mockJWT = mocks.NewMockTokenGenerator(s.ctrl)
 	s.mockAuditPublisher = mocks.NewMockAuditPublisher(s.ctrl)
 	s.mockTRL = mocks.NewMockTokenRevocationList(s.ctrl)
+	s.mockClientResolver = mocks.NewMockClientResolver(s.ctrl)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := &Config{
 		SessionTTL:             2 * time.Hour,
@@ -55,6 +57,7 @@ func (s *ServiceSuite) SetupTest() {
 		WithJWTService(s.mockJWT),
 		WithAuditPublisher(s.mockAuditPublisher),
 		WithTRL(s.mockTRL),
+		WithClientResolver(s.mockClientResolver),
 	)
 }
 

@@ -35,3 +35,10 @@ const (
 	TokenTypeAccess  TokenType = "access_token"
 	TokenTypeRefresh TokenType = "refresh_token"
 )
+
+type UserStatus string
+
+const (
+	UserStatusActive   UserStatus = "active"
+	UserStatusInactive UserStatus = "inactive"
+)

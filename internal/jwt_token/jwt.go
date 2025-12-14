@@ -14,11 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// Claims represents the JWT claims for our access tokens
-type Claims struct {
+// AccessTokenClaims represents the JWT claims for our access tokens
+type AccessTokenClaims struct {
 	UserID    string   `json:"user_id"`
 	SessionID string   `json:"session_id"`
 	ClientID  string   `json:"client_id"`
+	TenantID  string   `json:"tenant_id,omitempty"`
 	Env       string   `json:"env,omitempty"`
 	Scope     []string `json:"scope"`
 	jwt.RegisteredClaims
@@ -55,20 +56,21 @@ func (s *JWTService) GenerateAccessTokenWithJTI(
 	userID uuid.UUID,
 	sessionID uuid.UUID,
 	clientID string,
+	tenantID string,
 	scopes []string,
 ) (string, string, error) {
-	newToken, err := s.GenerateAccessToken(userID, sessionID, clientID, scopes)
+	newToken, err := s.GenerateAccessToken(userID, sessionID, clientID, tenantID, scopes)
 	if err != nil {
 		return "", "", err
 	}
 	// Extract the JTI from the token
-	parsed, err := jwt.ParseWithClaims(newToken, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+	parsed, err := jwt.ParseWithClaims(newToken, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return s.signingKey, nil
 	})
 	if err != nil {
 		return "", "", err
 	}
-	claims, ok := parsed.Claims.(*Claims)
+	claims, ok := parsed.Claims.(*AccessTokenClaims)
 	if !ok {
 		return "", "", errors.New("invalid token claims")
 	}
@@ -79,6 +81,7 @@ func (s *JWTService) GenerateAccessToken(
 	userID uuid.UUID,
 	sessionID uuid.UUID,
 	clientID string,
+	tenantID string,
 	scopes []string,
 ) (string, error) {
 	b := make([]byte, 16)
@@ -88,10 +91,11 @@ func (s *JWTService) GenerateAccessToken(
 	}
 	jti := hex.EncodeToString(b)
 
-	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, AccessTokenClaims{
 		UserID:    userID.String(),
 		SessionID: sessionID.String(),
 		ClientID:  clientID,
+		TenantID:  tenantID,
 		Env:       s.env,
 		Scope:     scopes,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -110,12 +114,12 @@ func (s *JWTService) GenerateAccessToken(
 	return signedToken, nil
 }
 
-func (s *JWTService) ParseTokenSkipClaimsValidation(tokenString string) (*Claims, error) {
+func (s *JWTService) ParseTokenSkipClaimsValidation(tokenString string) (*AccessTokenClaims, error) {
 	if tokenString == "" {
 		return nil, errors.New("empty token")
 	}
 
-	claims := new(Claims)
+	claims := new(AccessTokenClaims)
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
@@ -170,9 +174,9 @@ func (s *JWTService) SetEnv(env string) {
 	s.env = env
 }
 
-func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
+func (s *JWTService) ValidateToken(tokenString string) (*AccessTokenClaims, error) {
 	var err error
-	parsed, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+	parsed, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrTokenUnverifiable
 		}
@@ -190,7 +194,7 @@ func (s *JWTService) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token")
 	}
 
-	claims, ok := parsed.Claims.(*Claims)
+	claims, ok := parsed.Claims.(*AccessTokenClaims)
 	if !ok {
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "invalid token claims")
 	}

@@ -77,14 +77,13 @@ func main() {
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
-
-	authMod, err := buildAuthModule(appCtx, infra)
+	tenantMod := buildTenantModule(infra)
+	authMod, err := buildAuthModule(appCtx, infra, tenantMod.Service)
 	if err != nil {
 		infra.Log.Error("failed to initialize auth module", "error", err)
 		os.Exit(1)
 	}
 	consentMod := buildConsentModule(infra)
-	tenantMod := buildTenantModule(infra)
 
 	startCleanupWorker(appCtx, infra.Log, authMod.Cleanup)
 
@@ -136,7 +135,7 @@ func buildInfra() (*infraBundle, error) {
 	}, nil
 }
 
-func buildAuthModule(ctx context.Context, infra *infraBundle) (*authModule, error) {
+func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *tenantService.Service) (*authModule, error) {
 	users := userStore.NewInMemoryUserStore()
 	sessions := sessionStore.NewInMemorySessionStore()
 	codes := authCodeStore.NewInMemoryAuthorizationCodeStore()
@@ -170,6 +169,8 @@ func buildAuthModule(ctx context.Context, infra *infraBundle) (*authModule, erro
 		authService.WithLogger(infra.Log),
 		authService.WithJWTService(infra.JWTService),
 		authService.WithTRL(trl),
+		authService.WithAuditPublisher(audit.NewPublisher(auditStore)),
+		authService.WithClientResolver(tenantService),
 	)
 	if err != nil {
 		return nil, err

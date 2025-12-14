@@ -34,6 +34,7 @@ type Service struct {
 	logger         *slog.Logger
 	auditPublisher AuditPublisher
 	jwt            TokenGenerator
+	clientResolver ClientResolver
 	metrics        *metrics.Metrics
 	*Config
 }
@@ -61,12 +62,6 @@ type tokenArtifacts struct {
 }
 
 type Option func(*Service)
-
-// AuthStoreTx provides a transactional boundary for auth-related store mutations.
-// Implementations may wrap a database transaction or, in-memory, a coarse lock.
-type AuthStoreTx interface {
-	RunInTx(ctx context.Context, fn func(stores TxAuthStores) error) error
-}
 
 // TxAuthStores groups the stores used inside a transaction.
 type TxAuthStores struct {
@@ -126,6 +121,12 @@ func WithDeviceBindingEnabled(enabled bool) Option {
 func WithTRL(trl revocation.TokenRevocationList) Option {
 	return func(s *Service) {
 		s.trl = trl
+	}
+}
+
+func WithClientResolver(resolver ClientResolver) Option {
+	return func(s *Service) {
+		s.clientResolver = resolver
 	}
 }
 
@@ -331,12 +332,18 @@ func (s *Service) handleTokenError(ctx context.Context, err error, clientID stri
 
 func (s *Service) generateTokenArtifacts(session *models.Session) (*tokenArtifacts, error) {
 	// Generate tokens before mutating persistence state so failures do not leave partial writes.
-	accessToken, accessTokenJTI, err := s.jwt.GenerateAccessTokenWithJTI(session.UserID, session.ID, session.ClientID, session.RequestedScope)
+	accessToken, accessTokenJTI, err := s.jwt.GenerateAccessTokenWithJTI(
+		session.UserID,
+		session.ID,
+		session.ClientID.String(),
+		session.TenantID.String(),
+		session.RequestedScope,
+	)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate access token")
 	}
 
-	idToken, err := s.jwt.GenerateIDToken(session.UserID, session.ID, session.ClientID)
+	idToken, err := s.jwt.GenerateIDToken(session.UserID, session.ID, session.ClientID.String())
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate ID token")
 	}

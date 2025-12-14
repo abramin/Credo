@@ -23,6 +23,7 @@ import (
 	userStore "credo/internal/auth/store/user"
 	jwttoken "credo/internal/jwt_token"
 	"credo/internal/platform/middleware"
+	tenantModels "credo/internal/tenant/models"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// stubClientResolver provides a simple test implementation of ClientResolver
+type stubClientResolver struct {
+	defaultTenantID uuid.UUID
+	defaultClientID uuid.UUID
+}
+
+func (r *stubClientResolver) ResolveClient(ctx context.Context, clientID string) (*tenantModels.Client, *tenantModels.Tenant, error) {
+	return &tenantModels.Client{
+			ID:       r.defaultClientID,
+			TenantID: r.defaultTenantID,
+			ClientID: clientID,
+			Name:     "Test Client",
+			Status:   "active",
+		}, &tenantModels.Tenant{
+			ID:   r.defaultTenantID,
+			Name: "Test Tenant",
+		}, nil
+}
 
 func SetupSuite(t *testing.T) (
 	*chi.Mux,
@@ -53,6 +73,10 @@ func SetupSuite(t *testing.T) (
 	)
 	auditStore := audit.NewInMemoryStore()
 	jwtValidator := jwttoken.NewJWTServiceAdapter(jwtService)
+	clientResolver := &stubClientResolver{
+		defaultTenantID: uuid.New(),
+		defaultClientID: uuid.New(),
+	}
 	cfg := service.Config{
 		SessionTTL:             24 * time.Hour,
 		TokenTTL:               15 * time.Minute,
@@ -64,6 +88,7 @@ func SetupSuite(t *testing.T) (
 		service.WithLogger(logger),
 		service.WithJWTService(jwtService),
 		service.WithAuditPublisher(audit.NewPublisher(auditStore)),
+		service.WithClientResolver(clientResolver),
 	)
 
 	router := chi.NewRouter()
@@ -155,7 +180,7 @@ func TestOAuthFlow(t *testing.T) {
 	tokenRequest := &models.TokenRequest{
 		GrantType: string(models.GrantAuthorizationCode),
 		Code:      code,
-		ClientID:  session.ClientID,
+		ClientID:  session.ClientID.String(),
 		// RedirectURI must match what was used at /auth/authorize
 		RedirectURI: reqBody.RedirectURI,
 	}
@@ -261,7 +286,7 @@ func TestTokenRevocation(t *testing.T) {
 		r.ServeHTTP(rec, req)
 		res := rec.Result()
 		defer res.Body.Close()
-		require.Equal(t, http.StatusOK, res.StatusCode)
+		assert.Equal(t, http.StatusOK, res.StatusCode)
 
 		var authBody map[string]string
 		require.NoError(t, json.NewDecoder(res.Body).Decode(&authBody))
@@ -297,7 +322,7 @@ func TestTokenRevocation(t *testing.T) {
 		r.ServeHTTP(tokenRec, tokenReq)
 		tokenRes := tokenRec.Result()
 		defer tokenRes.Body.Close()
-		require.Equal(t, http.StatusOK, tokenRes.StatusCode)
+		assert.Equal(t, http.StatusOK, tokenRes.StatusCode)
 
 		var tokenBody map[string]any
 		require.NoError(t, json.NewDecoder(tokenRes.Body).Decode(&tokenBody))
@@ -308,7 +333,7 @@ func TestTokenRevocation(t *testing.T) {
 		require.NoError(t, err)
 		session, err := sessionStore.FindByID(context.Background(), codeRecord.SessionID)
 		require.NoError(t, err)
-		require.Equal(t, string(models.SessionStatusActive), session.Status)
+		assert.Equal(t, string(models.SessionStatusActive), session.Status)
 
 		t.Log("Step 3: Revoke Access Token")
 		revokePayload, err := json.Marshal(map[string]any{
@@ -322,14 +347,14 @@ func TestTokenRevocation(t *testing.T) {
 		r.ServeHTTP(revokeRec, revokeReq)
 		revokeRes := revokeRec.Result()
 		defer revokeRes.Body.Close()
-		require.Equal(t, http.StatusOK, revokeRes.StatusCode)
+		assert.Equal(t, http.StatusOK, revokeRes.StatusCode)
 
 		t.Log("Step 4: Accessing UserInfo with revoked Access Token should fail")
 		userInfoReq := httptest.NewRequest(http.MethodGet, "/auth/userinfo", nil)
 		userInfoReq.Header.Set("Authorization", "Bearer "+accessToken)
 		userInfoRec := httptest.NewRecorder()
 		r.ServeHTTP(userInfoRec, userInfoReq)
-		require.Equal(t, http.StatusUnauthorized, userInfoRec.Result().StatusCode)
+		assert.Equal(t, http.StatusUnauthorized, userInfoRec.Result().StatusCode)
 		assert.Contains(t, userInfoRec.Body.String(), "Token has been revoked")
 
 		t.Log("Verifying session is updated to revoked status")
@@ -359,7 +384,7 @@ func TestTokenRevocation(t *testing.T) {
 		r.ServeHTTP(rec, req)
 		res := rec.Result()
 		defer res.Body.Close()
-		require.Equal(t, http.StatusOK, res.StatusCode)
+		assert.Equal(t, http.StatusOK, res.StatusCode)
 
 		var authBody map[string]string
 		require.NoError(t, json.NewDecoder(res.Body).Decode(&authBody))
@@ -394,7 +419,7 @@ func TestTokenRevocation(t *testing.T) {
 		r.ServeHTTP(tokenRec, tokenReq)
 		tokenRes := tokenRec.Result()
 		defer tokenRes.Body.Close()
-		require.Equal(t, http.StatusOK, tokenRes.StatusCode)
+		assert.Equal(t, http.StatusOK, tokenRes.StatusCode)
 
 		var tokenBody map[string]any
 		require.NoError(t, json.NewDecoder(tokenRes.Body).Decode(&tokenBody))
@@ -413,7 +438,7 @@ func TestTokenRevocation(t *testing.T) {
 		r.ServeHTTP(revokeRec, revokeReq)
 		revokeRes := revokeRec.Result()
 		defer revokeRes.Body.Close()
-		require.Equal(t, http.StatusOK, revokeRes.StatusCode)
+		assert.Equal(t, http.StatusOK, revokeRes.StatusCode)
 
 		t.Log("Step 4: Attempt to refresh with revoked token should fail")
 		refreshReqBody := &models.TokenRequest{
@@ -427,7 +452,7 @@ func TestTokenRevocation(t *testing.T) {
 		refreshReq.Header.Set("Content-Type", "application/json")
 		refreshRec := httptest.NewRecorder()
 		r.ServeHTTP(refreshRec, refreshReq)
-		require.Equal(t, http.StatusUnauthorized, refreshRec.Result().StatusCode)
+		assert.Equal(t, http.StatusUnauthorized, refreshRec.Result().StatusCode)
 		assert.Contains(t, refreshRec.Body.String(), "unauthorized")
 	})
 }
@@ -457,7 +482,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		r.ServeHTTP(authRec, authReq)
 		authRes := authRec.Result()
 		defer authRes.Body.Close()
-		require.Equal(t, http.StatusOK, authRes.StatusCode)
+		assert.Equal(t, http.StatusOK, authRes.StatusCode)
 
 		var authBody map[string]string
 		require.NoError(t, json.NewDecoder(authRes.Body).Decode(&authBody))
@@ -491,7 +516,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		r.ServeHTTP(tokenRec, tokenReq)
 		tokenRes := tokenRec.Result()
 		defer tokenRes.Body.Close()
-		require.Equal(t, http.StatusOK, tokenRes.StatusCode)
+		assert.Equal(t, http.StatusOK, tokenRes.StatusCode)
 
 		var tokenBody map[string]any
 		require.NoError(t, json.NewDecoder(tokenRes.Body).Decode(&tokenBody))
@@ -503,7 +528,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		require.NoError(t, err)
 		session, err := sessionStore.FindByID(context.Background(), codeRecord.SessionID)
 		require.NoError(t, err)
-		require.Equal(t, string(models.SessionStatusActive), session.Status)
+		assert.Equal(t, string(models.SessionStatusActive), session.Status)
 		require.NotEmpty(t, session.LastAccessTokenJTI)
 
 		user, err := userStore.FindByEmail(context.Background(), email)
@@ -518,7 +543,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 
 		accessTokenA, _, userID := createActiveSession(t, "revoke.session@example.com", uaA)
 		accessTokenB, sessionIDB, userIDB := createActiveSession(t, "revoke.session@example.com", uaB)
-		require.Equal(t, userID, userIDB)
+		assert.Equal(t, userID, userIDB)
 
 		revokeReq := httptest.NewRequest(http.MethodDelete, "/auth/sessions/"+sessionIDB.String(), nil)
 		revokeReq.Header.Set("Authorization", "Bearer "+accessTokenA)
@@ -527,7 +552,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		revokeRes := revokeRec.Result()
 		defer revokeRes.Body.Close()
 
-		require.Equal(t, http.StatusOK, revokeRes.StatusCode)
+		assert.Equal(t, http.StatusOK, revokeRes.StatusCode)
 		var out models.SessionRevocationResult
 		require.NoError(t, json.NewDecoder(revokeRes.Body).Decode(&out))
 		assert.True(t, out.Revoked)
@@ -543,7 +568,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		listReq.Header.Set("Authorization", "Bearer "+accessTokenB)
 		listRec := httptest.NewRecorder()
 		r.ServeHTTP(listRec, listReq)
-		require.Equal(t, http.StatusUnauthorized, listRec.Result().StatusCode)
+		assert.Equal(t, http.StatusUnauthorized, listRec.Result().StatusCode)
 		assert.Contains(t, listRec.Body.String(), "Token has been revoked")
 
 		auditEvents, err := auditStore.ListByUser(context.Background(), userID.String())
@@ -567,7 +592,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		revokeRes := revokeRec.Result()
 		defer revokeRes.Body.Close()
 
-		require.Equal(t, http.StatusForbidden, revokeRes.StatusCode)
+		assert.Equal(t, http.StatusForbidden, revokeRes.StatusCode)
 		var errBody map[string]string
 		require.NoError(t, json.NewDecoder(revokeRes.Body).Decode(&errBody))
 		assert.Equal(t, "forbidden", errBody["error"])
@@ -588,7 +613,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		revokeRes := revokeRec.Result()
 		defer revokeRes.Body.Close()
 
-		require.Equal(t, http.StatusBadRequest, revokeRes.StatusCode)
+		assert.Equal(t, http.StatusBadRequest, revokeRes.StatusCode)
 		var errBody map[string]string
 		require.NoError(t, json.NewDecoder(revokeRes.Body).Decode(&errBody))
 		assert.Equal(t, "bad_request", errBody["error"])
@@ -601,7 +626,7 @@ func TestRevokeSpecificSession(t *testing.T) {
 		revokeRes := revokeRec.Result()
 		defer revokeRes.Body.Close()
 
-		require.Equal(t, http.StatusUnauthorized, revokeRes.StatusCode)
+		assert.Equal(t, http.StatusUnauthorized, revokeRes.StatusCode)
 	})
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"credo/internal/auth/models"
+	tenant "credo/internal/tenant/models"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -19,6 +20,8 @@ import (
 func (s *ServiceSuite) TestToken_Exchange() {
 	sessionID := uuid.New()
 	userID := uuid.New()
+	tenantID := uuid.New()
+	clientUUID := uuid.New()
 	clientID := "client-123"
 	redirectURI := "https://client.app/callback"
 	code := "authz_12345"
@@ -26,6 +29,28 @@ func (s *ServiceSuite) TestToken_Exchange() {
 	issuedAccessTokenJTI := "access-token-jti"
 	issuedIDToken := "mock-id-token"
 	issuedRefreshToken := "ref_mock-refresh-token"
+
+	mockClient := &tenant.Client{
+		ID:       clientUUID,
+		TenantID: tenantID,
+		ClientID: clientID,
+		Name:     "Test Client",
+		Status:   "active",
+	}
+
+	mockTenant := &tenant.Tenant{
+		ID:   tenantID,
+		Name: "Test Tenant",
+	}
+
+	mockUser := &models.User{
+		ID:        userID,
+		TenantID:  tenantID,
+		Email:     "user@test.com",
+		FirstName: "Test",
+		LastName:  "User",
+		Status:    models.UserStatusActive,
+	}
 
 	baseReq := models.TokenRequest{
 		GrantType:   string(models.GrantAuthorizationCode),
@@ -46,7 +71,8 @@ func (s *ServiceSuite) TestToken_Exchange() {
 	validSession := &models.Session{
 		ID:             sessionID,
 		UserID:         userID,
-		ClientID:       clientID,
+		ClientID:       clientUUID,
+		TenantID:       tenantID,
 		RequestedScope: []string{"openid", "profile"},
 		DeviceID:       "device-123",
 		Status:         string(models.SessionStatusPendingConsent), // Should be pending_consent before token exchange
@@ -57,9 +83,9 @@ func (s *ServiceSuite) TestToken_Exchange() {
 	expectTokens := func(t *testing.T) {
 		t.Helper()
 		s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(
-			userID, sessionID, clientID, []string{"openid", "profile"},
+			userID, sessionID, clientUUID.String(), tenantID.String(), []string{"openid", "profile"},
 		).Return(issuedAccessToken, issuedAccessTokenJTI, nil)
-		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientID).Return(issuedIDToken, nil)
+		s.mockJWT.EXPECT().GenerateIDToken(userID, sessionID, clientUUID.String()).Return(issuedIDToken, nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().Return(issuedRefreshToken, nil)
 	}
 
@@ -67,10 +93,10 @@ func (s *ServiceSuite) TestToken_Exchange() {
 		t.Helper()
 
 		activate := sess.Status == string(models.SessionStatusPendingConsent)
-		s.mockSessionStore.EXPECT().AdvanceLastSeen(gomock.Any(), sess.ID, clientID, gomock.Any(), issuedAccessTokenJTI, activate, sess.DeviceID, sess.DeviceFingerprintHash).DoAndReturn(
+		s.mockSessionStore.EXPECT().AdvanceLastSeen(gomock.Any(), sess.ID, req.ClientID, gomock.Any(), issuedAccessTokenJTI, activate, sess.DeviceID, sess.DeviceFingerprintHash).DoAndReturn(
 			func(_ context.Context, id uuid.UUID, client string, seenAt time.Time, jti string, activateFlag bool, deviceID string, fingerprint string) (*models.Session, error) {
 				assert.Equal(t, sess.ID, id)
-				assert.Equal(t, clientID, client)
+				assert.Equal(t, req.ClientID, client)
 				assert.Equal(t, issuedAccessTokenJTI, jti)
 				assert.Equal(t, activate, activateFlag)
 				assert.False(t, seenAt.IsZero())
@@ -96,6 +122,12 @@ func (s *ServiceSuite) TestToken_Exchange() {
 		sess := *validSession
 		ctx := context.Background()
 
+		// Token exchange now calls resolveTokenContext which needs client, tenant, and user
+		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
+		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientUUID.String()).Return(mockClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
+
 		s.mockCodeStore.EXPECT().ConsumeAuthCode(gomock.Any(), req.Code, req.RedirectURI, gomock.Any()).Return(&codeRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		expectTokens(t)
@@ -116,6 +148,12 @@ func (s *ServiceSuite) TestToken_Exchange() {
 		sess := *validSession
 		sess.Status = string(models.SessionStatusActive) // Already active
 		ctx := context.Background()
+
+		// Add resolveTokenContext expectations
+		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
+		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientUUID.String()).Return(mockClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
 
 		s.mockCodeStore.EXPECT().ConsumeAuthCode(gomock.Any(), req.Code, req.RedirectURI, gomock.Any()).Return(&codeRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
@@ -197,12 +235,12 @@ func (s *ServiceSuite) TestToken_Exchange() {
 	// Infrastructure errors - verify error propagation through handleTokenError
 	s.T().Run("code store lookup error", func(t *testing.T) {
 		req := baseReq
-		s.mockCodeStore.EXPECT().ConsumeAuthCode(gomock.Any(), req.Code, req.RedirectURI, gomock.Any()).Return(nil, errors.New("db error"))
+		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, errors.New("db error"))
 
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
 		assert.Nil(s.T(), result)
-		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInternal))
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeUnauthorized))
 	})
 
 	s.T().Run("JWT generation errors", func(t *testing.T) {
@@ -214,7 +252,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 			{
 				name: "access token generation fails",
 				setupMocks: func(t *testing.T) {
-					s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+					s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("", "", errors.New("jwt error"))
 				},
 				expectedErr: "failed to generate access token",
@@ -222,7 +260,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 			{
 				name: "id token generation fails",
 				setupMocks: func(t *testing.T) {
-					s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+					s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("access-token", "access-token-jti", nil)
 					s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("", errors.New("jwt error"))
@@ -232,7 +270,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 			{
 				name: "refresh token generation fails",
 				setupMocks: func(t *testing.T) {
-					s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+					s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("access-token", "access-token-jti", nil)
 					s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any()).
 						Return("mock-id", nil)
@@ -249,6 +287,13 @@ func (s *ServiceSuite) TestToken_Exchange() {
 				codeRec := *validCodeRecord
 				sess := *validSession
 
+				// resolveTokenContext mocks
+				s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
+				s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
+				s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientUUID.String()).Return(mockClient, mockTenant, nil)
+				s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
+
+				// Transaction mocks
 				s.mockCodeStore.EXPECT().ConsumeAuthCode(gomock.Any(), req.Code, req.RedirectURI, gomock.Any()).Return(&codeRec, nil)
 				s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 				tt.setupMocks(t)

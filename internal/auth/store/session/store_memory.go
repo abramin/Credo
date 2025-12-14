@@ -155,7 +155,7 @@ func (s *InMemorySessionStore) AdvanceLastSeen(_ context.Context, id uuid.UUID, 
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if session.ClientID != clientID {
+	if session.ClientID.String() != clientID {
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "client_id mismatch")
 	}
 	if session.Status == "revoked" {
@@ -196,7 +196,7 @@ func (s *InMemorySessionStore) AdvanceLastRefreshed(_ context.Context, id uuid.U
 	if !ok {
 		return nil, ErrNotFound
 	}
-	if session.ClientID != clientID {
+	if session.ClientID.String() != clientID {
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "client_id mismatch")
 	}
 	if session.Status == "revoked" {

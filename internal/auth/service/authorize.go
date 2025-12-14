@@ -57,16 +57,24 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	var session *models.Session
 	userWasCreated := false
 
+	client, tenant, err := s.clientResolver.ResolveClient(ctx, req.ClientID)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeBadRequest, "failed to resolve client")
+	}
+
 	// Wrap user+code+session creation in transaction for atomicity
 	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
 		firstName, lastName := email.DeriveNameFromEmail(req.Email)
-		newUser, err := models.NewUser(uuid.New(), req.Email, firstName, lastName, false)
+		newUser, err := models.NewUser(uuid.New(), tenant.ID, req.Email, firstName, lastName, false)
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create user")
 		}
-		user, err = stores.Users.FindOrCreateByEmail(ctx, req.Email, newUser)
+		user, err = stores.Users.FindOrCreateByTenantAndEmail(ctx, tenant.ID, req.Email, newUser)
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to find or create user")
+		}
+		if user.Status != models.UserStatusActive {
+			return dErrors.New(dErrors.CodeForbidden, "user is inactive")
 		}
 		userWasCreated = (user.ID == newUser.ID)
 
@@ -90,7 +98,8 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		session, err = models.NewSession(
 			authCode.SessionID,
 			user.ID,
-			req.ClientID,
+			client.ID,
+			tenant.ID,
 			scopes,
 			string(models.SessionStatusPendingConsent),
 			now,

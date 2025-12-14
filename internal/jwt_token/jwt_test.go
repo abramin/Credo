@@ -13,6 +13,7 @@ import (
 var userID = uuid.New()
 var sessionID = uuid.New()
 var clientID = "test-client"
+var tenantID = "test-tenant"
 var expiresIn = time.Second * 1
 
 var jwtService = NewJWTService(
@@ -23,7 +24,7 @@ var jwtService = NewJWTService(
 )
 
 func Test_GenerateAccessToken(t *testing.T) {
-	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
+	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, tenantID, []string{"read", "write"})
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 	claims, err := jwtService.ValidateToken(token)
@@ -41,7 +42,7 @@ func Test_ValidateToken_InvalidToken(t *testing.T) {
 }
 
 func Test_ValidateToken_ExpiredToken(t *testing.T) {
-	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
+	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, tenantID, []string{"read", "write"})
 	time.Sleep(expiresIn + time.Second)
 	require.NoError(t, err)
 
@@ -50,7 +51,7 @@ func Test_ValidateToken_ExpiredToken(t *testing.T) {
 }
 
 func Test_ValidateToken_ValidTokent(t *testing.T) {
-	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
+	token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, tenantID, []string{"read", "write"})
 	require.NoError(t, err)
 
 	claims, err := jwtService.ValidateToken(token)
@@ -75,7 +76,7 @@ func Test_GenerateIDToken(t *testing.T) {
 }
 func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
 	t.Run("valid token", func(t *testing.T) {
-		token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
+		token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, tenantID, []string{"read", "write"})
 		require.NoError(t, err)
 
 		claims, err := jwtService.ParseTokenSkipClaimsValidation(token)
@@ -87,7 +88,7 @@ func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
 	})
 
 	t.Run("expired token still parses", func(t *testing.T) {
-		token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read", "write"})
+		token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, tenantID, []string{"read", "write"})
 		require.NoError(t, err)
 		time.Sleep(expiresIn + time.Second)
 
@@ -120,7 +121,7 @@ func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
 			{
 				name: "invalid signature",
 				tokenFunc: func() string {
-					token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, []string{"read"})
+					token, err := jwtService.GenerateAccessToken(userID, sessionID, clientID, tenantID, []string{"read"})
 					require.NoError(t, err)
 					return token
 				},
