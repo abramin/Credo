@@ -24,18 +24,15 @@ type Service interface {
 	UpdateClient(ctx context.Context, id uuid.UUID, req *models.UpdateClientRequest) (*models.ClientResponse, error)
 }
 
-// Handler wires tenant and client services to HTTP.
 type Handler struct {
 	service Service
 	logger  *slog.Logger
 }
 
-// New constructs a Handler.
 func New(service Service, logger *slog.Logger) *Handler {
 	return &Handler{service: service, logger: logger}
 }
 
-// Register registers routes under /admin.
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/admin/tenants", h.HandleCreateTenant)
 	r.Get("/admin/tenants/{id}", h.HandleGetTenant)
