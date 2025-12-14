@@ -175,6 +175,8 @@ jobs:
   combine-pages:
     name: Combine artifacts for Pages
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [openapi-docs, e2e-reports]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
