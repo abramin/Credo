@@ -63,16 +63,21 @@ func (s *InMemoryTenantStore) Count(_ context.Context) (int, error) {
 type InMemoryClientStore struct {
 	mu      sync.RWMutex
 	clients map[string]*tenant.Client
+	byCode  map[string]*tenant.Client
 }
 
 func NewInMemoryClientStore() *InMemoryClientStore {
-	return &InMemoryClientStore{clients: make(map[string]*tenant.Client)}
+	return &InMemoryClientStore{
+		clients: make(map[string]*tenant.Client),
+		byCode:  make(map[string]*tenant.Client),
+	}
 }
 
 func (s *InMemoryClientStore) Create(_ context.Context, c *tenant.Client) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clients[c.ID.String()] = c
+	s.byCode[c.ClientID] = c
 	return nil
 }
 
@@ -80,6 +85,7 @@ func (s *InMemoryClientStore) Update(_ context.Context, c *tenant.Client) error 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clients[c.ID.String()] = c
+	s.byCode[c.ClientID] = c
 	return nil
 }
 
@@ -87,6 +93,15 @@ func (s *InMemoryClientStore) FindByID(_ context.Context, id uuid.UUID) (*tenant
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if c, ok := s.clients[id.String()]; ok {
+		return c, nil
+	}
+	return nil, ErrNotFound
+}
+
+func (s *InMemoryClientStore) FindByClientID(_ context.Context, clientID string) (*tenant.Client, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if c, ok := s.byCode[clientID]; ok {
 		return c, nil
 	}
 	return nil, ErrNotFound

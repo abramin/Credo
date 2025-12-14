@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	clientStatusActive = "active"
+	clientStatusActive   = "active"
+	clientStatusDisabled = "disabled"
 )
 
 type TenantStore interface {
@@ -30,6 +31,7 @@ type ClientStore interface {
 	Create(ctx context.Context, client *models.Client) error
 	Update(ctx context.Context, client *models.Client) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Client, error)
+	FindByClientID(ctx context.Context, clientID string) (*models.Client, error)
 	CountByTenant(ctx context.Context, tenantID uuid.UUID) (int, error)
 }
 
@@ -102,6 +104,7 @@ func (s *Service) GetTenant(ctx context.Context, id uuid.UUID) (*models.TenantDe
 
 // CreateClient registers a client under a tenant.
 func (s *Service) CreateClient(ctx context.Context, req *models.CreateClientRequest) (*models.ClientResponse, error) {
+	req.Normalize()
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -161,6 +164,18 @@ func (s *Service) GetClient(ctx context.Context, id uuid.UUID) (*models.ClientRe
 	return toResponse(client, ""), nil
 }
 
+// GetClientForTenant enforces tenant scoping when retrieving a client.
+func (s *Service) GetClientForTenant(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*models.ClientResponse, error) {
+	client, err := s.GetClient(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if client.TenantID != tenantID {
+		return nil, dErrors.New(dErrors.CodeNotFound, "client not found")
+	}
+	return client, nil
+}
+
 // UpdateClient updates mutable fields and optionally rotates the secret.
 func (s *Service) UpdateClient(ctx context.Context, id uuid.UUID, req *models.UpdateClientRequest) (*models.ClientResponse, error) {
 	client, err := s.clients.FindByID(ctx, id)
@@ -171,6 +186,7 @@ func (s *Service) UpdateClient(ctx context.Context, id uuid.UUID, req *models.Up
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get client")
 	}
 
+	req.Normalize()
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -206,6 +222,46 @@ func (s *Service) UpdateClient(ctx context.Context, id uuid.UUID, req *models.Up
 	}
 
 	return toResponse(client, rotatedSecret), nil
+}
+
+// UpdateClientForTenant enforces tenant scoping when updating a client.
+func (s *Service) UpdateClientForTenant(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req *models.UpdateClientRequest) (*models.ClientResponse, error) {
+	resp, err := s.UpdateClient(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TenantID != tenantID {
+		return nil, dErrors.New(dErrors.CodeNotFound, "client not found")
+	}
+	return resp, nil
+}
+
+// ResolveClient maps client_id -> client and tenant as a single choke point.
+func (s *Service) ResolveClient(ctx context.Context, clientID string) (*models.Client, *models.Tenant, error) {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return nil, nil, dErrors.New(dErrors.CodeValidation, "client_id is required")
+	}
+
+	client, err := s.clients.FindByClientID(ctx, clientID)
+	if err != nil {
+		if dErrors.Is(err, dErrors.CodeNotFound) {
+			return nil, nil, dErrors.New(dErrors.CodeNotFound, "client not found")
+		}
+		return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to resolve client")
+	}
+	if client.Status != clientStatusActive {
+		return nil, nil, dErrors.New(dErrors.CodeForbidden, "client is disabled")
+	}
+
+	tenant, err := s.tenants.FindByID(ctx, client.TenantID)
+	if err != nil {
+		if dErrors.Is(err, dErrors.CodeNotFound) {
+			return nil, nil, dErrors.New(dErrors.CodeNotFound, "tenant not found")
+		}
+		return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to load tenant for client")
+	}
+	return client, tenant, nil
 }
 
 func generateSecret() (string, error) {

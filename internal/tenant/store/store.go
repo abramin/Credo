@@ -21,6 +21,7 @@ type ClientStore interface {
 	Create(ctx context.Context, client *models.Client) error
 	Update(ctx context.Context, client *models.Client) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Client, error)
+	FindByClientID(ctx context.Context, clientID string) (*models.Client, error)
 	CountByTenant(ctx context.Context, tenantID uuid.UUID) (int, error)
 }
 

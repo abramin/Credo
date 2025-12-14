@@ -210,3 +210,79 @@ func TestRedirectURIRequiresHost(t *testing.T) {
 		t.Fatalf("expected validation error for redirect without host")
 	}
 }
+
+func TestTenantScopedClientAccess(t *testing.T) {
+	tenants := store.NewInMemoryTenantStore()
+	clients := store.NewInMemoryClientStore()
+	svc := New(tenants, clients, nil)
+
+	t1, _ := svc.CreateTenant(context.Background(), "Acme")
+	t2, _ := svc.CreateTenant(context.Background(), "Beta")
+	created, _ := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
+		TenantID:      t1.ID,
+		Name:          "Web",
+		RedirectURIs:  []string{"https://app.example.com/callback"},
+		AllowedGrants: []string{"authorization_code"},
+		AllowedScopes: []string{"openid"},
+	})
+
+	if _, err := svc.GetClientForTenant(context.Background(), t2.ID, created.ID); err == nil {
+		t.Fatalf("expected not found when tenant mismatched")
+	}
+}
+
+func TestResolveClient(t *testing.T) {
+	tenants := store.NewInMemoryTenantStore()
+	clients := store.NewInMemoryClientStore()
+	svc := New(tenants, clients, nil)
+
+	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
+	created, _ := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
+		TenantID:      tenantRecord.ID,
+		Name:          "Web",
+		RedirectURIs:  []string{"https://app.example.com/callback"},
+		AllowedGrants: []string{"authorization_code"},
+		AllowedScopes: []string{"openid"},
+	})
+
+	client, tenantObj, err := svc.ResolveClient(context.Background(), created.ClientID)
+	if err != nil {
+		t.Fatalf("unexpected error resolving client: %v", err)
+	}
+	if tenantObj.ID != tenantRecord.ID {
+		t.Fatalf("expected tenant match")
+	}
+	if client.ID != created.ID {
+		t.Fatalf("expected client match")
+	}
+}
+
+func TestCreateClientNormalizesInput(t *testing.T) {
+	tenants := store.NewInMemoryTenantStore()
+	clients := store.NewInMemoryClientStore()
+	svc := New(tenants, clients, nil)
+
+	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
+	resp, err := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
+		TenantID:      tenantRecord.ID,
+		Name:          "  Web  ",
+		RedirectURIs:  []string{" https://app.example.com/callback ", "https://app.example.com/callback"},
+		AllowedGrants: []string{"AUTHORIZATION_CODE"},
+		AllowedScopes: []string{"openid", "openid"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+	if resp.Name != "Web" {
+		t.Fatalf("expected trimmed name, got %q", resp.Name)
+	}
+	if len(resp.RedirectURIs) != 1 || resp.RedirectURIs[0] != "https://app.example.com/callback" {
+		t.Fatalf("expected normalized redirect URIs, got %#v", resp.RedirectURIs)
+	}
+	if len(resp.AllowedGrants) != 1 || resp.AllowedGrants[0] != "authorization_code" {
+		t.Fatalf("expected lowercased grants, got %#v", resp.AllowedGrants)
+	}
+	if len(resp.AllowedScopes) != 1 || resp.AllowedScopes[0] != "openid" {
+		t.Fatalf("expected deduped scopes, got %#v", resp.AllowedScopes)
+	}
+}

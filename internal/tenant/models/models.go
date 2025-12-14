@@ -65,6 +65,17 @@ type CreateClientRequest struct {
 	Public        bool      `json:"public_client"`
 }
 
+// Normalize trims input and deduplicates collections for stable validation/storage.
+func (r *CreateClientRequest) Normalize() {
+	if r == nil {
+		return
+	}
+	r.Name = strings.TrimSpace(r.Name)
+	r.RedirectURIs = normalizeStrings(r.RedirectURIs)
+	r.AllowedGrants = normalizeStrings(lowerStrings(r.AllowedGrants))
+	r.AllowedScopes = normalizeStrings(r.AllowedScopes)
+}
+
 func (r *CreateClientRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
@@ -143,6 +154,29 @@ type UpdateClientRequest struct {
 	RotateSecret  bool      `json:"rotate_secret"`
 }
 
+// Normalize trims provided fields and deduplicates collections.
+func (r *UpdateClientRequest) Normalize() {
+	if r == nil {
+		return
+	}
+	if r.Name != nil {
+		trimmed := strings.TrimSpace(*r.Name)
+		r.Name = &trimmed
+	}
+	if r.RedirectURIs != nil {
+		normalized := normalizeStrings(*r.RedirectURIs)
+		r.RedirectURIs = &normalized
+	}
+	if r.AllowedGrants != nil {
+		normalized := normalizeStrings(lowerStrings(*r.AllowedGrants))
+		r.AllowedGrants = &normalized
+	}
+	if r.AllowedScopes != nil {
+		normalized := normalizeStrings(*r.AllowedScopes)
+		r.AllowedScopes = &normalized
+	}
+}
+
 func (r *UpdateClientRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
@@ -178,4 +212,29 @@ func (r *UpdateClientRequest) Validate() error {
 		return dErrors.New(dErrors.CodeValidation, "allowed_scopes cannot be empty")
 	}
 	return nil
+}
+
+func normalizeStrings(values []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func lowerStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		out = append(out, strings.ToLower(v))
+	}
+	return out
 }
