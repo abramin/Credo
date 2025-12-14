@@ -803,7 +803,14 @@ curl -X POST http://localhost:8080/auth/token \
 
 ---
 
-## 13. Open Questions
+## 13. Deferred Tenant & Client Integration
+
+Authentication flows currently accept and validate client_id directly.
+Tenant resolution via client_id will be delegated to Tenant & Client Management (PRD-026A) once integrated.
+
+Until then, auth behavior remains unchanged to avoid cross-PRD coupling during MVP implementation.
+
+## 14. Open Questions
 
 1. **User Auto-Creation:** Should we auto-create users on first auth?
 
@@ -817,7 +824,7 @@ curl -X POST http://localhost:8080/auth/token \
 
 ---
 
-## 14. References
+## 15. References
 
 - [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)
 - [OAuth 2.0 RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749)
@@ -850,3 +857,4 @@ curl -X POST http://localhost:8080/auth/token \
 |         |            |              | - Added jti claim to access tokens for future revocation support                                                 |
 |         |            |              | - Updated storage interfaces to reflect separated stores                                                         |
 |         |            |              | - Updated acceptance criteria and testing requirements                                                           |
+| 1.5     | 2025-12-14 | Engineering  | Add new section 13 for tenant flow integration                                                                   |
