@@ -79,7 +79,7 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 
-	var req *models.AuthorizationRequest
+	var req models.AuthorizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.WarnContext(ctx, "failed to decode authorize request",
 			"error", err,
@@ -89,23 +89,12 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Normalize()
-	if err := req.Validate(); err != nil {
-		h.logger.WarnContext(ctx, "invalid authorize request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httpError.WriteError(w, err)
-		return
-	}
-
-	// TODO: Should this be done in middleware or service layer?
 	// Extract device ID cookie (if present) for device binding.
 	if cookie, err := r.Cookie(h.deviceCookieName); err == nil && cookie != nil {
 		ctx = middleware.WithDeviceID(ctx, cookie.Value)
 	}
 
-	res, err := h.auth.Authorize(ctx, req)
+	res, err := h.auth.Authorize(ctx, &req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "authorize failed",
 			"error", err,
@@ -155,14 +144,6 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 			"request_id", requestID,
 		)
 		httpError.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
-		return
-	}
-	if err := req.Validate(); err != nil {
-		h.logger.WarnContext(ctx, "invalid token request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httpError.WriteError(w, err)
 		return
 	}
 
@@ -354,15 +335,7 @@ func (h *Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 		httpError.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
 		return
 	}
-	req.Normalize()
-	if err := req.Validate(); err != nil {
-		h.logger.WarnContext(ctx, "invalid revoke request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httpError.WriteError(w, err)
-		return
-	}
+
 	if err := h.auth.RevokeToken(ctx, req.Token, req.TokenTypeHint); err != nil {
 		h.logger.ErrorContext(ctx, "failed to revoke token",
 			"error", err,

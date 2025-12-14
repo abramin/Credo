@@ -43,13 +43,12 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 		RedirectURI: "https://example.com/redirect",
 		State:       "test-state",
 	}
-	s.T().Run("scopes default to openid when omitted", func(t *testing.T) {
+	s.T().Run("forwards authorize request to service when scopes omitted", func(t *testing.T) {
 		mockService, router := s.newHandler(t, nil)
 		requestBody := `{"email":"user@example.com","client_id":"test-client-id","redirect_uri":"https://example.com/redirect"}`
 		expectedReq := &models.AuthorizationRequest{
 			Email:       "user@example.com",
 			ClientID:    "test-client-id",
-			Scopes:      []string{"openid"},
 			RedirectURI: "https://example.com/redirect",
 			State:       "",
 		}
@@ -132,7 +131,7 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				mockService, router := s.newHandler(t, nil)
-				mockService.EXPECT().Authorize(gomock.Any(), gomock.Any()).Times(0)
+				mockService.EXPECT().Authorize(gomock.Any(), tt.request).Return(nil, dErrors.New(dErrors.CodeBadRequest, "invalid request"))
 
 				var body string
 				if tt.body != "" {
@@ -209,7 +208,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 	//- 400 Bad Request: Missing required fields (grant_type, code, redirect_uri, client_id)
 	s.T().Run("missing required fields - 400", func(t *testing.T) {
 		mockService, router := s.newHandler(t, nil)
-		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Times(0)
+		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Return(nil, dErrors.New(dErrors.CodeBadRequest, "missing fields"))
 		missing := *validRequest
 		missing.ClientID = ""
 
@@ -223,7 +222,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 		mockService, router := s.newHandler(t, nil)
 		invalid := *validRequest
 		invalid.GrantType = "invalid_grant"
-		mockService.EXPECT().Token(gomock.Any(), gomock.Any()).Times(0)
+		mockService.EXPECT().Token(gomock.Any(), &invalid).Return(nil, dErrors.New(dErrors.CodeBadRequest, "unsupported grant_type"))
 
 		status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(&invalid, t))
 
