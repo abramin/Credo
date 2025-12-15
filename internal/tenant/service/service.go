@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
 	"credo/internal/tenant/models"
+	"credo/internal/tenant/store"
 	"credo/pkg/attrs"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/secrets"
@@ -112,7 +114,7 @@ func (s *Service) CreateTenant(ctx context.Context, name string) (*models.Tenant
 func (s *Service) GetTenant(ctx context.Context, id uuid.UUID) (*models.TenantDetails, error) {
 	tenant, err := s.tenants.FindByID(ctx, id)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, dErrors.New(dErrors.CodeNotFound, "tenant not found")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to load tenant")
@@ -142,7 +144,7 @@ func (s *Service) CreateClient(ctx context.Context, req *models.CreateClientRequ
 	}
 
 	if _, err := s.tenants.FindByID(ctx, req.TenantID); err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, dErrors.New(dErrors.CodeNotFound, "tenant not found")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to load tenant")
@@ -188,7 +190,7 @@ func (s *Service) CreateClient(ctx context.Context, req *models.CreateClientRequ
 func (s *Service) GetClient(ctx context.Context, id uuid.UUID) (*models.ClientResponse, error) {
 	client, err := s.clients.FindByID(ctx, id)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, dErrors.New(dErrors.CodeNotFound, "client not found")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get client")
@@ -200,7 +202,7 @@ func (s *Service) GetClient(ctx context.Context, id uuid.UUID) (*models.ClientRe
 func (s *Service) GetClientForTenant(ctx context.Context, tenantID uuid.UUID, id uuid.UUID) (*models.ClientResponse, error) {
 	client, err := s.clients.FindByTenantAndID(ctx, tenantID, id)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, dErrors.New(dErrors.CodeNotFound, "client not found")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get client")
@@ -212,7 +214,7 @@ func (s *Service) GetClientForTenant(ctx context.Context, tenantID uuid.UUID, id
 func (s *Service) UpdateClient(ctx context.Context, id uuid.UUID, req *models.UpdateClientRequest) (*models.ClientResponse, error) {
 	client, err := s.clients.FindByID(ctx, id)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, dErrors.New(dErrors.CodeNotFound, "client not found")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get client")
@@ -260,7 +262,7 @@ func (s *Service) UpdateClient(ctx context.Context, id uuid.UUID, req *models.Up
 func (s *Service) UpdateClientForTenant(ctx context.Context, tenantID uuid.UUID, id uuid.UUID, req *models.UpdateClientRequest) (*models.ClientResponse, error) {
 	client, err := s.clients.FindByTenantAndID(ctx, tenantID, id)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, dErrors.New(dErrors.CodeNotFound, "client not found")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get client")
@@ -277,7 +279,7 @@ func (s *Service) ResolveClient(ctx context.Context, clientID string) (*models.C
 
 	client, err := s.clients.FindByClientID(ctx, clientID)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil, dErrors.New(dErrors.CodeNotFound, "client not found")
 		}
 		return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to resolve client")
@@ -288,7 +290,7 @@ func (s *Service) ResolveClient(ctx context.Context, clientID string) (*models.C
 
 	tenant, err := s.tenants.FindByID(ctx, client.TenantID)
 	if err != nil {
-		if dErrors.Is(err, dErrors.CodeNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil, dErrors.New(dErrors.CodeNotFound, "tenant not found")
 		}
 		return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to load tenant for client")
