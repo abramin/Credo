@@ -5,43 +5,90 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"golang.org/x/crypto/bcrypt"
 
 	tenant "credo/internal/tenant/models"
-
 	"credo/internal/tenant/store"
 	dErrors "credo/pkg/domain-errors"
 )
 
-func TestCreateTenantValidation(t *testing.T) {
-	svc := New(store.NewInMemoryTenantStore(), store.NewInMemoryClientStore(), nil)
-
-	if _, err := svc.CreateTenant(context.Background(), ""); err == nil {
-		t.Fatalf("expected error for empty name")
-	}
-
-	longName := make([]byte, 129)
-	if _, err := svc.CreateTenant(context.Background(), string(longName)); err == nil {
-		t.Fatalf("expected validation error for long name")
-	}
-
-	if _, err := svc.CreateTenant(context.Background(), "Acme"); err != nil {
-		t.Fatalf("expected tenant creation to succeed: %v", err)
-	}
-	if _, err := svc.CreateTenant(context.Background(), "acme"); err == nil {
-		t.Fatalf("expected conflict for duplicate name")
-	}
+// ServiceSuite provides shared test setup for tenant service tests.
+type ServiceSuite struct {
+	suite.Suite
+	tenantStore *store.InMemoryTenantStore
+	clientStore *store.InMemoryClientStore
+	service     *Service
 }
 
-func TestCreateAndGetClient(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
+func (s *ServiceSuite) SetupTest() {
+	s.tenantStore = store.NewInMemoryTenantStore()
+	s.clientStore = store.NewInMemoryClientStore()
+	s.service = New(s.tenantStore, s.clientStore, nil)
+}
 
-	tenantRecord, err := svc.CreateTenant(context.Background(), "Acme")
-	if err != nil {
-		t.Fatalf("unexpected error creating tenant: %v", err)
-	}
+func TestServiceSuite(t *testing.T) {
+	suite.Run(t, new(ServiceSuite))
+}
+
+// Shared test helpers
+
+func (s *ServiceSuite) createTestTenant(name string) *tenant.Tenant {
+	t, err := s.service.CreateTenant(context.Background(), name)
+	require.NoError(s.T(), err)
+	return t
+}
+
+func (s *ServiceSuite) createTestClient(tenantID uuid.UUID) *tenant.ClientResponse {
+	resp, err := s.service.CreateClient(context.Background(), &tenant.CreateClientRequest{
+		TenantID:      tenantID,
+		Name:          "Web",
+		RedirectURIs:  []string{"https://app.example.com/callback"},
+		AllowedGrants: []string{"authorization_code"},
+		AllowedScopes: []string{"openid"},
+	})
+	require.NoError(s.T(), err)
+	return resp
+}
+
+// Tenant Tests
+
+func (s *ServiceSuite) TestCreateTenantValidation() {
+	s.T().Run("validates empty name", func(t *testing.T) {
+		_, err := s.service.CreateTenant(context.Background(), "")
+		require.Error(s.T(), err)
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeValidation))
+	})
+
+	s.T().Run("validates name length", func(t *testing.T) {
+		longName := make([]byte, 129)
+		_, err := s.service.CreateTenant(context.Background(), string(longName))
+		require.Error(s.T(), err)
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeValidation))
+	})
+}
+
+func (s *ServiceSuite) TestCreateTenantSuccess() {
+	tenant, err := s.service.CreateTenant(context.Background(), "Acme")
+	require.NoError(s.T(), err)
+	assert.NotEqual(s.T(), uuid.Nil, tenant.ID)
+	assert.Equal(s.T(), "Acme", tenant.Name)
+}
+
+func (s *ServiceSuite) TestCreateTenantEnforcesUniqueName() {
+	_, err := s.service.CreateTenant(context.Background(), "UniqueTest")
+	require.NoError(s.T(), err)
+
+	_, err = s.service.CreateTenant(context.Background(), "uniquetest")
+	require.Error(s.T(), err, "expected conflict for duplicate name")
+}
+
+// Client Tests
+
+func (s *ServiceSuite) TestCreateAndGetClient() {
+	tenantRecord := s.createTestTenant("Acme")
 
 	req := &tenant.CreateClientRequest{
 		TenantID:      tenantRecord.ID,
@@ -51,133 +98,82 @@ func TestCreateAndGetClient(t *testing.T) {
 		AllowedScopes: []string{"openid"},
 	}
 
-	created, err := svc.CreateClient(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error creating client: %v", err)
-	}
-	if created.ClientSecret == "" {
-		t.Fatalf("expected client secret to be returned for confidential client")
-	}
+	created, err := s.service.CreateClient(context.Background(), req)
+	require.NoError(s.T(), err)
+	assert.NotEmpty(s.T(), created.ClientSecret, "expected client secret for confidential client")
+	assert.NotEqual(s.T(), uuid.Nil, created.ID)
 
-	fetched, err := svc.GetClient(context.Background(), created.ID)
-	if err != nil {
-		t.Fatalf("unexpected error getting client: %v", err)
-	}
-	if fetched.Name != req.Name {
-		t.Fatalf("expected name %s, got %s", req.Name, fetched.Name)
-	}
+	fetched, err := s.service.GetClient(context.Background(), created.ID)
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), req.Name, fetched.Name)
 }
 
-func TestUpdateClient(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
-
-	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
-	created, _ := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
-		TenantID:      tenantRecord.ID,
-		Name:          "Web",
-		RedirectURIs:  []string{"https://app.example.com/callback"},
-		AllowedGrants: []string{"authorization_code"},
-		AllowedScopes: []string{"openid"},
-	})
+func (s *ServiceSuite) TestUpdateClient() {
+	tenantRecord := s.createTestTenant("Acme")
+	created := s.createTestClient(tenantRecord.ID)
 
 	newName := "Updated"
 	newRedirects := []string{"https://app.example.com/new"}
-	resp, err := svc.UpdateClient(context.Background(), created.ID, &tenant.UpdateClientRequest{
+	resp, err := s.service.UpdateClient(context.Background(), created.ID, &tenant.UpdateClientRequest{
 		Name:         &newName,
 		RedirectURIs: &newRedirects,
 		RotateSecret: true,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error updating client: %v", err)
-	}
-	if resp.Name != newName {
-		t.Fatalf("expected updated name")
-	}
-	if resp.ClientSecret == "" {
-		t.Fatalf("expected rotated secret to be returned")
-	}
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), newName, resp.Name)
+	assert.NotEmpty(s.T(), resp.ClientSecret, "expected rotated secret to be returned")
 }
 
-func TestGetTenantCounts(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
+func (s *ServiceSuite) TestGetTenantCounts() {
+	tenantRecord := s.createTestTenant("Acme")
+	s.createTestClient(tenantRecord.ID)
 
-	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
-	_, _ = svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
+	details, err := s.service.GetTenant(context.Background(), tenantRecord.ID)
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), 1, details.ClientCount)
+	assert.Equal(s.T(), tenantRecord.ID, details.Tenant.ID)
+}
+
+func (s *ServiceSuite) TestValidationErrors() {
+	s.T().Run("create client with missing fields", func(t *testing.T) {
+		_, err := s.service.CreateClient(context.Background(), &tenant.CreateClientRequest{TenantID: uuid.New()})
+		require.Error(s.T(), err)
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeValidation) || dErrors.Is(err, dErrors.CodeNotFound))
+	})
+
+	s.T().Run("update client with invalid redirect uri", func(t *testing.T) {
+		_, err := s.service.UpdateClient(context.Background(), uuid.New(), &tenant.UpdateClientRequest{
+			RedirectURIs: &[]string{"invalid"},
+		})
+		require.Error(s.T(), err)
+	})
+}
+
+func (s *ServiceSuite) TestCreateClientHashesSecret() {
+	tenantRecord := s.createTestTenant("Acme")
+
+	resp, err := s.service.CreateClient(context.Background(), &tenant.CreateClientRequest{
 		TenantID:      tenantRecord.ID,
 		Name:          "Web",
 		RedirectURIs:  []string{"https://app.example.com/callback"},
 		AllowedGrants: []string{"authorization_code"},
 		AllowedScopes: []string{"openid"},
 	})
+	require.NoError(s.T(), err)
+	assert.NotEmpty(s.T(), resp.ClientSecret, "expected secret for confidential client")
 
-	details, err := svc.GetTenant(context.Background(), tenantRecord.ID)
-	if err != nil {
-		t.Fatalf("unexpected error getting tenant: %v", err)
-	}
-	if details.ClientCount != 1 {
-		t.Fatalf("expected 1 client, got %d", details.ClientCount)
-	}
-	if details.Tenant.ID != tenantRecord.ID {
-		t.Fatalf("unexpected tenant id")
-	}
+	stored, err := s.clientStore.FindByID(context.Background(), resp.ID)
+	require.NoError(s.T(), err)
+	assert.NotEmpty(s.T(), stored.ClientSecretHash, "expected stored client secret hash")
+
+	err = bcrypt.CompareHashAndPassword([]byte(stored.ClientSecretHash), []byte(resp.ClientSecret))
+	assert.NoError(s.T(), err, "stored hash should match client secret")
 }
 
-func TestValidationErrors(t *testing.T) {
-	svc := New(store.NewInMemoryTenantStore(), store.NewInMemoryClientStore(), nil)
-	_, err := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{TenantID: uuid.New()})
-	if err == nil {
-		t.Fatalf("expected validation error for missing fields")
-	}
+func (s *ServiceSuite) TestPublicClientValidation() {
+	tenantRecord := s.createTestTenant("Acme")
 
-	_, err = svc.UpdateClient(context.Background(), uuid.New(), &tenant.UpdateClientRequest{RedirectURIs: &[]string{"invalid"}})
-	if err == nil {
-		t.Fatalf("expected validation error for redirect uri")
-	}
-}
-
-func TestCreateClientHashesSecret(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
-
-	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
-	resp, err := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
-		TenantID:      tenantRecord.ID,
-		Name:          "Web",
-		RedirectURIs:  []string{"https://app.example.com/callback"},
-		AllowedGrants: []string{"authorization_code"},
-		AllowedScopes: []string{"openid"},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error creating client: %v", err)
-	}
-	if resp.ClientSecret == "" {
-		t.Fatalf("expected secret for confidential client")
-	}
-
-	stored, err := clients.FindByID(context.Background(), resp.ID)
-	if err != nil {
-		t.Fatalf("failed to find stored client: %v", err)
-	}
-	if stored.ClientSecretHash == "" {
-		t.Fatalf("expected stored client secret hash")
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(stored.ClientSecretHash), []byte(resp.ClientSecret)); err != nil {
-		t.Fatalf("stored hash does not match client secret: %v", err)
-	}
-}
-
-func TestPublicClientValidation(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
-
-	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
-	_, err := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
+	_, err := s.service.CreateClient(context.Background(), &tenant.CreateClientRequest{
 		TenantID:      tenantRecord.ID,
 		Name:          "Public",
 		RedirectURIs:  []string{"https://app.example.com/callback"},
@@ -185,104 +181,59 @@ func TestPublicClientValidation(t *testing.T) {
 		AllowedScopes: []string{"openid"},
 		Public:        true,
 	})
-	if err == nil {
-		t.Fatalf("expected validation error for public client with client_credentials grant")
-	}
-	if !dErrors.Is(err, dErrors.CodeValidation) {
-		t.Fatalf("expected validation error code, got %v", err)
-	}
+	require.Error(s.T(), err)
+	assert.True(s.T(), dErrors.Is(err, dErrors.CodeValidation), "expected validation error for public client with client_credentials")
 }
 
-func TestRedirectURIRequiresHost(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
+func (s *ServiceSuite) TestRedirectURIRequiresHost() {
+	tenantRecord := s.createTestTenant("Acme")
 
-	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
-	_, err := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
+	_, err := s.service.CreateClient(context.Background(), &tenant.CreateClientRequest{
 		TenantID:      tenantRecord.ID,
 		Name:          "Web",
 		RedirectURIs:  []string{"https:///callback"},
 		AllowedGrants: []string{"authorization_code"},
 		AllowedScopes: []string{"openid"},
 	})
-	if err == nil {
-		t.Fatalf("expected validation error for redirect without host")
-	}
+	require.Error(s.T(), err)
+	assert.True(s.T(), dErrors.Is(err, dErrors.CodeValidation), "expected validation error for redirect without host")
 }
 
-func TestTenantScopedClientAccess(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
+func (s *ServiceSuite) TestTenantScopedClientAccess() {
+	t1 := s.createTestTenant("Acme")
+	t2 := s.createTestTenant("Beta")
+	created := s.createTestClient(t1.ID)
 
-	t1, _ := svc.CreateTenant(context.Background(), "Acme")
-	t2, _ := svc.CreateTenant(context.Background(), "Beta")
-	created, _ := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
-		TenantID:      t1.ID,
-		Name:          "Web",
-		RedirectURIs:  []string{"https://app.example.com/callback"},
-		AllowedGrants: []string{"authorization_code"},
-		AllowedScopes: []string{"openid"},
-	})
-
-	if _, err := svc.GetClientForTenant(context.Background(), t2.ID, created.ID); err == nil {
-		t.Fatalf("expected not found when tenant mismatched")
-	}
+	_, err := s.service.GetClientForTenant(context.Background(), t2.ID, created.ID)
+	require.Error(s.T(), err)
+	assert.True(s.T(), dErrors.Is(err, dErrors.CodeNotFound), "expected not found when tenant mismatched")
 }
 
-func TestResolveClient(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
+func (s *ServiceSuite) TestResolveClient() {
+	tenantRecord := s.createTestTenant("Acme")
+	created := s.createTestClient(tenantRecord.ID)
 
-	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
-	created, _ := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
-		TenantID:      tenantRecord.ID,
-		Name:          "Web",
-		RedirectURIs:  []string{"https://app.example.com/callback"},
-		AllowedGrants: []string{"authorization_code"},
-		AllowedScopes: []string{"openid"},
-	})
-
-	client, tenantObj, err := svc.ResolveClient(context.Background(), created.ClientID)
-	if err != nil {
-		t.Fatalf("unexpected error resolving client: %v", err)
-	}
-	if tenantObj.ID != tenantRecord.ID {
-		t.Fatalf("expected tenant match")
-	}
-	if client.ID != created.ID {
-		t.Fatalf("expected client match")
-	}
+	client, tenantObj, err := s.service.ResolveClient(context.Background(), created.ClientID)
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), tenantRecord.ID, tenantObj.ID)
+	assert.Equal(s.T(), created.ID, client.ID)
 }
 
-func TestCreateClientNormalizesInput(t *testing.T) {
-	tenants := store.NewInMemoryTenantStore()
-	clients := store.NewInMemoryClientStore()
-	svc := New(tenants, clients, nil)
+func (s *ServiceSuite) TestCreateClientNormalizesInput() {
+	tenantRecord := s.createTestTenant("Acme")
 
-	tenantRecord, _ := svc.CreateTenant(context.Background(), "Acme")
-	resp, err := svc.CreateClient(context.Background(), &tenant.CreateClientRequest{
+	resp, err := s.service.CreateClient(context.Background(), &tenant.CreateClientRequest{
 		TenantID:      tenantRecord.ID,
 		Name:          "  Web  ",
 		RedirectURIs:  []string{" https://app.example.com/callback ", "https://app.example.com/callback"},
 		AllowedGrants: []string{"AUTHORIZATION_CODE"},
 		AllowedScopes: []string{"openid", "openid"},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error creating client: %v", err)
-	}
-	if resp.Name != "Web" {
-		t.Fatalf("expected trimmed name, got %q", resp.Name)
-	}
-	if len(resp.RedirectURIs) != 1 || resp.RedirectURIs[0] != "https://app.example.com/callback" {
-		t.Fatalf("expected normalized redirect URIs, got %#v", resp.RedirectURIs)
-	}
-	if len(resp.AllowedGrants) != 1 || resp.AllowedGrants[0] != "authorization_code" {
-		t.Fatalf("expected lowercased grants, got %#v", resp.AllowedGrants)
-	}
-	if len(resp.AllowedScopes) != 1 || resp.AllowedScopes[0] != "openid" {
-		t.Fatalf("expected deduped scopes, got %#v", resp.AllowedScopes)
-	}
+	require.NoError(s.T(), err)
+	assert.Equal(s.T(), "Web", resp.Name, "expected trimmed name")
+	assert.Len(s.T(), resp.RedirectURIs, 1, "expected deduplicated redirect URIs")
+	assert.Equal(s.T(), "https://app.example.com/callback", resp.RedirectURIs[0])
+	assert.Len(s.T(), resp.AllowedGrants, 1, "expected deduplicated grants")
+	assert.Equal(s.T(), "authorization_code", resp.AllowedGrants[0], "expected lowercased grants")
+	assert.Len(s.T(), resp.AllowedScopes, 1, "expected deduplicated scopes")
 }
