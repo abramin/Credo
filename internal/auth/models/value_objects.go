@@ -42,3 +42,17 @@ const (
 	UserStatusActive   UserStatus = "active"
 	UserStatusInactive UserStatus = "inactive"
 )
+
+type ClientStatus string
+
+const (
+	ClientStatusActive   ClientStatus = "active"
+	ClientStatusInactive ClientStatus = "inactive"
+)
+
+type TenantStatus string
+
+const (
+	TenantStatusActive   TenantStatus = "active"
+	TenantStatusInactive TenantStatus = "inactive"
+)

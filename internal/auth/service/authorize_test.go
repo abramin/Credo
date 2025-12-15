@@ -212,3 +212,226 @@ func (s *ServiceSuite) TestAuthorize() {
 		assert.Nil(s.T(), result)
 	})
 }
+
+// TestAuthorizeRedirectURIValidation tests that authorize rejects redirect URIs
+// not registered on the client (PRD-026A FR-8).
+// This test is expected to FAIL until the validation is implemented.
+func (s *ServiceSuite) TestAuthorizeRedirectURIValidation() {
+	tenantID := uuid.New()
+	clientID := uuid.New()
+
+	// Client with specific registered redirect URIs
+	mockClient := &tenant.Client{
+		ID:           clientID,
+		TenantID:     tenantID,
+		ClientID:     "client-123",
+		Name:         "Test Client",
+		Status:       "active",
+		RedirectURIs: []string{"https://allowed.example.com/callback"},
+	}
+
+	mockTenant := &tenant.Tenant{
+		ID:   tenantID,
+		Name: "Test Tenant",
+	}
+
+	s.T().Run("redirect_uri not in client.RedirectURIs rejected", func(t *testing.T) {
+		req := models.AuthorizationRequest{
+			ClientID:    "client-123",
+			Scopes:      []string{"openid"},
+			RedirectURI: "https://attacker.example.com/callback", // Not in client's registered URIs
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		// Auth should resolve client to get redirect_uris
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+
+		// Expect failure BEFORE user lookup - redirect_uri validation should happen early
+		result, err := s.service.Authorize(ctx, &req)
+
+		// This test documents the expected behavior per PRD-026A FR-8:
+		// "Redirect URI Matching: Exact match against registered URIs"
+		assert.Error(t, err, "expected error when redirect_uri is not in client.RedirectURIs")
+		assert.Nil(t, result)
+		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest), "expected bad_request error code")
+		assert.Contains(t, err.Error(), "redirect_uri", "error message should mention redirect_uri")
+	})
+
+	s.T().Run("redirect_uri in client.RedirectURIs accepted", func(t *testing.T) {
+		req := models.AuthorizationRequest{
+			ClientID:    "client-123",
+			Scopes:      []string{"openid"},
+			RedirectURI: "https://allowed.example.com/callback", // In client's registered URIs
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		existingUser := &models.User{
+			ID:       uuid.New(),
+			TenantID: tenantID,
+			Email:    req.Email,
+			Status:   models.UserStatusActive,
+		}
+
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
+		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+
+		result, err := s.service.Authorize(ctx, &req)
+		assert.NoError(t, err, "expected success when redirect_uri is in client.RedirectURIs")
+		assert.NotNil(t, result)
+	})
+}
+
+// TestAuthorizeScopeValidation tests that authorize rejects scopes
+// not allowed by the client (PRD-026A FR-7).
+// This test is expected to FAIL until the validation is implemented.
+func (s *ServiceSuite) TestAuthorizeScopeValidation() {
+	tenantID := uuid.New()
+	clientID := uuid.New()
+
+	// Client with specific allowed scopes
+	mockClient := &tenant.Client{
+		ID:            clientID,
+		TenantID:      tenantID,
+		ClientID:      "client-123",
+		Name:          "Test Client",
+		Status:        "active",
+		RedirectURIs:  []string{"https://app.example.com/callback"},
+		AllowedScopes: []string{"openid", "profile"}, // Only these scopes are allowed
+	}
+
+	mockTenant := &tenant.Tenant{
+		ID:   tenantID,
+		Name: "Test Tenant",
+	}
+
+	s.T().Run("scope not in client.AllowedScopes rejected", func(t *testing.T) {
+		req := models.AuthorizationRequest{
+			ClientID:    "client-123",
+			Scopes:      []string{"openid", "email", "admin"}, // "email" and "admin" not in allowed scopes
+			RedirectURI: "https://app.example.com/callback",
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+
+		result, err := s.service.Authorize(ctx, &req)
+
+		// This test documents the expected behavior per PRD-026A FR-7:
+		// "Scope Enforcement: Requested scopes must be subset of client allowed_scopes; reject otherwise"
+		assert.Error(t, err, "expected error when requested scopes not subset of client.AllowedScopes")
+		assert.Nil(t, result)
+		assert.True(t, dErrors.Is(err, dErrors.CodeBadRequest), "expected bad_request error code")
+		assert.Contains(t, err.Error(), "scope", "error message should mention scope")
+	})
+
+	s.T().Run("scopes subset of client.AllowedScopes accepted", func(t *testing.T) {
+		req := models.AuthorizationRequest{
+			ClientID:    "client-123",
+			Scopes:      []string{"openid", "profile"}, // Subset of allowed scopes
+			RedirectURI: "https://app.example.com/callback",
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		existingUser := &models.User{
+			ID:       uuid.New(),
+			TenantID: tenantID,
+			Email:    req.Email,
+			Status:   models.UserStatusActive,
+		}
+
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
+		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+
+		result, err := s.service.Authorize(ctx, &req)
+		assert.NoError(t, err, "expected success when scopes are subset of client.AllowedScopes")
+		assert.NotNil(t, result)
+	})
+}
+
+// TestAuthorizeTenantStatusValidation tests that authorize rejects requests
+// when the tenant is not active (PRD-026A FR-4.5.3).
+// This test is expected to FAIL until the validation is implemented.
+func (s *ServiceSuite) TestAuthorizeTenantStatusValidation() {
+	tenantID := uuid.New()
+	clientID := uuid.New()
+
+	mockClient := &tenant.Client{
+		ID:           clientID,
+		TenantID:     tenantID,
+		ClientID:     "client-123",
+		Name:         "Test Client",
+		Status:       "active",
+		RedirectURIs: []string{"https://app.example.com/callback"},
+	}
+
+	// Tenant with inactive status
+	mockInactiveTenant := &tenant.Tenant{
+		ID:     tenantID,
+		Name:   "Inactive Tenant",
+		Status: string(models.TenantStatusInactive), // Tenant is suspended
+	}
+
+	s.T().Run("inactive tenant rejected", func(t *testing.T) {
+		req := models.AuthorizationRequest{
+			ClientID:    "client-123",
+			Scopes:      []string{"openid"},
+			RedirectURI: "https://app.example.com/callback",
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockInactiveTenant, nil)
+
+		result, err := s.service.Authorize(ctx, &req)
+
+		// This test documents the expected behavior per PRD-026A FR-4.5.3:
+		// "Enforce tenant.status == active; tenant-inactive returns access_denied"
+		assert.Error(t, err, "expected error when tenant is inactive")
+		assert.Nil(t, result)
+		assert.True(t, dErrors.Is(err, dErrors.CodeForbidden) || dErrors.Is(err, dErrors.CodeBadRequest),
+			"expected forbidden or bad_request error code")
+	})
+
+	s.T().Run("active tenant accepted", func(t *testing.T) {
+		mockActiveTenant := &tenant.Tenant{
+			ID:     tenantID,
+			Name:   "Active Tenant",
+			Status: "active",
+		}
+
+		req := models.AuthorizationRequest{
+			ClientID:    "client-123",
+			Scopes:      []string{"openid"},
+			RedirectURI: "https://app.example.com/callback",
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		existingUser := &models.User{
+			ID:       uuid.New(),
+			TenantID: tenantID,
+			Email:    req.Email,
+			Status:   models.UserStatusActive,
+		}
+
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockActiveTenant, nil)
+		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
+		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+
+		result, err := s.service.Authorize(ctx, &req)
+		assert.NoError(t, err, "expected success when tenant is active")
+		assert.NotNil(t, result)
+	})
+}

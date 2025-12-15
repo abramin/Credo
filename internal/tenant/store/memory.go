@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"credo/internal/facts"
+	"credo/internal/tenant/models"
 	tenant "credo/internal/tenant/models"
 )
 
@@ -139,7 +140,7 @@ func (s *InMemoryClientStore) CountByTenant(_ context.Context, tenantID uuid.UUI
 // SeedBootstrapTenant creates a default tenant and client for backward compatibility.
 func SeedBootstrapTenant(ts *InMemoryTenantStore, cs *InMemoryClientStore) (*tenant.Tenant, *tenant.Client) {
 	now := time.Now()
-	t := &tenant.Tenant{ID: uuid.New(), Name: "default", CreatedAt: now}
+	t := &tenant.Tenant{ID: uuid.New(), Name: "default", Status: string(models.TenantStatusActive), CreatedAt: now}
 	_ = ts.CreateIfNameAvailable(context.Background(), t)
 
 	c := &tenant.Client{
@@ -150,7 +151,7 @@ func SeedBootstrapTenant(ts *InMemoryTenantStore, cs *InMemoryClientStore) (*ten
 		RedirectURIs:  []string{"http://localhost"},
 		AllowedGrants: []string{"authorization_code", "refresh_token"},
 		AllowedScopes: []string{"openid", "profile"},
-		Status:        "active",
+		Status:        string(models.ClientStatusActive),
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}

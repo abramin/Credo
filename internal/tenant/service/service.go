@@ -19,11 +19,6 @@ import (
 	"credo/pkg/secrets"
 )
 
-const (
-	clientStatusActive   = "active"
-	clientStatusInactive = "inactive"
-)
-
 type TenantStore interface {
 	CreateIfNameAvailable(ctx context.Context, tenant *models.Tenant) error
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Tenant, error)
@@ -96,7 +91,7 @@ func (s *Service) CreateTenant(ctx context.Context, name string) (*models.Tenant
 		return nil, dErrors.New(dErrors.CodeValidation, "name must be 128 characters or less")
 	}
 
-	t := &models.Tenant{ID: uuid.New(), Name: name, CreatedAt: time.Now()}
+	t := &models.Tenant{ID: uuid.New(), Name: name, Status: string(models.TenantStatusActive), CreatedAt: time.Now()}
 	if err := s.tenants.CreateIfNameAvailable(ctx, t); err != nil {
 		if dErrors.Is(err, dErrors.CodeConflict) {
 			return nil, dErrors.New(dErrors.CodeConflict, "tenant name must be unique")

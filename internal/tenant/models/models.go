@@ -10,6 +10,7 @@ import (
 type Tenant struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
+	Status    string    `json:"status"` // "active" or "inactive" (PRD-026A FR-4.5.3)
 	CreatedAt time.Time `json:"created_at"`
 }
 
