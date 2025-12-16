@@ -3,6 +3,7 @@ package models
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	dErrors "credo/pkg/domain-errors"
@@ -84,10 +85,8 @@ func (r *CreateClientRequest) Validate() error {
 		return dErrors.Wrap(err, dErrors.CodeValidation, "invalid allowed_grants")
 	}
 	if r.Public {
-		for _, grant := range r.AllowedGrants {
-			if grant == "client_credentials" {
-				return dErrors.New(dErrors.CodeValidation, "client_credentials grant requires a confidential client")
-			}
+		if slices.Contains(r.AllowedGrants, "client_credentials") {
+			return dErrors.New(dErrors.CodeValidation, "client_credentials grant requires a confidential client")
 		}
 	}
 	if len(r.AllowedScopes) == 0 {

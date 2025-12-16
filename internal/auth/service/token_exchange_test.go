@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"credo/internal/auth/models"
+	tenant "credo/internal/tenant/models"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -271,5 +272,161 @@ func (s *ServiceSuite) TestToken_Exchange() {
 				assert.Contains(s.T(), err.Error(), tt.expectedErr)
 			})
 		}
+	})
+}
+
+// TestToken_ClientSecretValidation tests that token endpoint validates client_secret
+// for confidential clients (PRD-026A FR-6).
+// This test is expected to FAIL until the validation is implemented.
+//
+// Prerequisites that also need to be implemented:
+// 1. TokenRequest needs a ClientSecret field
+// 2. Client model needs an IsPublic field to distinguish public vs confidential
+// 3. Token endpoint needs to validate secret against client.ClientSecretHash
+func (s *ServiceSuite) TestToken_ClientSecretValidation() {
+	sessionID := uuid.New()
+	userID := uuid.New()
+	tenantID := uuid.New()
+	clientUUID := uuid.New()
+	code := "authz_12345"
+	redirectURI := "https://client.app/callback"
+
+	// Confidential client with a secret hash
+	// In reality, this would be a bcrypt/argon2 hash of "correct-secret"
+	// GAP: Client model needs IsPublic field to distinguish public vs confidential
+	confidentialClient := &tenant.Client{
+		ID:               clientUUID,
+		TenantID:         tenantID,
+		ClientID:         "confidential-client",
+		Name:             "Confidential App",
+		Status:           "active",
+		ClientSecretHash: "$argon2id$v=19$m=65536,t=1,p=4$somesalt$somehash", // Hash of "correct-secret"
+		RedirectURIs:     []string{redirectURI},
+		AllowedGrants:    []string{"authorization_code", "refresh_token"},
+		AllowedScopes:    []string{"openid", "profile"},
+		// IsPublic: false, // GAP: This field doesn't exist yet on Client model!
+	}
+
+	// Public client without a secret (no ClientSecretHash)
+	// GAP: Currently we infer public from empty ClientSecretHash, but should be explicit
+	publicClient := &tenant.Client{
+		ID:            clientUUID,
+		TenantID:      tenantID,
+		ClientID:      "public-client",
+		Name:          "Public SPA",
+		Status:        "active",
+		RedirectURIs:  []string{redirectURI},
+		AllowedGrants: []string{"authorization_code", "refresh_token"},
+		AllowedScopes: []string{"openid", "profile"},
+		// IsPublic: true, // GAP: This field doesn't exist yet on Client model!
+		// ClientSecretHash is empty - currently the only way to identify public clients
+	}
+
+	mockTenant := &tenant.Tenant{
+		ID:     tenantID,
+		Name:   "Test Tenant",
+		Status: "active",
+	}
+
+	mockUser := s.newTestUser(userID, tenantID)
+
+	validCodeRecord := &models.AuthorizationCodeRecord{
+		Code:        code,
+		SessionID:   sessionID,
+		RedirectURI: redirectURI,
+		ExpiresAt:   time.Now().Add(5 * time.Minute),
+		Used:        false,
+		CreatedAt:   time.Now().Add(-1 * time.Minute),
+	}
+
+	validSession := &models.Session{
+		ID:             sessionID,
+		UserID:         userID,
+		ClientID:       clientUUID,
+		TenantID:       tenantID,
+		RequestedScope: []string{"openid", "profile"},
+		DeviceID:       "device-123",
+		Status:         string(models.SessionStatusPendingConsent),
+		CreatedAt:      time.Now().Add(-5 * time.Minute),
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+	}
+
+	s.T().Run("confidential client without secret rejected", func(t *testing.T) {
+		// NOTE: TokenRequest.ClientSecret field doesn't exist yet!
+		req := models.TokenRequest{
+			GrantType:   string(models.GrantAuthorizationCode),
+			Code:        code,
+			RedirectURI: redirectURI,
+			ClientID:    "confidential-client",
+			// ClientSecret: "", // Missing - should fail for confidential client
+		}
+		ctx := context.Background()
+
+		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(validCodeRecord, nil)
+		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(validSession, nil)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientUUID.String()).Return(confidentialClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
+
+		result, err := s.service.Token(ctx, &req)
+
+		// This test documents the expected behavior per PRD-026A FR-6:
+		// "/oauth/token validates client_id/secret (if confidential)"
+		assert.Error(t, err, "expected error when confidential client provides no secret")
+		assert.Nil(t, result)
+		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized),
+			"expected unauthorized error code for missing client_secret")
+		assert.Contains(t, err.Error(), "client_secret", "error message should mention client_secret")
+	})
+
+	s.T().Run("confidential client with wrong secret rejected", func(t *testing.T) {
+		// NOTE: TokenRequest.ClientSecret field doesn't exist yet!
+		req := models.TokenRequest{
+			GrantType:   string(models.GrantAuthorizationCode),
+			Code:        code,
+			RedirectURI: redirectURI,
+			ClientID:    "confidential-client",
+			// ClientSecret: "wrong-secret", // Wrong secret - should fail
+		}
+		ctx := context.Background()
+
+		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(validCodeRecord, nil)
+		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(validSession, nil)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientUUID.String()).Return(confidentialClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
+
+		result, err := s.service.Token(ctx, &req)
+
+		assert.Error(t, err, "expected error when confidential client provides wrong secret")
+		assert.Nil(t, result)
+		assert.True(t, dErrors.Is(err, dErrors.CodeUnauthorized),
+			"expected unauthorized error code for invalid client_secret")
+	})
+
+	s.T().Run("public client without secret accepted", func(t *testing.T) {
+		req := models.TokenRequest{
+			GrantType:   string(models.GrantAuthorizationCode),
+			Code:        code,
+			RedirectURI: redirectURI,
+			ClientID:    "public-client",
+			// No ClientSecret - OK for public client
+		}
+		ctx := context.Background()
+
+		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(validCodeRecord, nil)
+		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(validSession, nil)
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientUUID.String()).Return(publicClient, mockTenant, nil)
+		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
+
+		s.mockCodeStore.EXPECT().ConsumeAuthCode(gomock.Any(), req.Code, req.RedirectURI, gomock.Any()).Return(validCodeRecord, nil)
+		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(validSession, nil)
+		_, accessTokenJTI, _, _ := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, validSession.RequestedScope)
+		s.mockSessionStore.EXPECT().AdvanceLastSeen(gomock.Any(), validSession.ID, clientUUID.String(), gomock.Any(), accessTokenJTI, true, validSession.DeviceID, validSession.DeviceFingerprintHash).
+			Return(validSession, nil)
+		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+
+		result, err := s.service.Token(ctx, &req)
+		assert.NoError(t, err, "expected success for public client without secret")
+		assert.NotNil(t, result)
 	})
 }
