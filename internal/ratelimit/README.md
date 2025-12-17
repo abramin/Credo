@@ -24,7 +24,6 @@ internal/ratelimit/
 │   └── allowlist/    # Allowlist entries
 ├── handler/          # HTTP handlers for admin endpoints
 ├── middleware/       # HTTP middleware for rate limiting
-├── DDD.md           # Domain-Driven Design documentation
 └── README.md        # This file
 ```
 
@@ -134,19 +133,6 @@ POST /admin/rate-limit/reset
   "class": "auth"
 }
 ```
-
-## Implementation Status
-
-This module is **bootstrapped with stubs**. The following needs implementation:
-
-- [ ] Sliding window algorithm in `store/bucket`
-- [ ] Allowlist CRUD in `store/allowlist`
-- [ ] Service methods (check limits, record failures, etc.)
-- [ ] Middleware implementation
-- [ ] Handler implementations
-- [ ] Cucumber step definitions in `e2e/steps/ratelimit`
-
-See `DDD.md` for detailed implementation guidance.
 
 ## Testing
 
