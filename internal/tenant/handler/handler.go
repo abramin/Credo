@@ -15,12 +15,14 @@ import (
 	dErrors "credo/pkg/domain-errors"
 )
 
+// Service defines the interface for tenant operations.
+// Returns domain objects, not HTTP response DTOs.
 type Service interface {
 	CreateTenant(ctx context.Context, name string) (*models.Tenant, error)
 	GetTenant(ctx context.Context, id uuid.UUID) (*models.TenantDetails, error)
-	CreateClient(ctx context.Context, req *models.CreateClientRequest) (*models.ClientResponse, error)
-	GetClient(ctx context.Context, id uuid.UUID) (*models.ClientResponse, error)
-	UpdateClient(ctx context.Context, id uuid.UUID, req *models.UpdateClientRequest) (*models.ClientResponse, error)
+	CreateClient(ctx context.Context, req *models.CreateClientRequest) (*models.Client, string, error)
+	GetClient(ctx context.Context, id uuid.UUID) (*models.Client, error)
+	UpdateClient(ctx context.Context, id uuid.UUID, req *models.UpdateClientRequest) (*models.Client, string, error)
 }
 
 type Handler struct {
@@ -103,14 +105,14 @@ func (h *Handler) HandleCreateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := h.service.CreateClient(ctx, &req)
+	client, secret, err := h.service.CreateClient(ctx, &req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "create client failed", "error", err, "request_id", requestID)
 		httputil.WriteError(w, err)
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusCreated, client)
+	httputil.WriteJSON(w, http.StatusCreated, toClientResponse(client, secret))
 }
 
 // HandleGetClient returns client metadata.
@@ -125,14 +127,14 @@ func (h *Handler) HandleGetClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.service.GetClient(ctx, clientID)
+	client, err := h.service.GetClient(ctx, clientID)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "get client failed", "error", err, "request_id", requestID, "client_id", clientID)
 		httputil.WriteError(w, err)
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, res)
+	httputil.WriteJSON(w, http.StatusOK, toClientResponse(client, ""))
 }
 
 // HandleUpdateClient updates metadata and optionally rotates secret.
@@ -153,12 +155,28 @@ func (h *Handler) HandleUpdateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.service.UpdateClient(ctx, clientID, &req)
+	client, secret, err := h.service.UpdateClient(ctx, clientID, &req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "update client failed", "error", err, "request_id", requestID, "client_id", clientID)
 		httputil.WriteError(w, err)
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, res)
+	httputil.WriteJSON(w, http.StatusOK, toClientResponse(client, secret))
+}
+
+// Response mapping functions - convert domain objects to HTTP DTOs
+
+func toClientResponse(client *models.Client, secret string) *models.ClientResponse {
+	return &models.ClientResponse{
+		ID:            client.ID,
+		TenantID:      client.TenantID,
+		Name:          client.Name,
+		ClientID:      client.ClientID,
+		ClientSecret:  secret,
+		RedirectURIs:  client.RedirectURIs,
+		AllowedGrants: client.AllowedGrants,
+		AllowedScopes: client.AllowedScopes,
+		Status:        client.Status.String(),
+	}
 }

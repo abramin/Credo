@@ -8,6 +8,7 @@ import (
 	"credo/internal/auth/device"
 	"credo/internal/auth/models"
 	"credo/internal/platform/middleware"
+	tenantModels "credo/internal/tenant/models"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -134,7 +135,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		refreshRec := *validRefreshToken
 		sess := *validSession
 		inactiveClient := *mockClient
-		inactiveClient.Status = string(models.ClientStatusInactive)
+		inactiveClient.Status = tenantModels.ClientStatusInactive
 
 		// Validation happens before transaction
 		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
