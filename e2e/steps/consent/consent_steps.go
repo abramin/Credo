@@ -32,6 +32,7 @@ func RegisterSteps(ctx *godog.ScenarioContext, tc TestContext) {
 	ctx.Step(`^I am authenticated as "([^"]*)"$`, steps.authenticateAs)
 	ctx.Step(`^I grant consent for purposes "([^"]*)"$`, steps.grantConsentForPurposes)
 	ctx.Step(`^I revoke consent for purposes "([^"]*)"$`, steps.revokeConsentForPurposes)
+	ctx.Step(`^I revoke all my consents$`, steps.revokeAllConsents)
 	ctx.Step(`^I list my consents$`, steps.listMyConsents)
 	ctx.Step(`^I grant consent for purposes "([^"]*)" without authentication$`, steps.grantConsentWithoutAuth)
 	ctx.Step(`^I revoke consent for purposes "([^"]*)" without authentication$`, steps.revokeConsentWithoutAuth)
@@ -122,6 +123,12 @@ func (s *consentSteps) revokeConsentForPurposes(ctx context.Context, purposes st
 		"purposes": strings.Split(purposes, ","),
 	}
 	return s.tc.POSTWithHeaders("/auth/consent/revoke", body, map[string]string{
+		"Authorization": "Bearer " + s.tc.GetAccessToken(),
+	})
+}
+
+func (s *consentSteps) revokeAllConsents(ctx context.Context) error {
+	return s.tc.POSTWithHeaders("/auth/consent/revoke-all", map[string]interface{}{}, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }

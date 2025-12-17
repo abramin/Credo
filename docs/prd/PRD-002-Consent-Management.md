@@ -2,9 +2,8 @@
 
 **Status:** Implementation Required (TR-6 projections deferred)
 **Priority:** P0 (Critical)
-**Priority:** P0 (Critical)
 **Owner:** Engineering Team
-**Last Updated:** 2025-12-12
+**Last Updated:** 2025-12-17
 
 ---
 
@@ -242,6 +241,65 @@ The system always reuses existing consent IDs (whether active, expired, or revok
 
 ---
 
+### FR-2.1: Revoke All Consents (Bulk)
+
+**Endpoint:** `POST /auth/consent/revoke-all`
+
+**Description:** Revoke all active consents for the authenticated user. This is a bulk operation intended for cleanup, administrative purposes, and test isolation. Already revoked or expired consents are not affected.
+
+**Input:**
+
+- Header: `Authorization: Bearer <token>`
+- No request body required
+
+**Output (Success - 200):**
+
+```json
+{
+  "revoked": null,
+  "message": "Consent revoked for 3 purposes"
+}
+```
+
+**Authentication:**
+
+- Requires valid JWT bearer token in Authorization header
+- Token validated via RequireAuth middleware
+
+**Business Logic:**
+
+1. Extract user_id from JWT claims (populated by RequireAuth middleware in context)
+2. Find all consent records for user
+3. For each record where RevokedAt is nil:
+   - Set RevokedAt = current timestamp
+   - Update ConsentStore
+4. Emit single audit event with bulk_revocation reason
+5. Return count of revoked consents
+
+**Error Cases:**
+
+- 401 Unauthorized: Invalid or missing bearer token
+- 500 Internal Server Error: Store failure
+
+**Audit Event:**
+
+```json
+{
+  "action": "consent_revoked",
+  "user_id": "user_123",
+  "decision": "revoked",
+  "reason": "bulk_revocation"
+}
+```
+
+**Use Cases:**
+
+- Test isolation: Clear consent state between test scenarios
+- Administrative cleanup: Revoke all consents before account deletion
+- User-initiated "reset all": Clear all permissions at once
+
+---
+
 ### FR-3: List User Consents
 
 **Endpoint:** `GET /auth/consent`
@@ -396,6 +454,7 @@ type Store interface {
     ListByUser(ctx context.Context, userID string) ([]*ConsentRecord, error)
     Update(ctx context.Context, record *ConsentRecord) error
     RevokeByUserAndPurpose(ctx context.Context, userID string, purpose ConsentPurpose, revokedAt time.Time) error
+    RevokeAllByUser(ctx context.Context, userID string, revokedAt time.Time) (int, error) // Bulk revoke
     DeleteByUser(ctx context.Context, userID string) error // For GDPR
 }
 ```
@@ -419,6 +478,9 @@ func (s *Service) Grant(ctx context.Context, userID string, purposes []Purpose) 
 
 // Revoke accepts multiple purposes and revokes consent for each
 func (s *Service) Revoke(ctx context.Context, userID string, purposes []Purpose) ([]*Record, error)
+
+// RevokeAll revokes all active consents for a user (bulk operation)
+func (s *Service) RevokeAll(ctx context.Context, userID string) (*RevokeResponse, error)
 
 // List returns all consent records for a user (optionally filtered)
 func (s *Service) List(ctx context.Context, userID string, filter *RecordFilter) ([]*Record, error)
@@ -749,11 +811,12 @@ consent:
 
 ### Endpoint Summary
 
-| Endpoint               | Method | Auth Required | Purpose        |
-| ---------------------- | ------ | ------------- | -------------- |
-| `/auth/consent`        | POST   | Yes           | Grant consent  |
-| `/auth/consent/revoke` | POST   | Yes           | Revoke consent |
-| `/auth/consent`        | GET    | Yes           | List consents  |
+| Endpoint                   | Method | Auth Required | Purpose            |
+| -------------------------- | ------ | ------------- | ------------------ |
+| `/auth/consent`            | POST   | Yes           | Grant consent      |
+| `/auth/consent/revoke`     | POST   | Yes           | Revoke consent     |
+| `/auth/consent/revoke-all` | POST   | Yes           | Revoke all (bulk)  |
+| `/auth/consent`            | GET    | Yes           | List consents      |
 
 ### Consent Lifecycle States
 
@@ -1112,3 +1175,4 @@ curl -X POST http://localhost:8080/registry/citizen \
 | 1.1     | 2025-12-10 | Engineering  | Added 5-min idempotency window, ID reuse details |
 | 1.2     | 2025-12-10 | Engineering  | Add TR-6 CQRS Read Model & Projection Store      |
 | 1.23    | 2025-12-12 | Engineering  | Expand TR-6 with detail                          |
+| 1.3     | 2025-12-17 | Engineering  | Add FR-2.1 revoke-all bulk endpoint              |

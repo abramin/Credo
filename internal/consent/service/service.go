@@ -39,6 +39,7 @@ type Store interface {
 	ListByUser(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.Record, error)
 	Update(ctx context.Context, consent *models.Record) error
 	RevokeByUserAndPurpose(ctx context.Context, userID string, purpose models.Purpose, revokedAt time.Time) (*models.Record, error)
+	RevokeAllByUser(ctx context.Context, userID string, revokedAt time.Time) (int, error)
 	DeleteByUser(ctx context.Context, userID string) error
 }
 
@@ -282,6 +283,36 @@ func (s *Service) Revoke(ctx context.Context, userID string, purposes []models.P
 	return &models.RevokeResponse{
 		Revoked: s.formatRevokeResponses(revoked),
 		Message: formatActionMessage("Consent revoked for %d purpose", len(revoked)),
+	}, nil
+}
+
+// RevokeAll revokes all active consents for a user.
+// Intended for test cleanup and administrative purposes.
+func (s *Service) RevokeAll(ctx context.Context, userID string) (*models.RevokeResponse, error) {
+	if userID == "" {
+		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+	}
+
+	now := time.Now()
+	count, err := s.store.RevokeAllByUser(ctx, userID, now)
+	if err != nil {
+		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke all consents")
+	}
+
+	if count > 0 {
+		s.emitAudit(ctx, audit.Event{
+			UserID:    userID,
+			Action:    models.AuditActionConsentRevoked,
+			Decision:  models.AuditDecisionRevoked,
+			Reason:    "bulk_revocation",
+			Timestamp: now,
+		})
+		s.decrementActiveConsents(float64(count))
+	}
+
+	return &models.RevokeResponse{
+		Revoked: nil,
+		Message: formatActionMessage("Consent revoked for %d purpose", count),
 	}, nil
 }
 

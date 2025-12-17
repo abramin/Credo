@@ -111,7 +111,8 @@ Feature: Consent Management
 
       @consent @filter
   Scenario: Filter consents by status - active only
-    Given I grant consent for purposes "login,registry_check"
+    Given I revoke all my consents
+    And I grant consent for purposes "login,registry_check"
     And I revoke consent for purposes "registry_check"
     When I list my consents filtered by status "active"
     Then the response status should be 200
@@ -120,7 +121,8 @@ Feature: Consent Management
 
       @consent @filter
   Scenario: Filter consents by status - revoked only
-    Given I grant consent for purposes "login,registry_check"
+    Given I revoke all my consents
+    And I grant consent for purposes "login,registry_check"
     And I revoke consent for purposes "registry_check"
     When I list my consents filtered by status "revoked"
     Then the response status should be 200
@@ -129,7 +131,8 @@ Feature: Consent Management
 
       @consent @filter
   Scenario: Filter consents by purpose
-    Given I grant consent for purposes "login,registry_check,vc_issuance"
+    Given I revoke all my consents
+    And I grant consent for purposes "login,registry_check,vc_issuance"
     When I list my consents filtered by purpose "login"
     Then the response status should be 200
     And all consents should have purpose "login"
@@ -137,7 +140,8 @@ Feature: Consent Management
 
       @consent @filter
   Scenario: Filter consents by status and purpose combined
-    Given I grant consent for purposes "login,registry_check"
+    Given I revoke all my consents
+    And I grant consent for purposes "login,registry_check"
     And I revoke consent for purposes "login"
     When I list my consents filtered by status "active" and purpose "registry_check"
     Then the response status should be 200

@@ -169,6 +169,37 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
+  /auth/consent/revoke-all:
+    post:
+      summary: Revoke all consents
+      description: |
+        Revoke all active consents for the authenticated user. This is a bulk
+        operation intended for cleanup and administrative purposes. Already
+        revoked or expired consents are not affected. Returns the count of
+        consents that were revoked.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: All active consents revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeConsentResponse"
+              examples:
+                success:
+                  value:
+                    revoked: null
+                    message: "Consent revoked for 3 purposes"
+                no_active:
+                  summary: No active consents to revoke
+                  value:
+                    revoked: null
+                    message: "Consent revoked for 0 purposes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:

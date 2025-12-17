@@ -114,3 +114,20 @@ func (s *InMemoryStore) DeleteByUser(_ context.Context, userID string) error {
 	delete(s.consents, userID)
 	return nil
 }
+
+// RevokeAllByUser revokes all active consents for a user.
+// Returns the count of consents that were revoked.
+func (s *InMemoryStore) RevokeAllByUser(_ context.Context, userID string, revokedAt time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	records := s.consents[userID]
+	count := 0
+	for i := range records {
+		if records[i].RevokedAt == nil {
+			records[i].RevokedAt = &revokedAt
+			count++
+		}
+	}
+	s.consents[userID] = records
+	return count, nil
+}
