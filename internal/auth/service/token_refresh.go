@@ -64,7 +64,7 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate tokens")
 		}
 
-		session, err = stores.Sessions.AdvanceLastRefreshed(ctx, session.ID, req.ClientID, now, artifacts.accessTokenJTI, mutableSession.DeviceID, mutableSession.DeviceFingerprintHash)
+		session, err = stores.Sessions.AdvanceLastRefreshed(ctx, session.ID, tc.Client.ID.String(), now, artifacts.accessTokenJTI, mutableSession.DeviceID, mutableSession.DeviceFingerprintHash)
 		if err != nil {
 			return fmt.Errorf("advance session last refreshed: %w", err)
 		}

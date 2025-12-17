@@ -41,9 +41,9 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 		codeRecord, err = stores.Codes.ConsumeAuthCode(ctx, req.Code, req.RedirectURI, now)
 		if err != nil {
 			if errors.Is(err, authCodeStore.ErrAuthCodeUsed) && codeRecord != nil {
-				err = stores.Sessions.RevokeSessionIfActive(ctx, codeRecord.SessionID, now)
-				if err != nil {
-					return dErrors.Wrap(err, dErrors.CodeInternal, "failed to revoke session for used code")
+				revokeErr := stores.Sessions.RevokeSessionIfActive(ctx, codeRecord.SessionID, now)
+				if revokeErr != nil {
+					return dErrors.Wrap(revokeErr, dErrors.CodeInternal, "failed to revoke session for used code")
 				}
 			}
 			return fmt.Errorf("consume authorization code: %w", err)
