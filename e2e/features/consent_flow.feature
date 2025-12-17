@@ -209,3 +209,35 @@ Feature: Consent Management
     Then the response status should be 200
     And the response should contain "consents"
     And the response should contain 0 consent records
+
+  # ============================================================================
+  # GDPR Delete Tests (PRD-002 FR-2.2: Right to Erasure)
+  # ============================================================================
+
+      @consent @gdpr
+  Scenario: Delete all consents removes all records
+    Given I am authenticated as "gdpr-delete-test@example.com"
+    And I grant consent for purposes "login,registry_check,vc_issuance"
+    When I delete all my consents
+    Then the response status should be 200
+    And the response field "message" should equal "All consents deleted"
+    When I list my consents
+    Then the response status should be 200
+    And the response should contain 0 consent records
+
+      @consent @gdpr
+  Scenario: Delete all consents removes both active and revoked records
+    Given I am authenticated as "gdpr-mixed-test@example.com"
+    And I grant consent for purposes "login,registry_check"
+    And I revoke consent for purposes "registry_check"
+    When I delete all my consents
+    Then the response status should be 200
+    When I list my consents
+    Then the response status should be 200
+    And the response should contain 0 consent records
+
+      @consent @gdpr @validation
+  Scenario: Delete all consents without authentication
+    When I DELETE "/auth/consent" without authorization
+    Then the response status should be 401
+    And the response field "error" should equal "unauthorized"

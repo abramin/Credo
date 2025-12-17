@@ -24,6 +24,7 @@ type Service interface {
 	Grant(ctx context.Context, userID string, purposes []models.Purpose) (*models.GrantResponse, error)
 	Revoke(ctx context.Context, userID string, purposes []models.Purpose) (*models.RevokeResponse, error)
 	RevokeAll(ctx context.Context, userID string) (*models.RevokeResponse, error)
+	DeleteAll(ctx context.Context, userID string) error
 	List(ctx context.Context, userID string, filter *models.RecordFilter) (*models.ListResponse, error)
 }
 
@@ -53,6 +54,7 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/auth/consent", h.handleGrantConsent)
 	r.Post("/auth/consent/revoke", h.handleRevokeConsent)
 	r.Post("/auth/consent/revoke-all", h.handleRevokeAllConsents)
+	r.Delete("/auth/consent", h.handleDeleteAllConsents)
 	r.Get("/auth/consent", h.handleGetConsents)
 }
 
@@ -178,6 +180,33 @@ func (h *Handler) handleRevokeAllConsents(w http.ResponseWriter, r *http.Request
 	}
 
 	respond.WriteJSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) handleDeleteAllConsents(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestID := middleware.GetRequestID(ctx)
+	userID := middleware.GetUserID(ctx)
+
+	if userID == "" {
+		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
+			"request_id", requestID,
+		)
+		httpError.WriteError(w, dErrors.New(dErrors.CodeInternal, "authentication context error"))
+		return
+	}
+
+	if err := h.consent.DeleteAll(ctx, userID); err != nil {
+		h.logger.ErrorContext(ctx, "failed to delete all consents",
+			"request_id", requestID,
+			"error", err,
+		)
+		httpError.WriteError(w, err)
+		return
+	}
+
+	respond.WriteJSON(w, http.StatusOK, map[string]string{
+		"message": "All consents deleted",
+	})
 }
 
 func (h *Handler) handleGetConsents(w http.ResponseWriter, r *http.Request) {

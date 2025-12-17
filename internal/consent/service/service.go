@@ -316,6 +316,28 @@ func (s *Service) RevokeAll(ctx context.Context, userID string) (*models.RevokeR
 	}, nil
 }
 
+// DeleteAll removes all consent records for a user.
+// Intended for GDPR right to erasure and test cleanup.
+func (s *Service) DeleteAll(ctx context.Context, userID string) error {
+	if userID == "" {
+		return pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+	}
+
+	if err := s.store.DeleteByUser(ctx, userID); err != nil {
+		return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to delete all consents")
+	}
+
+	s.emitAudit(ctx, audit.Event{
+		UserID:    userID,
+		Action:    "consent_deleted",
+		Decision:  "deleted",
+		Reason:    "bulk_deletion",
+		Timestamp: time.Now(),
+	})
+
+	return nil
+}
+
 func (s *Service) List(ctx context.Context, userID string, filter *models.RecordFilter) (*models.ListResponse, error) {
 	if userID == "" {
 		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")

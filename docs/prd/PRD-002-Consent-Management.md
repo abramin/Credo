@@ -300,6 +300,67 @@ The system always reuses existing consent IDs (whether active, expired, or revok
 
 ---
 
+### FR-2.2: Delete All Consents (GDPR Right to Erasure)
+
+**Endpoint:** `DELETE /auth/consent`
+
+**Description:** Permanently delete all consent records for the authenticated user. This is a destructive operation intended for GDPR "right to erasure" (Article 17) compliance. Unlike revoke-all, this removes records entirely rather than marking them as revoked.
+
+**Input:**
+
+- Header: `Authorization: Bearer <token>`
+- No request body required
+
+**Output (Success - 200):**
+
+```json
+{
+  "message": "All consents deleted"
+}
+```
+
+**Authentication:**
+
+- Requires valid JWT bearer token in Authorization header
+- Token validated via RequireAuth middleware
+
+**Business Logic:**
+
+1. Extract user_id from JWT claims (populated by RequireAuth middleware in context)
+2. Delete all consent records for user from ConsentStore
+3. Emit single audit event with bulk_deletion reason
+4. Return success message
+
+**Error Cases:**
+
+- 401 Unauthorized: Invalid or missing bearer token
+- 500 Internal Server Error: Store failure
+
+**Audit Event:**
+
+```json
+{
+  "action": "consent_deleted",
+  "user_id": "user_123",
+  "decision": "deleted",
+  "reason": "bulk_deletion"
+}
+```
+
+**Use Cases:**
+
+- GDPR right to erasure (Article 17) requests
+- Account deletion workflows
+- Test cleanup (provides complete isolation between test scenarios)
+
+**Important Considerations:**
+
+- This operation is **irreversible**. Deleted consents cannot be recovered.
+- For audit trail preservation, consider using `POST /auth/consent/revoke-all` unless full erasure is legally required.
+- The audit event itself is retained (audit logs are append-only) but the consent records are removed.
+
+---
+
 ### FR-3: List User Consents
 
 **Endpoint:** `GET /auth/consent`
@@ -481,6 +542,9 @@ func (s *Service) Revoke(ctx context.Context, userID string, purposes []Purpose)
 
 // RevokeAll revokes all active consents for a user (bulk operation)
 func (s *Service) RevokeAll(ctx context.Context, userID string) (*RevokeResponse, error)
+
+// DeleteAll permanently removes all consent records for a user (GDPR erasure)
+func (s *Service) DeleteAll(ctx context.Context, userID string) error
 
 // List returns all consent records for a user (optionally filtered)
 func (s *Service) List(ctx context.Context, userID string, filter *RecordFilter) ([]*Record, error)
@@ -811,12 +875,13 @@ consent:
 
 ### Endpoint Summary
 
-| Endpoint                   | Method | Auth Required | Purpose            |
-| -------------------------- | ------ | ------------- | ------------------ |
-| `/auth/consent`            | POST   | Yes           | Grant consent      |
-| `/auth/consent/revoke`     | POST   | Yes           | Revoke consent     |
-| `/auth/consent/revoke-all` | POST   | Yes           | Revoke all (bulk)  |
-| `/auth/consent`            | GET    | Yes           | List consents      |
+| Endpoint                   | Method | Auth Required | Purpose              |
+| -------------------------- | ------ | ------------- | -------------------- |
+| `/auth/consent`            | POST   | Yes           | Grant consent        |
+| `/auth/consent/revoke`     | POST   | Yes           | Revoke consent       |
+| `/auth/consent/revoke-all` | POST   | Yes           | Revoke all (bulk)    |
+| `/auth/consent`            | DELETE | Yes           | Delete all (GDPR)    |
+| `/auth/consent`            | GET    | Yes           | List consents        |
 
 ### Consent Lifecycle States
 
@@ -1176,3 +1241,4 @@ curl -X POST http://localhost:8080/registry/citizen \
 | 1.2     | 2025-12-10 | Engineering  | Add TR-6 CQRS Read Model & Projection Store      |
 | 1.23    | 2025-12-12 | Engineering  | Expand TR-6 with detail                          |
 | 1.3     | 2025-12-17 | Engineering  | Add FR-2.1 revoke-all bulk endpoint              |
+| 1.4     | 2025-12-17 | Engineering  | Add FR-2.2 delete-all GDPR erasure endpoint      |

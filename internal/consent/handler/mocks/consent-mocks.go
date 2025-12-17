@@ -100,3 +100,17 @@ func (mr *MockServiceMockRecorder) RevokeAll(ctx, userID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeAll", reflect.TypeOf((*MockService)(nil).RevokeAll), ctx, userID)
 }
+
+// DeleteAll mocks base method.
+func (m *MockService) DeleteAll(ctx context.Context, userID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteAll", ctx, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteAll indicates an expected call of DeleteAll.
+func (mr *MockServiceMockRecorder) DeleteAll(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteAll", reflect.TypeOf((*MockService)(nil).DeleteAll), ctx, userID)
+}
