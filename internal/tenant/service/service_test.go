@@ -60,14 +60,14 @@ func (s *ServiceSuite) TestCreateTenantValidation() {
 	s.T().Run("validates empty name", func(t *testing.T) {
 		_, err := s.service.CreateTenant(context.Background(), "")
 		require.Error(s.T(), err)
-		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeValidation))
+		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeInvariantViolation))
 	})
 
 	s.T().Run("validates name length", func(t *testing.T) {
 		longName := make([]byte, 129)
 		_, err := s.service.CreateTenant(context.Background(), string(longName))
 		require.Error(s.T(), err)
-		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeValidation))
+		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeInvariantViolation))
 	})
 }
 
