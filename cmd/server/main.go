@@ -244,7 +244,7 @@ func initializeJWTService(cfg *config.Server) (*jwttoken.JWTService, *jwttoken.J
 	jwtService := jwttoken.NewJWTService(
 		cfg.Auth.JWTSigningKey,
 		cfg.Auth.JWTIssuerBaseURL,
-		"credo-client", // TODO: make configurable
+		cfg.Auth.JWTAudience,
 		cfg.Auth.TokenTTL,
 	)
 	if cfg.DemoMode {
@@ -282,10 +282,10 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
-				"env":              "demo",
-				"users":            []string{"alice", "bob", "charlie"},
-				"jwt_issuer_base":  infra.Cfg.Auth.JWTIssuerBaseURL,
-				"data_store":       "in-memory",
+				"env":             "demo",
+				"users":           []string{"alice", "bob", "charlie"},
+				"jwt_issuer_base": infra.Cfg.Auth.JWTIssuerBaseURL,
+				"data_store":      "in-memory",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)

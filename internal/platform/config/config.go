@@ -63,8 +63,8 @@ var (
 	DefaultAuthCleanupInterval            = 5 * time.Minute
 	DefaultConsentTTL                     = 365 * 24 * time.Hour
 	DefaultConsentGrantWindow             = 5 * time.Minute
-	DefaultRegistryCacheTTL   = 5 * time.Minute
-	DefaultDeviceCookieName   = "__Secure-Device-ID"
+	DefaultRegistryCacheTTL               = 5 * time.Minute
+	DefaultDeviceCookieName               = "__Secure-Device-ID"
 	DefaultDeviceCookieMaxAge             = 31536000 // 1 year
 )
 
