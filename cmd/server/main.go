@@ -32,7 +32,6 @@ import (
 	"credo/internal/seeder"
 	tenantHandler "credo/internal/tenant/handler"
 	tenantService "credo/internal/tenant/service"
-	"credo/internal/tenant/store"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
 
@@ -225,9 +224,6 @@ func buildTenantModule(infra *infraBundle) *tenantModule {
 	tenants := tenantstore.NewInMemory()
 	clients := clientstore.NewInMemory()
 	service := tenantService.New(tenants, clients, nil)
-
-	// Bootstrap a default tenant/client for backward compatibility with existing flows.
-	store.SeedBootstrapTenant(tenants, clients)
 
 	return &tenantModule{
 		Service: service,

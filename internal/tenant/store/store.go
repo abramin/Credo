@@ -5,12 +5,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/sentinel"
 	"credo/internal/tenant/models"
 )
-
-// ErrNotFound is returned when a tenant or client is not found.
-var ErrNotFound = sentinel.ErrNotFound
 
 // TenantStore persists tenant records.
 type TenantStore interface {
