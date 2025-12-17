@@ -199,6 +199,90 @@ func (s *ServiceSuite) TestToken_Exchange() {
 		}
 	})
 
+	// RFC 6749 §5.2: invalid_grant errors - code not found, expired, or used
+	s.T().Run("invalid_grant scenarios (RFC 6749 §5.2)", func(t *testing.T) {
+		tests := []struct {
+			name         string
+			setupMocks   func()
+			expectedCode dErrors.Code
+			expectedMsg  string
+		}{
+			{
+				name: "authorization code not found",
+				setupMocks: func() {
+					s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), code).Return(nil, dErrors.New(dErrors.CodeNotFound, "code not found"))
+				},
+				expectedCode: dErrors.CodeInvalidGrant,
+				expectedMsg:  "invalid authorization code",
+			},
+			{
+				name: "authorization code expired",
+				setupMocks: func() {
+					expiredCode := &models.AuthorizationCodeRecord{
+						Code:        code,
+						SessionID:   sessionID,
+						RedirectURI: redirectURI,
+						ExpiresAt:   time.Now().Add(-5 * time.Minute), // Expired 5 minutes ago
+						Used:        false,
+						CreatedAt:   time.Now().Add(-15 * time.Minute),
+					}
+					s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), code).Return(expiredCode, nil)
+				},
+				expectedCode: dErrors.CodeInvalidGrant,
+				expectedMsg:  "authorization code expired",
+			},
+			{
+				name: "authorization code already used",
+				setupMocks: func() {
+					usedCode := &models.AuthorizationCodeRecord{
+						Code:        code,
+						SessionID:   sessionID,
+						RedirectURI: redirectURI,
+						ExpiresAt:   time.Now().Add(5 * time.Minute),
+						Used:        true, // Already used
+						CreatedAt:   time.Now().Add(-1 * time.Minute),
+					}
+					s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), code).Return(usedCode, nil)
+				},
+				expectedCode: dErrors.CodeInvalidGrant,
+				expectedMsg:  "authorization code already used",
+			},
+			{
+				name: "redirect_uri mismatch",
+				setupMocks: func() {
+					// Code was issued for a different redirect_uri
+					codeWithDifferentRedirect := &models.AuthorizationCodeRecord{
+						Code:        code,
+						SessionID:   sessionID,
+						RedirectURI: "https://original.app/callback", // Different from request
+						ExpiresAt:   time.Now().Add(5 * time.Minute),
+						Used:        false,
+						CreatedAt:   time.Now().Add(-1 * time.Minute),
+					}
+					s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), code).Return(codeWithDifferentRedirect, nil)
+				},
+				expectedCode: dErrors.CodeInvalidGrant,
+				expectedMsg:  "redirect_uri mismatch",
+			},
+		}
+
+		for _, tt := range tests {
+			s.T().Run(tt.name, func(t *testing.T) {
+				req := baseReq
+				tt.setupMocks()
+
+				result, err := s.service.Token(context.Background(), &req)
+				assert.Error(t, err)
+				assert.Nil(t, result)
+				assert.True(t, dErrors.Is(err, tt.expectedCode),
+					"expected %s but got %v", tt.expectedCode, err)
+				if tt.expectedMsg != "" {
+					assert.Contains(t, err.Error(), tt.expectedMsg)
+				}
+			})
+		}
+	})
+
 	// Infrastructure errors - verify error propagation through handleTokenError
 	s.T().Run("code store lookup error", func(t *testing.T) {
 		req := baseReq

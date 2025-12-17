@@ -213,6 +213,55 @@ func (s *ServiceSuite) TestAuthorize() {
 	})
 }
 
+// TestAuthorizeClientValidation tests that authorize rejects requests
+// when the client is unknown or inactive (RFC 6749 §4.1.2.1 and PRD-026A FR-4.5.3).
+func (s *ServiceSuite) TestAuthorizeClientValidation() {
+	s.T().Run("unknown client_id rejected (RFC 6749 §4.1.2.1)", func(t *testing.T) {
+		req := models.AuthorizationRequest{
+			ClientID:    "unknown-client",
+			Scopes:      []string{"openid"},
+			RedirectURI: "https://app.example.com/callback",
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		// Client resolver returns not_found for unknown client
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).
+			Return(nil, nil, dErrors.New(dErrors.CodeInvalidClient, "client not found"))
+
+		result, err := s.service.Authorize(ctx, &req)
+
+		// RFC 6749 §4.1.2.1: If client_id is missing or invalid, MUST NOT redirect
+		// Returns 400 Bad Request with invalid_client error
+		assert.Error(t, err, "expected error when client_id is unknown")
+		assert.Nil(t, result)
+		assert.True(t, dErrors.Is(err, dErrors.CodeInvalidClient),
+			"expected invalid_client error code per RFC 6749")
+	})
+
+	s.T().Run("inactive client rejected", func(t *testing.T) {
+		req := models.AuthorizationRequest{
+			ClientID:    "inactive-client",
+			Scopes:      []string{"openid"},
+			RedirectURI: "https://app.example.com/callback",
+			Email:       "user@test.com",
+		}
+		ctx := context.Background()
+
+		// Client resolver returns invalid_client for inactive client
+		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).
+			Return(nil, nil, dErrors.New(dErrors.CodeInvalidClient, "client is inactive"))
+
+		result, err := s.service.Authorize(ctx, &req)
+
+		// PRD-026A FR-4.5.3: inactive client returns invalid_client
+		assert.Error(t, err, "expected error when client is inactive")
+		assert.Nil(t, result)
+		assert.True(t, dErrors.Is(err, dErrors.CodeInvalidClient),
+			"expected invalid_client error code")
+	})
+}
+
 // TestAuthorizeRedirectURIValidation tests that authorize rejects redirect URIs
 // not registered on the client (PRD-026A FR-8).
 // This test is expected to FAIL until the validation is implemented.
@@ -396,10 +445,11 @@ func (s *ServiceSuite) TestAuthorizeTenantStatusValidation() {
 
 		// This test documents the expected behavior per PRD-026A FR-4.5.3:
 		// "Enforce tenant.status == active; tenant-inactive returns access_denied"
+		// RFC 6749 compliant: returns 400 Bad Request with access_denied error code
 		assert.Error(t, err, "expected error when tenant is inactive")
 		assert.Nil(t, result)
-		assert.True(t, dErrors.Is(err, dErrors.CodeForbidden) || dErrors.Is(err, dErrors.CodeBadRequest),
-			"expected forbidden or bad_request error code")
+		assert.True(t, dErrors.Is(err, dErrors.CodeAccessDenied),
+			"expected access_denied error code per RFC 6749")
 	})
 
 	s.T().Run("active tenant accepted", func(t *testing.T) {

@@ -103,7 +103,8 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		assert.Equal(s.T(), s.service.TokenTTL, result.ExpiresIn)
 	})
 
-	s.T().Run("refresh token already used (replay)", func(t *testing.T) {
+	// RFC 6749 §5.2: invalid_grant errors for refresh token issues
+	s.T().Run("refresh token already used (replay) - invalid_grant", func(t *testing.T) {
 		req := newReq()
 		refreshRec := *validRefreshToken
 		refreshRec.Used = true
@@ -113,11 +114,13 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
 		assert.Nil(s.T(), result)
-		assert.True(s.T(), dErrors.Is(err, dErrors.CodeUnauthorized))
+		// RFC 6749 §5.2: invalid refresh token returns invalid_grant with HTTP 400
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInvalidGrant),
+			"expected invalid_grant error code per RFC 6749 §5.2")
 		assert.Contains(s.T(), err.Error(), "invalid refresh token")
 	})
 
-	s.T().Run("refresh token not found", func(t *testing.T) {
+	s.T().Run("refresh token not found - invalid_grant", func(t *testing.T) {
 		req := models.TokenRequest{
 			GrantType:    string(models.GrantRefreshToken),
 			RefreshToken: "invalid_token",
@@ -129,11 +132,13 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
 		assert.Nil(s.T(), result)
-		assert.True(s.T(), dErrors.Is(err, dErrors.CodeUnauthorized))
+		// RFC 6749 §5.2: invalid refresh token returns invalid_grant with HTTP 400
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInvalidGrant),
+			"expected invalid_grant error code per RFC 6749 §5.2")
 		assert.Contains(s.T(), err.Error(), "invalid refresh token")
 	})
 
-	s.T().Run("refresh token expired", func(t *testing.T) {
+	s.T().Run("refresh token expired - invalid_grant", func(t *testing.T) {
 		req := newReq()
 		refreshRec := *validRefreshToken
 		refreshRec.ExpiresAt = time.Now().Add(-1 * time.Hour) // Expired
@@ -143,11 +148,13 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
 		assert.Nil(s.T(), result)
-		assert.True(s.T(), dErrors.Is(err, dErrors.CodeUnauthorized))
+		// RFC 6749 §5.2: expired refresh token returns invalid_grant with HTTP 400
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInvalidGrant),
+			"expected invalid_grant error code per RFC 6749 §5.2")
 		assert.Contains(s.T(), err.Error(), "expired")
 	})
 
-	s.T().Run("session not found for refresh token", func(t *testing.T) {
+	s.T().Run("session not found for refresh token - invalid_grant", func(t *testing.T) {
 		req := newReq()
 		refreshRec := *validRefreshToken
 
@@ -157,10 +164,12 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
 		assert.Nil(s.T(), result)
-		assert.True(s.T(), dErrors.Is(err, dErrors.CodeUnauthorized))
+		// RFC 6749 §5.2: session not found means the grant is invalid
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInvalidGrant),
+			"expected invalid_grant error code per RFC 6749 §5.2")
 	})
 
-	s.T().Run("session revoked", func(t *testing.T) {
+	s.T().Run("session revoked - invalid_grant", func(t *testing.T) {
 		req := newReq()
 		refreshRec := *validRefreshToken
 		sess := *validSession
@@ -179,11 +188,13 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
 		assert.Nil(s.T(), result)
-		// Error gets wrapped by transaction as CodeInternal
-		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInternal) || dErrors.Is(err, dErrors.CodeUnauthorized))
+		// RFC 6749 §5.2: revoked session means the grant is invalid
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInvalidGrant),
+			"expected invalid_grant error code per RFC 6749 §5.2")
 	})
 
-	s.T().Run("client_id mismatch", func(t *testing.T) {
+	// RFC 6749 §5.2: "The provided authorization grant ... was issued to another client."
+	s.T().Run("client_id mismatch - invalid_grant", func(t *testing.T) {
 		req := models.TokenRequest{
 			GrantType:    string(models.GrantRefreshToken),
 			RefreshToken: refreshTokenString,
@@ -200,13 +211,14 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		_, accessTokenJTI, _, _ := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
 		s.mockSessionStore.EXPECT().AdvanceLastRefreshed(gomock.Any(), sess.ID, req.ClientID, gomock.Any(), accessTokenJTI, sess.DeviceID, sess.DeviceFingerprintHash).
-			Return(nil, dErrors.New(dErrors.CodeUnauthorized, "client_id mismatch"))
+			Return(nil, dErrors.New(dErrors.CodeInvalidGrant, "client_id mismatch"))
 
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
 		assert.Nil(s.T(), result)
-		// Error gets wrapped by transaction as CodeInternal
-		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInternal) || dErrors.Is(err, dErrors.CodeUnauthorized))
+		// RFC 6749 §5.2: token issued to another client returns invalid_grant
+		assert.True(s.T(), dErrors.Is(err, dErrors.CodeInvalidGrant),
+			"expected invalid_grant error code per RFC 6749 §5.2")
 	})
 
 	s.T().Run("client inactive - PRD-026A FR-4.5.4", func(t *testing.T) {

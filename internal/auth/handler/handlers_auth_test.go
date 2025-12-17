@@ -228,25 +228,26 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 		s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeBadRequest))
 	})
-	// - 401 Unauthorized: Invalid authorization code (not found)
-	// - 401 Unauthorized: Authorization code expired (> 10 minutes old)
-	// - 401 Unauthorized: Authorization code already used (replay attack prevention)
-	s.T().Run("unauthorized scenarios - 401", func(t *testing.T) {
+	// RFC 6749 §5.2: invalid_grant errors return 400 Bad Request
+	// - 400 Bad Request: Invalid authorization code (not found) - invalid_grant
+	// - 400 Bad Request: Authorization code expired (> 10 minutes old) - invalid_grant
+	// - 400 Bad Request: Authorization code already used (replay attack prevention) - invalid_grant
+	s.T().Run("invalid_grant scenarios - 400 (RFC 6749 §5.2)", func(t *testing.T) {
 		tests := []struct {
 			name       string
 			serviceErr error
 		}{
 			{
 				name:       "invalid authorization code",
-				serviceErr: dErrors.New(dErrors.CodeUnauthorized, "invalid authorization code"),
+				serviceErr: dErrors.New(dErrors.CodeInvalidGrant, "invalid authorization code"),
 			},
 			{
 				name:       "authorization code expired",
-				serviceErr: dErrors.New(dErrors.CodeUnauthorized, "authorization code expired"),
+				serviceErr: dErrors.New(dErrors.CodeInvalidGrant, "authorization code expired"),
 			},
 			{
 				name:       "authorization code already used",
-				serviceErr: dErrors.New(dErrors.CodeUnauthorized, "authorization code already used"),
+				serviceErr: dErrors.New(dErrors.CodeInvalidGrant, "authorization code already used"),
 			},
 		}
 
@@ -257,7 +258,7 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 
 				status, got, errBody := s.doTokenRequest(t, router, s.mustMarshal(validRequest, t))
 
-				s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
+				s.assertErrorResponse(t, status, got, errBody, http.StatusBadRequest, string(dErrors.CodeInvalidGrant))
 			})
 		}
 	})
