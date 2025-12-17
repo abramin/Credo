@@ -75,7 +75,8 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		accessToken, accessTokenJTI, idToken, refreshToken := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
 		// Inside RunInTx: Advance session, create new token
-		s.mockSessionStore.EXPECT().AdvanceLastRefreshed(gomock.Any(), sess.ID, req.ClientID, gomock.Any(), accessTokenJTI, sess.DeviceID, sess.DeviceFingerprintHash).DoAndReturn(
+		// Note: AdvanceLastRefreshed receives tc.Client.ID.String() (UUID string), not req.ClientID
+		s.mockSessionStore.EXPECT().AdvanceLastRefreshed(gomock.Any(), sess.ID, clientUUID.String(), gomock.Any(), accessTokenJTI, sess.DeviceID, sess.DeviceFingerprintHash).DoAndReturn(
 			func(ctx context.Context, sessionID uuid.UUID, clientID string, ts time.Time, jti string, deviceID string, fingerprint string) (*models.Session, error) {
 				assert.Equal(s.T(), sess.ID, sessionID)
 				assert.False(s.T(), ts.IsZero())
@@ -198,7 +199,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		s.mockRefreshStore.EXPECT().ConsumeRefreshToken(gomock.Any(), refreshTokenString, gomock.Any()).Return(&refreshRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		_, accessTokenJTI, _, _ := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
-		s.mockSessionStore.EXPECT().AdvanceLastRefreshed(gomock.Any(), sess.ID, req.ClientID, gomock.Any(), accessTokenJTI, sess.DeviceID, sess.DeviceFingerprintHash).
+		s.mockSessionStore.EXPECT().AdvanceLastRefreshed(gomock.Any(), sess.ID, clientUUID.String(), gomock.Any(), accessTokenJTI, sess.DeviceID, sess.DeviceFingerprintHash).
 			DoAndReturn(func(ctx context.Context, sessionID uuid.UUID, client string, ts time.Time, jti string, deviceID string, fingerprint string) (*models.Session, error) {
 				assert.Equal(s.T(), sess.DeviceID, deviceID)
 				return &sess, nil
