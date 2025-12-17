@@ -32,7 +32,9 @@ import (
 	"credo/internal/seeder"
 	tenantHandler "credo/internal/tenant/handler"
 	tenantService "credo/internal/tenant/service"
-	tenantStore "credo/internal/tenant/store"
+	"credo/internal/tenant/store"
+	clientstore "credo/internal/tenant/store/client"
+	tenantstore "credo/internal/tenant/store/tenant"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -67,8 +69,8 @@ type consentModule struct {
 type tenantModule struct {
 	Service *tenantService.Service
 	Handler *tenantHandler.Handler
-	Tenants *tenantStore.InMemoryTenantStore
-	Clients *tenantStore.InMemoryClientStore
+	Tenants *tenantstore.InMemory
+	Clients *clientstore.InMemory
 }
 
 func main() {
@@ -220,12 +222,12 @@ func buildConsentModule(infra *infraBundle) *consentModule {
 }
 
 func buildTenantModule(infra *infraBundle) *tenantModule {
-	tenants := tenantStore.NewInMemoryTenantStore()
-	clients := tenantStore.NewInMemoryClientStore()
+	tenants := tenantstore.NewInMemory()
+	clients := clientstore.NewInMemory()
 	service := tenantService.New(tenants, clients, nil)
 
 	// Bootstrap a default tenant/client for backward compatibility with existing flows.
-	tenantStore.SeedBootstrapTenant(tenants, clients)
+	store.SeedBootstrapTenant(tenants, clients)
 
 	return &tenantModule{
 		Service: service,
