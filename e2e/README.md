@@ -12,7 +12,7 @@ End-to-end API tests using [godog](https://github.com/cucumber/godog) (Cucumber 
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - ID Gateway running on `http://localhost:8080` (or set `BASE_URL`)
 
 ## Installation

@@ -252,6 +252,15 @@ The hexagonal architecture enables zero-downtime migration:
 5. **Audit Service**
    Append only audit log, queue consumer, durable audit storage.
 
+6. **Rate Limiting Service**
+   Per-IP and per-user rate limits, sliding window algorithm, allowlist management, partner API quotas.
+
+7. **Tenant Service**
+   Multi-tenancy support, client management, API key handling, tenant isolation.
+
+8. **Admin Service**
+   Administrative operations, user management, session controls, system administration.
+
 ---
 
 ## Package Layout
@@ -276,25 +285,56 @@ internal/
     config/                     # configuration loading
     logger/                     # structured logging with slog
     httpserver/                 # shared HTTP server setup
-    middleware/                 # HTTP middleware (recovery, logging, request ID, latency, JWT auth)
+    middleware/                 # HTTP middleware (recovery, logging, request ID, latency, JWT auth, device, admin)
     metrics/                    # Prometheus metrics collection
   jwt_token/
     jwt.go                      # JWT generation and validation with HS256
     jwt_adapter.go              # Adapter for middleware interface
   auth/
+    handler/                    # HTTP handlers for auth endpoints
     service/
       service.go                # Users, sessions, tokens (domain logic)
+      authorize.go              # Authorization code flow
+      token.go                  # Token issuance and refresh
+      revocation.go             # Token revocation
+    device/                     # Device binding service (PRD-001)
+      service.go                # Device fingerprint verification
+    workers/
+      cleanup/                  # Background cleanup workers
     store/
-      store.go                  # UserStore, SessionStore (ports)
+      authorization-code/       # Authorization code store
+      refresh-token/            # Refresh token store
+      session/                  # Session storage
+      user/                     # User storage
+      revocation/               # Token revocation list (TRL)
     models/
       models.go                 # Domain models
   consent/
+    handler/                    # HTTP handlers for consent endpoints
     service/
       service.go                # Grant, revoke, RequireConsent (domain logic)
+    adapters/
+      grpc/                     # gRPC server adapter
     store/
       store.go                  # ConsentStore (port)
     models/
       models.go                 # Domain models
+  ratelimit/                    # Rate limiting module (PRD-017)
+    handler/                    # Admin endpoints for allowlist/reset
+    middleware/                 # HTTP middleware for rate limit enforcement
+    service/                    # Business logic and orchestration
+    models/                     # Rate limit models and responses
+    store/
+      bucket/                   # Rate limit counters (sliding window)
+      allowlist/                # IP/User allowlist entries
+  tenant/                       # Multi-tenancy module (PRD-026A)
+    handler/                    # HTTP handlers for tenant management
+    service/                    # Tenant and client orchestration
+    models/                     # Tenant/Client domain models
+    store/                      # In-memory tenant storage
+  admin/                        # Administrative operations (PRD-001B)
+    handler.go                  # HTTP handlers for admin endpoints
+    service.go                  # Admin business logic (user deletion, session management)
   registry/
     ports/
       consent.go                # ConsentPort interface (dependency on consent)
@@ -318,6 +358,17 @@ internal/
       service.go                # Decision engine logic
     integration_test.go
   evidence/
+    registry/                   # Registry evidence subsystem
+      handler/                  # HTTP handlers
+      service/                  # Orchestration and business logic
+      providers/                # Data source integrations
+        citizen/                # Citizen registry provider
+        sanctions/              # Sanctions registry provider
+        adapters/               # HTTP adapters for external APIs
+      orchestrator/             # Evidence correlation and rule engine
+      cache/                    # Evidence caching layer
+      models/                   # Domain models
+      store/                    # In-memory evidence storage
     vc/
       service.go                # VCService
       store.go                  # VCStore
@@ -328,9 +379,13 @@ internal/
     worker.go                   # background consumer
     store.go                    # AuditStore
     models.go
+  seeder/                       # Demo data population
+    seeder.go                   # Seeds users, sessions, tokens in demo mode
   transport/
     http/
       router.go
+      handlers_auth.go          # Auth endpoint handlers
+      handlers_consent.go       # Consent endpoint handlers
       handlers_evidence.go
       handlers_decision.go
       handlers_me.go

@@ -5,7 +5,7 @@ Get up and running with Credo demo in 5 minutes.
 ## Prerequisites
 
 - Docker and Docker Compose
-- OR: Go 1.21+ and a web server (Python, Node.js, etc.)
+- OR: Go 1.25+ and a web server (Python, Node.js, etc.)
 
 ## Method 1: Docker (Easiest)
 
@@ -183,7 +183,7 @@ Frontend (automatic):
 lsof -i :8080
 
 # Check Go version
-go version  # Should be 1.21+
+go version  # Should be 1.25+
 
 # Rebuild
 go mod download
