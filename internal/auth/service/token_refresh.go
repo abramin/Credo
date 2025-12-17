@@ -21,18 +21,19 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 	// Find refresh token and session (non-transactional reads for validation)
 	refreshRecord, err := s.refreshTokens.Find(ctx, req.RefreshToken)
 	if err != nil {
-		return nil, s.handleTokenError(ctx, err, req.ClientID, "", "refresh")
+		return nil, s.handleTokenError(ctx, err, req.ClientID, nil, TokenFlowRefresh)
 	}
 
+	sessionID := refreshRecord.SessionID.String()
 	session, err = s.sessions.FindByID(ctx, refreshRecord.SessionID)
 	if err != nil {
-		return nil, s.handleTokenError(ctx, err, req.ClientID, refreshRecord.SessionID.String(), "refresh")
+		return nil, s.handleTokenError(ctx, err, req.ClientID, &sessionID, TokenFlowRefresh)
 	}
 
 	// Validate client and user status before issuing new tokens (PRD-026A FR-4.5.4)
 	tc, err := s.resolveTokenContext(ctx, session)
 	if err != nil {
-		return nil, s.handleTokenError(ctx, err, req.ClientID, session.ID.String(), "refresh")
+		return nil, s.handleTokenError(ctx, err, req.ClientID, &sessionID, TokenFlowRefresh)
 	}
 
 	if models.UserStatus(tc.Client.Status) != models.UserStatusActive {
@@ -94,9 +95,10 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 }
 
 func (s *Service) handleRefreshTokenError(ctx context.Context, err error, req *models.TokenRequest, refreshRecord *models.RefreshTokenRecord) error {
-	recordID := ""
+	var recordID *string
 	if refreshRecord != nil {
-		recordID = refreshRecord.SessionID.String()
+		id := refreshRecord.SessionID.String()
+		recordID = &id
 	}
-	return s.handleTokenError(ctx, err, req.ClientID, recordID, "refresh")
+	return s.handleTokenError(ctx, err, req.ClientID, recordID, TokenFlowRefresh)
 }

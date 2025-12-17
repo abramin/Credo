@@ -21,15 +21,16 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 	)
 	code, err := s.codes.FindByCode(ctx, req.Code)
 	if err != nil {
-		return nil, s.handleTokenError(ctx, err, req.ClientID, "", "code")
+		return nil, s.handleTokenError(ctx, err, req.ClientID, nil, TokenFlowCode)
 	}
+	sessionID := code.SessionID.String()
 	session, err = s.sessions.FindByID(ctx, code.SessionID)
 	if err != nil {
-		return nil, s.handleTokenError(ctx, err, req.ClientID, code.SessionID.String(), "code")
+		return nil, s.handleTokenError(ctx, err, req.ClientID, &sessionID, TokenFlowCode)
 	}
 	tc, err := s.resolveTokenContext(ctx, session)
 	if err != nil {
-		return nil, s.handleTokenError(ctx, err, req.ClientID, code.SessionID.String(), "code")
+		return nil, s.handleTokenError(ctx, err, req.ClientID, &sessionID, TokenFlowCode)
 	}
 
 	if models.UserStatus(tc.Client.Status) != models.UserStatusActive {
@@ -79,11 +80,12 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 		return nil
 	})
 	if txErr != nil {
-		recordID := ""
+		var recordID *string
 		if codeRecord != nil {
-			recordID = codeRecord.SessionID.String()
+			id := codeRecord.SessionID.String()
+			recordID = &id
 		}
-		return nil, s.handleTokenError(ctx, txErr, req.ClientID, recordID, "code")
+		return nil, s.handleTokenError(ctx, txErr, req.ClientID, recordID, TokenFlowCode)
 	}
 
 	s.logAudit(ctx,

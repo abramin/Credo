@@ -23,7 +23,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 	tests := []struct {
 		name           string
 		err            error
-		flow           string
+		flow           TokenFlow
 		expectedCode   dErrors.Code
 		expectedMsg    string
 		auditReason    string
@@ -33,7 +33,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "auth code not found",
 			err:            authCodeStore.ErrNotFound,
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "invalid authorization code",
 			auditReason:    "code_not_found",
@@ -42,7 +42,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "auth code expired",
 			err:            authCodeStore.ErrAuthCodeExpired,
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "authorization code expired",
 			auditReason:    "authorization_code_expired",
@@ -51,7 +51,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "auth code already used",
 			err:            authCodeStore.ErrAuthCodeUsed,
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "authorization code already used",
 			auditReason:    "authorization_code_reused",
@@ -61,7 +61,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "refresh token not found",
 			err:            refreshTokenStore.ErrNotFound,
-			flow:           "refresh",
+			flow:           TokenFlowRefresh,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "invalid refresh token",
 			auditReason:    "refresh_token_not_found",
@@ -70,7 +70,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "refresh token expired",
 			err:            refreshTokenStore.ErrRefreshTokenExpired,
-			flow:           "refresh",
+			flow:           TokenFlowRefresh,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "refresh token expired",
 			auditReason:    "refresh_token_expired",
@@ -79,7 +79,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "refresh token already used",
 			err:            refreshTokenStore.ErrRefreshTokenUsed,
-			flow:           "refresh",
+			flow:           TokenFlowRefresh,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "invalid refresh token",
 			auditReason:    "refresh_token_reused",
@@ -89,7 +89,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "session not found - code flow",
 			err:            sessionStore.ErrNotFound,
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "invalid authorization code",
 			auditReason:    "session_not_found",
@@ -98,7 +98,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "session not found - refresh flow",
 			err:            sessionStore.ErrNotFound,
-			flow:           "refresh",
+			flow:           TokenFlowRefresh,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "invalid refresh token",
 			auditReason:    "session_not_found",
@@ -107,7 +107,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "session revoked",
 			err:            sessionStore.ErrSessionRevoked,
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "session has been revoked",
 			auditReason:    "session_revoked",
@@ -117,7 +117,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "bad request - redirect_uri mismatch",
 			err:            fmt.Errorf("redirect_uri mismatch: %w", facts.ErrBadRequest),
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeBadRequest,
 			expectedMsg:    "redirect_uri mismatch: bad request",
 			auditReason:    "bad_request",
@@ -126,7 +126,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "unauthorized - invalid session state",
 			err:            dErrors.New(dErrors.CodeUnauthorized, "session expired"),
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeUnauthorized,
 			expectedMsg:    "session expired",
 			auditReason:    "invalid_session_state",
@@ -135,7 +135,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "internal error passthrough",
 			err:            dErrors.New(dErrors.CodeInternal, "db connection failed"),
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeInternal,
 			expectedMsg:    "db connection failed",
 			auditReason:    "", // No audit for passthrough
@@ -145,7 +145,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		{
 			name:           "unknown error",
 			err:            errors.New("random error"),
-			flow:           "code",
+			flow:           TokenFlowCode,
 			expectedCode:   dErrors.CodeInternal,
 			expectedMsg:    "token handling failed",
 			auditReason:    "internal_error",
@@ -157,7 +157,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 		s.T().Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 
-			result := s.service.handleTokenError(ctx, tt.err, clientID, recordID, tt.flow)
+			result := s.service.handleTokenError(ctx, tt.err, clientID, &recordID, tt.flow)
 
 			assert.Error(t, result)
 			assert.True(t, dErrors.Is(result, tt.expectedCode))
@@ -168,20 +168,20 @@ func (s *ServiceSuite) TestHandleTokenError() {
 
 // TestHandleTokenError_AuditAttributes verifies correct audit attribute inclusion
 func (s *ServiceSuite) TestHandleTokenError_AuditAttributes() {
-	s.T().Run("includes record_id when hasRecord=true", func(t *testing.T) {
+	s.T().Run("includes record_id when provided", func(t *testing.T) {
 		ctx := context.Background()
 		clientID := "client-123"
 		recordID := "record-456"
 
-		err := s.service.handleTokenError(ctx, authCodeStore.ErrAuthCodeUsed, clientID, recordID, "code")
+		err := s.service.handleTokenError(ctx, authCodeStore.ErrAuthCodeUsed, clientID, &recordID, TokenFlowCode)
 		assert.Error(t, err)
 	})
 
-	s.T().Run("excludes record_id when recordID is empty", func(t *testing.T) {
+	s.T().Run("excludes record_id when nil", func(t *testing.T) {
 		ctx := context.Background()
 		clientID := "client-123"
 
-		err := s.service.handleTokenError(ctx, authCodeStore.ErrAuthCodeUsed, clientID, "", "code")
+		err := s.service.handleTokenError(ctx, authCodeStore.ErrAuthCodeUsed, clientID, nil, TokenFlowCode)
 		assert.Error(t, err)
 	})
 }

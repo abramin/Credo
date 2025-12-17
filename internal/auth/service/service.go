@@ -44,6 +44,14 @@ const (
 	defaultRefreshTokenTTL = 30 * 24 * time.Hour
 )
 
+// TokenFlow represents the type of token operation being performed.
+type TokenFlow string
+
+const (
+	TokenFlowCode    TokenFlow = "code"
+	TokenFlowRefresh TokenFlow = "refresh"
+)
+
 type Config struct {
 	SessionTTL             time.Duration
 	TokenTTL               time.Duration
@@ -268,15 +276,15 @@ func (s *Service) isRedirectSchemeAllowed(uri *url.URL) bool {
 }
 
 // handleTokenError translates dependency errors into domain errors once.
-// The flow parameter ("code" or "refresh") scopes user-facing messages.
-func (s *Service) handleTokenError(ctx context.Context, err error, clientID string, recordID string, flow string) error {
+// The flow parameter scopes user-facing messages to the token operation type.
+func (s *Service) handleTokenError(ctx context.Context, err error, clientID string, recordID *string, flow TokenFlow) error {
 	if err == nil {
 		return nil
 	}
 
 	attrs := []any{"client_id", clientID}
-	if recordID != "" {
-		attrs = append(attrs, "record_id", recordID)
+	if recordID != nil {
+		attrs = append(attrs, "record_id", *recordID)
 	}
 
 	var de dErrors.DomainError
@@ -288,21 +296,21 @@ func (s *Service) handleTokenError(ctx context.Context, err error, clientID stri
 	switch {
 	case errors.Is(err, facts.ErrNotFound):
 		msg := "invalid authorization code"
-		if flow == "refresh" {
+		if flow == TokenFlowRefresh {
 			msg = "invalid refresh token"
 		}
 		s.authFailure(ctx, "not_found", false, attrs...)
 		return dErrors.Wrap(err, dErrors.CodeUnauthorized, msg)
 	case errors.Is(err, facts.ErrExpired):
 		msg := "authorization code expired"
-		if flow == "refresh" {
+		if flow == TokenFlowRefresh {
 			msg = "refresh token expired"
 		}
 		s.authFailure(ctx, "expired", false, attrs...)
 		return dErrors.Wrap(err, dErrors.CodeUnauthorized, msg)
 	case errors.Is(err, facts.ErrAlreadyUsed):
 		msg := "authorization code already used"
-		if flow == "refresh" {
+		if flow == TokenFlowRefresh {
 			msg = "invalid refresh token"
 		}
 		s.authFailure(ctx, "already_used", false, attrs...)
