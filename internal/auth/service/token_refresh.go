@@ -40,41 +40,42 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 		return nil, dErrors.New(dErrors.CodeForbidden, "client is not active")
 	}
 
-	// Now perform transactional updates
+	// Perform transactional updates
 	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
+		// Step 1: Consume refresh token (prevents replay attacks)
 		var err error
-		// Consume the refresh token (transactional to prevent replay)
 		refreshRecord, err = stores.RefreshTokens.ConsumeRefreshToken(ctx, req.RefreshToken, now)
 		if err != nil {
 			return fmt.Errorf("consume refresh token: %w", err)
 		}
 
+		// Step 2: Load session for token generation
 		session, err = stores.Sessions.FindByID(ctx, refreshRecord.SessionID)
 		if err != nil {
 			return fmt.Errorf("fetch session: %w", err)
 		}
 
-		mutableSession := *session
-		s.applyDeviceBinding(ctx, &mutableSession)
-		mutableSession.LastSeenAt = now
-		mutableSession.LastRefreshedAt = &now
-
-		artifacts, err = s.generateTokenArtifacts(&mutableSession)
+		// Step 3: Generate tokens, update session, persist refresh token
+		result, err := s.executeTokenFlowTx(ctx, stores, tokenFlowTxParams{
+			Session:            session,
+			TokenContext:       tc,
+			Now:                now,
+			ActivateOnFirstUse: false,
+		})
 		if err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate tokens")
+			return err
 		}
-
-		session, err = stores.Sessions.AdvanceLastRefreshed(ctx, session.ID, tc.Client.ID.String(), now, artifacts.accessTokenJTI, mutableSession.DeviceID, mutableSession.DeviceFingerprintHash)
-		if err != nil {
-			return fmt.Errorf("advance session last refreshed: %w", err)
-		}
-		if err := stores.RefreshTokens.Create(ctx, artifacts.refreshRecord); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create refresh token")
-		}
+		session = result.Session
+		artifacts = result.Artifacts
 		return nil
 	})
 	if txErr != nil {
-		return nil, s.handleRefreshTokenError(ctx, txErr, req, refreshRecord)
+		var recordID *string
+		if refreshRecord != nil {
+			id := refreshRecord.SessionID.String()
+			recordID = &id
+		}
+		return nil, s.handleTokenError(ctx, txErr, req.ClientID, recordID, TokenFlowRefresh)
 	}
 
 	s.logAudit(ctx,
@@ -94,11 +95,3 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 	}, nil
 }
 
-func (s *Service) handleRefreshTokenError(ctx context.Context, err error, req *models.TokenRequest, refreshRecord *models.RefreshTokenRecord) error {
-	var recordID *string
-	if refreshRecord != nil {
-		id := refreshRecord.SessionID.String()
-		recordID = &id
-	}
-	return s.handleTokenError(ctx, err, req.ClientID, recordID, TokenFlowRefresh)
-}

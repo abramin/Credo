@@ -37,6 +37,7 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 		return nil, dErrors.New(dErrors.CodeForbidden, "client is not active")
 	}
 	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
+		// Step 1: Consume authorization code (with replay attack protection)
 		var err error
 		codeRecord, err = stores.Codes.ConsumeAuthCode(ctx, req.Code, req.RedirectURI, now)
 		if err != nil {
@@ -49,34 +50,25 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 			return fmt.Errorf("consume authorization code: %w", err)
 		}
 
+		// Step 2: Load session for token generation
 		session, err = stores.Sessions.FindByID(ctx, codeRecord.SessionID)
 		if err != nil {
 			return fmt.Errorf("fetch session: %w", err)
 		}
+		session.TenantID = tc.Tenant.ID
 
-		mutableSession := *session
-		s.applyDeviceBinding(ctx, &mutableSession)
-		mutableSession.LastSeenAt = now
-		mutableSession.TenantID = tc.Tenant.ID
-		activate := false
-		if mutableSession.Status == string(models.SessionStatusPendingConsent) {
-			mutableSession.Status = string(models.SessionStatusActive)
-			activate = true
-		}
-
-		artifacts, err = s.generateTokenArtifacts(&mutableSession)
+		// Step 3: Generate tokens, update session, persist refresh token
+		result, err := s.executeTokenFlowTx(ctx, stores, tokenFlowTxParams{
+			Session:            session,
+			TokenContext:       tc,
+			Now:                now,
+			ActivateOnFirstUse: true,
+		})
 		if err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate tokens")
+			return err
 		}
-
-		session, err = stores.Sessions.AdvanceLastSeen(ctx, session.ID, tc.Client.ID.String(), now, artifacts.accessTokenJTI, activate, mutableSession.DeviceID, mutableSession.DeviceFingerprintHash)
-		if err != nil {
-			return fmt.Errorf("advance last seen: %w", err)
-		}
-
-		if err := stores.RefreshTokens.Create(ctx, artifacts.refreshRecord); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create refresh token")
-		}
+		session = result.Session
+		artifacts = result.Artifacts
 		return nil
 	})
 	if txErr != nil {

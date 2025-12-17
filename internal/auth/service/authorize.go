@@ -86,6 +86,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 
 	// Wrap user+code+session creation in transaction for atomicity
 	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
+		// --- Step 1: Find or create user ---
 		firstName, lastName := email.DeriveNameFromEmail(req.Email)
 		newUser, err := models.NewUser(uuid.New(), tenant.ID, req.Email, firstName, lastName, false)
 		if err != nil {
@@ -100,7 +101,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		}
 		userWasCreated = (user.ID == newUser.ID)
 
-		// Generate OAuth 2.0 authorization code
+		// --- Step 2: Generate authorization code ---
 		sessionID := uuid.New()
 		authCode, err = models.NewAuthorizationCode(
 			"authz_"+uuid.New().String(),
@@ -112,11 +113,11 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create authorization code")
 		}
-
 		if err := stores.Codes.Create(ctx, authCode); err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to save authorization code")
 		}
 
+		// --- Step 3: Create session (pending consent) ---
 		session, err = models.NewSession(
 			authCode.SessionID,
 			user.ID,
@@ -131,7 +132,8 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create session")
 		}
-		// Set optional device binding fields
+
+		// --- Step 4: Attach device binding signals ---
 		session.DeviceID = deviceID
 		session.DeviceFingerprintHash = deviceFingerprint
 		session.DeviceDisplayName = deviceDisplayName

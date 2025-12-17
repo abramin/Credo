@@ -38,14 +38,22 @@ func RegisterSteps(ctx *godog.ScenarioContext, tc TestContext) {
 	ctx.Step(`^I POST to "([^"]*)" with empty purposes array$`, steps.postWithEmptyPurposes)
 	ctx.Step(`^I wait (\d+) seconds$`, steps.waitSeconds)
 
+	// Filter steps
+	ctx.Step(`^I list my consents filtered by status "([^"]*)"$`, steps.listConsentsFilteredByStatus)
+	ctx.Step(`^I list my consents filtered by purpose "([^"]*)"$`, steps.listConsentsFilteredByPurpose)
+	ctx.Step(`^I list my consents filtered by status "([^"]*)" and purpose "([^"]*)"$`, steps.listConsentsFilteredByStatusAndPurpose)
+
 	// Consent assertion steps
 	ctx.Step(`^the response should contain at least (\d+) consent records$`, steps.responseShouldContainAtLeastNConsents)
+	ctx.Step(`^the response should contain (\d+) consent records$`, steps.responseShouldContainExactlyNConsents)
 	ctx.Step(`^each granted consent should have "([^"]*)" equal to "([^"]*)"$`, steps.eachGrantedConsentShouldHaveField)
 	ctx.Step(`^each granted consent should have "([^"]*)"$`, steps.eachGrantedConsentShouldHaveFieldPresent)
 	ctx.Step(`^the revoked consent should have "([^"]*)" equal to "([^"]*)"$`, steps.revokedConsentShouldHaveField)
 	ctx.Step(`^the revoked consent should have "([^"]*)"$`, steps.revokedConsentShouldHaveFieldPresent)
 	ctx.Step(`^the consent for purpose "([^"]*)" should have status "([^"]*)"$`, steps.consentForPurposeShouldHaveStatus)
 	ctx.Step(`^the consent should have a new "([^"]*)" timestamp$`, steps.consentShouldHaveNewTimestamp)
+	ctx.Step(`^all consents should have status "([^"]*)"$`, steps.allConsentsShouldHaveStatus)
+	ctx.Step(`^all consents should have purpose "([^"]*)"$`, steps.allConsentsShouldHavePurpose)
 }
 
 type consentSteps struct {
@@ -124,6 +132,24 @@ func (s *consentSteps) listMyConsents(ctx context.Context) error {
 	})
 }
 
+func (s *consentSteps) listConsentsFilteredByStatus(ctx context.Context, status string) error {
+	return s.tc.GET("/auth/consent?status="+status, map[string]string{
+		"Authorization": "Bearer " + s.tc.GetAccessToken(),
+	})
+}
+
+func (s *consentSteps) listConsentsFilteredByPurpose(ctx context.Context, purpose string) error {
+	return s.tc.GET("/auth/consent?purpose="+purpose, map[string]string{
+		"Authorization": "Bearer " + s.tc.GetAccessToken(),
+	})
+}
+
+func (s *consentSteps) listConsentsFilteredByStatusAndPurpose(ctx context.Context, status, purpose string) error {
+	return s.tc.GET("/auth/consent?status="+status+"&purpose="+purpose, map[string]string{
+		"Authorization": "Bearer " + s.tc.GetAccessToken(),
+	})
+}
+
 func (s *consentSteps) grantConsentWithoutAuth(ctx context.Context, purposes string) error {
 	body := map[string]interface{}{
 		"purposes": strings.Split(purposes, ","),
@@ -163,6 +189,47 @@ func (s *consentSteps) responseShouldContainAtLeastNConsents(ctx context.Context
 	}
 	if len(consents) < count {
 		return fmt.Errorf("expected at least %d consents, got %d", count, len(consents))
+	}
+	return nil
+}
+
+func (s *consentSteps) responseShouldContainExactlyNConsents(ctx context.Context, count int) error {
+	consents, err := s.extractArray("consents")
+	if err != nil {
+		// If no consents key and expecting 0, that's acceptable
+		if count == 0 {
+			return nil
+		}
+		return err
+	}
+	if len(consents) != count {
+		return fmt.Errorf("expected exactly %d consents, got %d", count, len(consents))
+	}
+	return nil
+}
+
+func (s *consentSteps) allConsentsShouldHaveStatus(ctx context.Context, status string) error {
+	consents, err := s.extractArray("consents")
+	if err != nil {
+		return err
+	}
+	for _, c := range consents {
+		if c["status"] != status {
+			return fmt.Errorf("expected all consents to have status %s, but found %v", status, c["status"])
+		}
+	}
+	return nil
+}
+
+func (s *consentSteps) allConsentsShouldHavePurpose(ctx context.Context, purpose string) error {
+	consents, err := s.extractArray("consents")
+	if err != nil {
+		return err
+	}
+	for _, c := range consents {
+		if c["purpose"] != purpose {
+			return fmt.Errorf("expected all consents to have purpose %s, but found %v", purpose, c["purpose"])
+		}
 	}
 	return nil
 }
