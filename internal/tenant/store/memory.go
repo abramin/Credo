@@ -143,12 +143,17 @@ func SeedBootstrapTenant(ts *InMemoryTenantStore, cs *InMemoryClientStore) (*ten
 	t := &tenant.Tenant{ID: uuid.New(), Name: "default", Status: string(models.TenantStatusActive), CreatedAt: now}
 	_ = ts.CreateIfNameAvailable(context.Background(), t)
 
+	redirectURIs := []string{
+		"http://localhost:3000/callback",
+		"http://localhost",
+	}
+
 	c := &tenant.Client{
 		ID:            uuid.New(),
 		TenantID:      t.ID,
 		Name:          "default-client",
-		ClientID:      uuid.NewString(),
-		RedirectURIs:  []string{"http://localhost"},
+		ClientID:      "test-client",
+		RedirectURIs:  redirectURIs,
 		AllowedGrants: []string{"authorization_code", "refresh_token"},
 		AllowedScopes: []string{"openid", "profile"},
 		Status:        string(models.ClientStatusActive),

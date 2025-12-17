@@ -300,30 +300,30 @@ func (s *Service) handleTokenError(ctx context.Context, err error, clientID stri
 			msg = "invalid refresh token"
 		}
 		s.authFailure(ctx, "not_found", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeUnauthorized, msg)
+		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, msg)
 	case errors.Is(err, facts.ErrExpired):
 		msg := "authorization code expired"
 		if flow == TokenFlowRefresh {
 			msg = "refresh token expired"
 		}
 		s.authFailure(ctx, "expired", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeUnauthorized, msg)
+		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, msg)
 	case errors.Is(err, facts.ErrAlreadyUsed):
 		msg := "authorization code already used"
 		if flow == TokenFlowRefresh {
 			msg = "invalid refresh token"
 		}
 		s.authFailure(ctx, "already_used", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeUnauthorized, msg)
+		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, msg)
 	case errors.Is(err, sessionStore.ErrSessionRevoked):
 		s.authFailure(ctx, "session_revoked", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeUnauthorized, "session has been revoked")
+		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, "session has been revoked")
 	case errors.Is(err, facts.ErrInvalidState):
 		s.authFailure(ctx, "invalid_state", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeUnauthorized, "session not active")
+		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, "session not active")
 	case errors.Is(err, facts.ErrInvalidInput):
 		s.authFailure(ctx, "invalid_input", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeValidation, err.Error())
+		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, err.Error())
 	case errors.Is(err, facts.ErrBadRequest):
 		s.authFailure(ctx, "bad_request", false, attrs...)
 		return dErrors.Wrap(err, dErrors.CodeBadRequest, err.Error())
