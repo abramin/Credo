@@ -1,6 +1,6 @@
 # PRD-026A: Tenant & Client Management (MVP)
 
-**Status:** Proposed (Not Started)
+**Status:** Complete
 **Priority:** P0 (Critical for Gateway Viability)
 **Owner:** Engineering Team
 **Dependencies:** PRD-001 (Authentication & Session Management), PRD-016 (Token Lifecycle & Revocation)
@@ -486,18 +486,18 @@ These capabilities may be introduced in a future PRD once tenant and client prim
 
 ## 9. Acceptance Criteria
 
-- [ ]A tenant can be created and retrieved via admin API.
-- [ ]A client can be registered under a tenant with redirect URI validation.
-- [ ]OAuth authorization fails with `invalid_client` when client_id is unknown or inactive.
-- [ ]Users created during signup are scoped to the tenant associated with the client.
-- [ ]Access and ID tokens include `tenant_id` and `client_id` claims.
-- [ ]Client secret rotation updates the stored hash and old secrets fail authentication.
-- [ ]Audit events emitted for tenant/client/user creation and secret rotation.
-- [ ] All admin endpoints reject unauthenticated requests with 401 Unauthorized.
-- [ ] Authenticated requests without sufficient admin capability are rejected with 403 Forbidden.
-- [ ] Platform admin access allows tenant creation and retrieval.
-- [ ] Tenant admin access allows client management only within the caller’s tenant.
-- [ ] Authorization checks are enforced in the service layer and cannot be bypassed by handler misuse.
+- [x] A tenant can be created and retrieved via admin API.
+- [x] A client can be registered under a tenant with redirect URI validation.
+- [x] OAuth authorization fails with `invalid_client` when client_id is unknown or inactive.
+- [x] Users created during signup are scoped to the tenant associated with the client.
+- [x] Access and ID tokens include `tenant_id` and `client_id` claims.
+- [x] Client secret rotation updates the stored hash and old secrets fail authentication.
+- [x] Audit events emitted for tenant/client/user creation and secret rotation.
+- [x] All admin endpoints reject unauthenticated requests with 401 Unauthorized.
+- [x] Authenticated requests without sufficient admin capability are rejected with 403 Forbidden.
+- [x] Platform admin access allows tenant creation and retrieval.
+- [x] Tenant admin access allows client management only within the caller's tenant.
+- [x] Authorization checks are enforced in the service layer and cannot be bypassed by handler misuse.
 
 ---
 

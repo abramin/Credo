@@ -1,6 +1,6 @@
 # PRD-016: Token Lifecycle & Revocation
 
-**Status:** Not Started
+**Status:** Mostly Complete
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
 **Dependencies:** PRD-001 (Authentication & Session Management)
@@ -925,11 +925,13 @@ func (s *CleanupService) performCleanup(ctx context.Context) {
 - [x] Revoked tokens fail authentication checks
 - [x] Users can list all active sessions
 - [x] Users can revoke individual sessions
-- [x] Users can revoke all sessions at once
-- [ ] Password change triggers global session revocation
+- [ ] Users can revoke all sessions at once (FR-6: POST /auth/logout-all)
+- [ ] Password change triggers global session revocation (requires PRD-022)
 - [x] Token revocation list uses TTL (no memory leak)
 - [x] All token lifecycle events emit audit events
 - [ ] Concurrent session limits enforced (optional)
+
+**Note:** The "password change triggers global session revocation" criterion requires password support from [PRD-022](./PRD-022-Account-Recovery-Credentials.md). This criterion will be completed alongside PRD-022 implementation in Phase 3.
 
 ---
 
