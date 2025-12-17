@@ -340,6 +340,9 @@ components:
         token:
           type: string
           description: Token to revoke (access or refresh)
+        client_id:
+          type: string
+          description: OAuth client identifier (optional per RFC 7009, required for public clients)
         token_type_hint:
           type: string
           enum: [access_token, refresh_token]
@@ -364,14 +367,24 @@ components:
       properties:
         session_id:
           type: string
-        device_display_name:
+          description: Unique session identifier
+        device:
           type: string
           description: Display-safe device label
-        approximate_location:
+        location:
           type: string
           description: Display-safe approximate location
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the session was created
+        last_activity:
+          type: string
+          format: date-time
+          description: Timestamp of last session activity
         is_current:
           type: boolean
+          description: True if this is the session making the request
     RevokeSessionResponse:
       type: object
       properties:
