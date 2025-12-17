@@ -101,6 +101,21 @@ func (mr *MockStoreMockRecorder) RevokeByUserAndPurpose(ctx, userID, purpose, re
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeByUserAndPurpose", reflect.TypeOf((*MockStore)(nil).RevokeByUserAndPurpose), ctx, userID, purpose, revokedAt)
 }
 
+// RevokeAllByUser mocks base method.
+func (m *MockStore) RevokeAllByUser(ctx context.Context, userID string, revokedAt time.Time) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeAllByUser", ctx, userID, revokedAt)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RevokeAllByUser indicates an expected call of RevokeAllByUser.
+func (mr *MockStoreMockRecorder) RevokeAllByUser(ctx, userID, revokedAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeAllByUser", reflect.TypeOf((*MockStore)(nil).RevokeAllByUser), ctx, userID, revokedAt)
+}
+
 // Save mocks base method.
 func (m *MockStore) Save(ctx context.Context, consent *models.Record) error {
 	m.ctrl.T.Helper()
