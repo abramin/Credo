@@ -275,8 +275,29 @@ func (s *Service) isRedirectSchemeAllowed(uri *url.URL) bool {
 	return false
 }
 
-// handleTokenError translates dependency errors into domain errors once.
-// The flow parameter scopes user-facing messages to the token operation type.
+// tokenErrorMapping defines how a sentinel error maps to a domain error.
+type tokenErrorMapping struct {
+	sentinel   error
+	code       dErrors.Code
+	codeMsg    string // message for TokenFlowCode (empty = use err.Error())
+	refreshMsg string // message for TokenFlowRefresh (empty = use err.Error())
+	logReason  string
+}
+
+// tokenErrorMappings defines error translations in priority order.
+// First match wins; more specific errors should come first.
+var tokenErrorMappings = []tokenErrorMapping{
+	{facts.ErrNotFound, dErrors.CodeInvalidGrant, "invalid authorization code", "invalid refresh token", "not_found"},
+	{facts.ErrExpired, dErrors.CodeInvalidGrant, "authorization code expired", "refresh token expired", "expired"},
+	{facts.ErrAlreadyUsed, dErrors.CodeInvalidGrant, "authorization code already used", "invalid refresh token", "already_used"},
+	{sessionStore.ErrSessionRevoked, dErrors.CodeInvalidGrant, "session has been revoked", "session has been revoked", "session_revoked"},
+	{facts.ErrInvalidState, dErrors.CodeInvalidGrant, "session not active", "session not active", "invalid_state"},
+	{facts.ErrInvalidInput, dErrors.CodeInvalidGrant, "", "", "invalid_input"},
+	{facts.ErrBadRequest, dErrors.CodeBadRequest, "", "", "bad_request"},
+}
+
+// handleTokenError translates dependency errors into domain errors.
+// Uses tokenErrorMappings to determine error code and user-facing message based on flow type.
 func (s *Service) handleTokenError(ctx context.Context, err error, clientID string, recordID *string, flow TokenFlow) error {
 	if err == nil {
 		return nil
@@ -287,50 +308,31 @@ func (s *Service) handleTokenError(ctx context.Context, err error, clientID stri
 		attrs = append(attrs, "record_id", *recordID)
 	}
 
+	// Pass through existing domain errors
 	var de dErrors.DomainError
 	if errors.As(err, &de) {
 		s.authFailure(ctx, string(de.Code), false, attrs...)
 		return err
 	}
 
-	switch {
-	case errors.Is(err, facts.ErrNotFound):
-		msg := "invalid authorization code"
-		if flow == TokenFlowRefresh {
-			msg = "invalid refresh token"
+	// Check mappings in order
+	for _, m := range tokenErrorMappings {
+		if errors.Is(err, m.sentinel) {
+			msg := m.codeMsg
+			if flow == TokenFlowRefresh {
+				msg = m.refreshMsg
+			}
+			if msg == "" {
+				msg = err.Error()
+			}
+			s.authFailure(ctx, m.logReason, false, attrs...)
+			return dErrors.Wrap(err, m.code, msg)
 		}
-		s.authFailure(ctx, "not_found", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, msg)
-	case errors.Is(err, facts.ErrExpired):
-		msg := "authorization code expired"
-		if flow == TokenFlowRefresh {
-			msg = "refresh token expired"
-		}
-		s.authFailure(ctx, "expired", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, msg)
-	case errors.Is(err, facts.ErrAlreadyUsed):
-		msg := "authorization code already used"
-		if flow == TokenFlowRefresh {
-			msg = "invalid refresh token"
-		}
-		s.authFailure(ctx, "already_used", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, msg)
-	case errors.Is(err, sessionStore.ErrSessionRevoked):
-		s.authFailure(ctx, "session_revoked", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, "session has been revoked")
-	case errors.Is(err, facts.ErrInvalidState):
-		s.authFailure(ctx, "invalid_state", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, "session not active")
-	case errors.Is(err, facts.ErrInvalidInput):
-		s.authFailure(ctx, "invalid_input", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeInvalidGrant, err.Error())
-	case errors.Is(err, facts.ErrBadRequest):
-		s.authFailure(ctx, "bad_request", false, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeBadRequest, err.Error())
-	default:
-		s.authFailure(ctx, "internal_error", true, attrs...)
-		return dErrors.Wrap(err, dErrors.CodeInternal, "token handling failed")
 	}
+
+	// Default: internal error
+	s.authFailure(ctx, "internal_error", true, attrs...)
+	return dErrors.Wrap(err, dErrors.CodeInternal, "token handling failed")
 }
 
 func (s *Service) generateTokenArtifacts(session *models.Session) (*tokenArtifacts, error) {
