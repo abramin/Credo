@@ -525,18 +525,33 @@ For authentication endpoints (`/auth/*`, `/mfa/*`), maintain a local in-memory r
 **Approach:** Validate at system boundaries (middleware, handlers), use simple types internally.
 
 **Rationale:** Domain primitives add complexity without proportional benefit for internal infrastructure code like rate limiting. The cost of over-engineering (development time, cognitive load, testing surface) exceeds the benefit when:
+<<<<<<< HEAD
+
+=======
+
+> > > > > > > 04966fa (clarify design)
 
 - Inputs come from trusted internal sources (already validated at API boundaries)
 - The domain is well-understood with few edge cases
 - Code is not exposed to external consumers
 
 **When to use strict domain primitives:**
+<<<<<<< HEAD
+
+=======
+
+> > > > > > > 04966fa (clarify design)
 
 - External-facing APIs with untrusted input
 - Cross-service boundaries
 - Complex business rules that vary by type
 
 **When simple types suffice:**
+<<<<<<< HEAD
+
+=======
+
+> > > > > > > 04966fa (clarify design)
 
 - Internal infrastructure (rate limiting, caching, logging)
 - Single-service, single-team ownership
@@ -708,6 +723,11 @@ func LoadRateLimitConfig() RateLimitConfig {
 **Secure-by-Design:** IP extraction must validate against trusted proxy list. Never blindly trust X-Forwarded-For as attackers can spoof headers to bypass rate limits.
 
 **Validation Order (per AGENTS.md Principle #5):**
+<<<<<<< HEAD
+
+=======
+
+> > > > > > > 04966fa (clarify design)
 
 1. **Origin:** Request must come from known proxy or direct connection
 2. **Size:** Limit X-Forwarded-For header length (max 500 chars)
@@ -761,6 +781,7 @@ func (c ClientIP) Addr() netip.Addr { return c.addr }
 **Objective:** Demonstrate SQL indexing concepts from "Use The Index, Luke" with production-ready patterns for rate limiting.
 
 **Topics Covered:**
+
 - B-Tree anatomy (sliding window key structure)
 - Composite/concatenated keys (key ordering for range queries)
 - Covering indexes (Allow() without table access)
@@ -773,13 +794,13 @@ func (c ClientIP) Addr() netip.Addr { return c.addr }
 
 #### Index Design
 
-| Table | Index | Type | Columns | Purpose |
-|-------|-------|------|---------|---------|
-| `rate_limits` | `idx_ratelimit_key_window` | B-Tree | `(key, window_end)` | Primary lookup for Allow() |
-| `rate_limits` | `idx_ratelimit_covering` | B-Tree | `(key, window_end) INCLUDE (remaining, limit_value)` | Index-only scan for Allow() |
-| `rate_limits` | `idx_ratelimit_blocked` | B-Tree (partial) | `(key) WHERE remaining = 0` | Abuse reporting queries |
-| `rate_limits` | `idx_ratelimit_cleanup` | B-Tree | `(window_end)` | Background cleanup worker |
-| `allowlist` | `idx_allowlist_type_id` | B-Tree | `(type, identifier)` | Allowlist bypass check |
+| Table         | Index                      | Type             | Columns                                              | Purpose                     |
+| ------------- | -------------------------- | ---------------- | ---------------------------------------------------- | --------------------------- |
+| `rate_limits` | `idx_ratelimit_key_window` | B-Tree           | `(key, window_end)`                                  | Primary lookup for Allow()  |
+| `rate_limits` | `idx_ratelimit_covering`   | B-Tree           | `(key, window_end) INCLUDE (remaining, limit_value)` | Index-only scan for Allow() |
+| `rate_limits` | `idx_ratelimit_blocked`    | B-Tree (partial) | `(key) WHERE remaining = 0`                          | Abuse reporting queries     |
+| `rate_limits` | `idx_ratelimit_cleanup`    | B-Tree           | `(window_end)`                                       | Background cleanup worker   |
+| `allowlist`   | `idx_allowlist_type_id`    | B-Tree           | `(type, identifier)`                                 | Allowlist bypass check      |
 
 ---
 
@@ -951,6 +972,7 @@ CREATE TABLE rate_limits_1 PARTITION OF rate_limits FOR VALUES WITH (MODULUS 8, 
 #### Exercises
 
 **Exercise 1: Index Ordering Matters**
+
 ```sql
 -- Create both indexes and compare EXPLAIN ANALYZE for the Allow() query:
 CREATE INDEX idx_good ON rate_limits (key, window_end);
@@ -964,6 +986,7 @@ SELECT remaining FROM rate_limits WHERE key = 'test:key' AND window_end > NOW();
 ```
 
 **Exercise 2: Covering Index Saves Heap Fetches**
+
 ```sql
 -- Compare heap fetches with and without INCLUDE columns:
 -- Step 1: Basic index
@@ -978,6 +1001,7 @@ EXPLAIN (ANALYZE, BUFFERS) SELECT remaining, limit_value FROM rate_limits WHERE 
 ```
 
 **Exercise 3: Measure INSERT Overhead**
+
 ```sql
 -- Benchmark INSERT with different index counts:
 -- Setup: Create table with 0, 1, 2, 3 indexes
