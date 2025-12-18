@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
 	"credo/internal/ratelimit/models"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit"
+	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/privacy"
 )
 
