@@ -460,18 +460,74 @@
   transform: translateX(16px);
 }
 
-/* Score Mini */
-.score-mini {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+/* Token Copy Box */
+.token-copy-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-md);
   padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.token-copy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.token-copy-header h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.token-preview {
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  word-break: break-all;
+  background: var(--bg-input);
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+/* Score Section */
+.score-section {
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
+  padding: 1rem;
   margin-top: auto;
 }
 
-.score-mini .score-value {
+.score-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.score-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.score-badge {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+}
+
+.score-display {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.score-display .score-value {
   font-size: 2rem;
   font-weight: 700;
   background: var(--accent-gradient);
@@ -480,9 +536,41 @@
   background-clip: text;
 }
 
-.score-mini .score-label {
-  font-size: 0.75rem;
+.score-display .score-max {
+  font-size: 0.875rem;
   color: var(--text-muted);
+}
+
+.score-bar {
+  height: 6px;
+  background: var(--bg-input);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.score-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width var(--transition-normal);
+}
+
+.score-bar-success {
+  background: var(--success);
+}
+
+.score-bar-warning {
+  background: var(--warning);
+}
+
+.score-bar-error {
+  background: var(--error);
+}
+
+.score-hint {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin: 0;
 }
 
 /* Compare Toggle in Nav */

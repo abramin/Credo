@@ -329,6 +329,21 @@
             <pre class="response-json" x-text="formatJson(response)"></pre>
           </div>
 
+          <!-- Quick Copy Token -->
+          <div class="token-copy-box" x-show="response?.access_token">
+            <div class="token-copy-header">
+              <h4>Access Token</h4>
+              <button class="btn btn-primary btn-sm" @click="copyToken(response?.access_token)">
+                <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                Copy Token
+              </button>
+            </div>
+            <div class="token-preview" x-text="truncate(response?.access_token, 80)"></div>
+          </div>
+
           <!-- JWT Decoder (for token responses) -->
           <div class="jwt-section" x-show="response?.access_token">
             <h4>
@@ -462,9 +477,19 @@
         </label>
       </div>
 
-      <div class="score-mini">
-        <span class="score-value" x-text="$store.config.securityScore"></span>
-        <span class="score-label">Security Score</span>
+      <div class="score-section">
+        <div class="score-header">
+          <span class="score-title">Security Score</span>
+          <span class="score-badge" :class="`badge-${$store.config.securityLevel.color}`" x-text="$store.config.securityLevel.label"></span>
+        </div>
+        <div class="score-display">
+          <span class="score-value" x-text="$store.config.securityScore"></span>
+          <span class="score-max">/ 100</span>
+        </div>
+        <div class="score-bar">
+          <div class="score-bar-fill" :style="`width: ${$store.config.securityScore}%`" :class="`score-bar-${$store.config.securityLevel.color}`"></div>
+        </div>
+        <p class="score-hint">Toggle controls above to see how security changes</p>
       </div>
     </aside>
   </main>
@@ -664,6 +689,12 @@
 
         truncate(str, len) {
           return FormatUtils.truncate(str, len);
+        },
+
+        async copyToken(token) {
+          if (token) {
+            await FormatUtils.copyToClipboard(token);
+          }
         },
 
         getControlLabel(control) {
