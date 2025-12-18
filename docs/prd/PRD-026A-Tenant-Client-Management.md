@@ -471,6 +471,8 @@ These capabilities may be introduced in a future PRD once tenant and client prim
 - **Tenant Isolation:** All user/client queries filter by `tenant_id`; no cross-tenant joins for auth paths.
 - **Rate Limits:** Reuse PRD-017 defaults for admin endpoints; protect tenant creation and client registration.
 - **Token Claims:** Include `tenant_id` and `client_id`; downstream services must validate issuer/audience and tenant match.
+- **Token Signing:** HS256 only for MVP; any header algo mismatch (including `none`) is rejected as invalid without leaking detail.
+- **Tenant/Client Suspension Effects:** On tenant or client suspension, auth/refresh/code issuance and reuse are denied; tie into PRD-016 revocation to invalidate outstanding codes/tokens.
 - **Telemetry:** Audit events for tenant/client/user creation and secret rotation; emit security alerts on repeated invalid client_id attempts.
 
 ---
@@ -498,6 +500,9 @@ These capabilities may be introduced in a future PRD once tenant and client prim
 - [x] Platform admin access allows tenant creation and retrieval.
 - [x] Tenant admin access allows client management only within the caller's tenant.
 - [x] Authorization checks are enforced in the service layer and cannot be bypassed by handler misuse.
+- [x] Secrets are hashed with argon2id/bcrypt and are never retrievable after creation/rotation responses.
+- [x] Redirect URIs must exactly match registered normalized URIs; wildcards and mismatched hosts/schemes/ports are rejected.
+- [x] Tokens with mismatched or `none` alg headers are rejected as invalid.
 
 ---
 
@@ -506,6 +511,7 @@ These capabilities may be introduced in a future PRD once tenant and client prim
 - Should we support **organization/teams** within a tenant in Phase 2? (Out of scope now.)
 - Do we need **client credentials grant** for machine-to-machine apps in MVP? If not, restrict to `authorization_code` and `refresh_token`.
 - How should **tenant-level settings** (password policies, MFA requirement) be configured? Potential follow-up PRD.
+- Should we harden key custody with **per-tenant keys and HSM-backed signing**, including JWKS rotation windows and backward-compatible key rollover?
 
 ---
 
