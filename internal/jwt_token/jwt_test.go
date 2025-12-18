@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"credo/internal/sentinel"
+
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,6 +62,52 @@ func Test_ValidateToken_ValidTokent(t *testing.T) {
 	assert.Equal(t, userID.String(), claims.UserID)
 	assert.Equal(t, sessionID.String(), claims.SessionID)
 	assert.Equal(t, clientID, claims.ClientID)
+}
+
+func Test_ValidateToken_RejectsAlgorithmConfusion(t *testing.T) {
+	claims := AccessTokenClaims{
+		UserID:    userID.String(),
+		SessionID: sessionID.String(),
+		ClientID:  clientID,
+		TenantID:  tenantID,
+		Scope:     []string{"read"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    jwtService.BuildIssuer(tenantID),
+			Audience:  []string{"test-audience"},
+			ID:        uuid.NewString(),
+		},
+	}
+
+	cases := []struct {
+		name       string
+		signMethod jwt.SigningMethod
+		signKey    any
+	}{
+		{
+			name:       "hs512 header rejected",
+			signMethod: jwt.SigningMethodHS512,
+			signKey:    []byte("test-signing-key"),
+		},
+		{
+			name:       "alg none rejected",
+			signMethod: jwt.SigningMethodNone,
+			signKey:    jwt.UnsafeAllowNoneSignatureType,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			token := jwt.NewWithClaims(tt.signMethod, claims)
+			tokenString, err := token.SignedString(tt.signKey)
+			require.NoError(t, err)
+
+			_, err = jwtService.ValidateToken(tokenString)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, sentinel.ErrInvalidInput)
+		})
+	}
 }
 
 func Test_GenerateIDToken(t *testing.T) {

@@ -72,7 +72,7 @@ func (s *JWTService) ExtractTenantFromIssuer(issuer string) (string, error) {
 	if issuer == s.issuerBaseURL {
 		return "", nil
 	}
-	return "", fmt.Errorf("invalid issuer format: %s", issuer)
+	return "", fmt.Errorf("invalid issuer format: %w", sentinel.ErrInvalidInput)
 }
 
 func (s *JWTService) GenerateAccessTokenWithJTI(
@@ -95,7 +95,7 @@ func (s *JWTService) GenerateAccessTokenWithJTI(
 	}
 	claims, ok := parsed.Claims.(*AccessTokenClaims)
 	if !ok {
-		return "", "", errors.New("invalid token claims")
+		return "", "", fmt.Errorf("invalid token claims: %w", sentinel.ErrInvalidInput)
 	}
 	return newToken, claims.ID, nil
 }
@@ -139,14 +139,14 @@ func (s *JWTService) GenerateAccessToken(
 
 func (s *JWTService) ParseTokenSkipClaimsValidation(tokenString string) (*AccessTokenClaims, error) {
 	if tokenString == "" {
-		return nil, errors.New("empty token")
+		return nil, fmt.Errorf("empty token: %w", sentinel.ErrInvalidInput)
 	}
 
 	claims := new(AccessTokenClaims)
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, fmt.Errorf("unexpected signing algorithm: %s", t.Method.Alg())
+			return nil, fmt.Errorf("unexpected signing algorithm: %w", sentinel.ErrInvalidInput)
 		}
 		return s.signingKey, nil
 	},
@@ -154,13 +154,13 @@ func (s *JWTService) ParseTokenSkipClaimsValidation(tokenString string) (*Access
 	)
 	if err != nil {
 		if errors.Is(err, jwt.ErrSignatureInvalid) {
-			return nil, fmt.Errorf("invalid jwt signature: %w", err)
+			return nil, fmt.Errorf("invalid jwt signature: %w", sentinel.ErrInvalidInput)
 		}
-		return nil, fmt.Errorf("jwt parse failed: %w", err)
+		return nil, fmt.Errorf("jwt parse failed: %w", sentinel.ErrInvalidInput)
 	}
 
 	if !token.Valid {
-		return nil, errors.New("invalid jwt signature")
+		return nil, fmt.Errorf("invalid jwt signature: %w", sentinel.ErrInvalidInput)
 	}
 
 	return claims, nil
@@ -199,9 +199,8 @@ func (s *JWTService) SetEnv(env string) {
 }
 
 func (s *JWTService) ValidateToken(tokenString string) (*AccessTokenClaims, error) {
-	var err error
 	parsed, err := jwt.ParseWithClaims(tokenString, &AccessTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, jwt.ErrTokenUnverifiable
 		}
 		return s.signingKey, nil
@@ -228,7 +227,7 @@ func (s *JWTService) ValidateToken(tokenString string) (*AccessTokenClaims, erro
 
 func (s *JWTService) ValidateIDToken(tokenString string) (*IDTokenClaims, error) {
 	parsed, err := jwt.ParseWithClaims(tokenString, &IDTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, jwt.ErrTokenUnverifiable
 		}
 		return s.signingKey, nil
