@@ -272,10 +272,12 @@ On each request:
   "message": "Invalid allowlist entry",
   "details": {
     "type": "must be 'ip' or 'user_id'",
-    "identifier": "invalid IP address format"
+    "identifier": "invalid format"
   }
 }
 ```
+
+**Security Note (per AGENTS.md Principle #7):** Error responses must NEVER echo the actual user-provided identifier value. Only echo field names and generic validation messages. The raw identifier should be logged server-side for debugging but never returned to the client.
 
 **404 Not Found (when removing from allowlist):**
 
@@ -405,31 +407,42 @@ X-Quota-Reset: 1738291200 (first of next month)
 
 **Description:** Define behavior when the rate limiting infrastructure (Redis) is unavailable.
 
-**Policy:** Fail Open (allow requests to proceed)
+**Policy:** Bounded Fail Open with Mandatory Fallback (per AGENTS.md Principle #10: Rotate, Repave, Repair)
 
 **Rationale:**
 
 - Availability over security for transient failures
 - Redis failures should be rare and short-lived
 - Denying all requests would cause complete service outage
+- **However:** Unbounded fail-open creates attack vector (exhaust Redis to bypass limits)
 
 **Fallback Behavior:**
 
-1. If Redis is unavailable, allow the request
+1. If Redis is unavailable, use in-memory fallback limiter (MANDATORY for auth endpoints)
 2. Log warning: `rate_limiter_unavailable`
 3. Emit metric: `rate_limit.fallback_allow`
 4. Set header: `X-RateLimit-Status: degraded`
+
+**Circuit Breaker (REQUIRED):**
+
+- Open circuit after 5 consecutive Redis failures
+- Half-open after 10 seconds to test recovery
+- Close circuit after 3 successful operations
+- Maximum degraded mode duration: 5 minutes
+- **Repair trigger:** Auto-restart instance if degraded mode exceeds 5 minutes
 
 **Monitoring:**
 
 - Alert if fallback mode exceeds 1% of requests
 - Alert if Redis connection failures persist > 30 seconds
+- Alert if circuit breaker opens
 
-**Optional: In-Memory Fallback**
+**Mandatory: In-Memory Fallback for Auth Endpoints**
 
-For critical endpoints (authentication), maintain a local in-memory rate limiter as backup:
+For authentication endpoints (`/auth/*`, `/mfa/*`), maintain a local in-memory rate limiter:
 
-- Smaller limits than distributed version
+- **Required**, not optional - auth endpoints must always be rate limited
+- Smaller limits than distributed version (50% of normal limits)
 - Per-instance only (not shared across instances)
 - Prevents total bypass during Redis outage
 
@@ -437,33 +450,75 @@ For critical endpoints (authentication), maintain a local in-memory rate limiter
 
 ## 4. Technical Requirements
 
-### TR-1: Rate Limiter Interface
+### TR-0: Validation Strategy (Boundary Validation)
 
-**Location:** `internal/platform/ratelimit/limiter.go`
+**Approach:** Validate at system boundaries (middleware, handlers), use simple types internally.
+
+**Rationale:** Domain primitives add complexity without proportional benefit for internal infrastructure code like rate limiting. The cost of over-engineering (development time, cognitive load, testing surface) exceeds the benefit when:
+- Inputs come from trusted internal sources (already validated at API boundaries)
+- The domain is well-understood with few edge cases
+- Code is not exposed to external consumers
+
+**When to use strict domain primitives:**
+- External-facing APIs with untrusted input
+- Cross-service boundaries
+- Complex business rules that vary by type
+
+**When simple types suffice:**
+- Internal infrastructure (rate limiting, caching, logging)
+- Single-service, single-team ownership
+- Inputs already validated upstream
+
+**Key principle:** Validate once at the boundary, trust internally.
 
 ```go
-type RateLimiter interface {
-    // Check if request is allowed
-    Allow(ctx context.Context, key string, limit int, window time.Duration) (allowed bool, remaining int, resetAt time.Time, err error)
+// Middleware validates IP before calling rate limit service
+func RateLimitMiddleware(svc *ratelimit.Service) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            ip := extractAndValidateIP(r) // Validation happens HERE
+            if ip == "" {
+                http.Error(w, "invalid request", http.StatusBadRequest)
+                return
+            }
+            // Internal call uses validated string - no re-validation needed
+            result, _ := svc.CheckIPRateLimit(r.Context(), ip, endpoint.Class)
+            // ...
+        })
+    }
+}
+```
 
-    // Check with custom cost (e.g., registry lookup costs 5 tokens)
-    AllowN(ctx context.Context, key string, cost int, limit int, window time.Duration) (allowed bool, remaining int, resetAt time.Time, err error)
+---
 
-    // Reset limit for key (admin operation)
+### TR-1: Rate Limiter Interface
+
+**Location:** `internal/ratelimit/service/interfaces.go`
+
+```go
+type BucketStore interface {
+    // Allow checks if a request is allowed and increments the counter.
+    // Key is a simple string - validation happens at the boundary (middleware).
+    Allow(ctx context.Context, key string, limit int, window time.Duration) (*RateLimitResult, error)
+
+    // AllowN checks with custom cost (e.g., registry lookup costs 5 tokens).
+    AllowN(ctx context.Context, key string, cost int, limit int, window time.Duration) (*RateLimitResult, error)
+
+    // Reset clears the rate limit counter for a key (admin operation).
     Reset(ctx context.Context, key string) error
 
-    // Check if identifier is allowlisted
-    IsAllowlisted(ctx context.Context, identifier string) (bool, error)
+    // GetCurrentCount returns the current request count for a key.
+    GetCurrentCount(ctx context.Context, key string) (int, error)
 }
 
 // In-memory implementation (MVP, not distributed)
-type InMemoryLimiter struct {
+type InMemoryBucketStore struct {
     mu      sync.RWMutex
-    buckets map[string]*TokenBucket
+    buckets map[string]*slidingWindow // key.String() -> window
 }
 
 // Production: Redis-backed (distributed)
-type RedisLimiter struct {
+type RedisBucketStore struct {
     client *redis.Client
 }
 ```
@@ -577,18 +632,54 @@ func LoadRateLimitConfig() RateLimitConfig {
 
 **Location:** `internal/platform/ratelimit/ip.go`
 
+**Secure-by-Design:** IP extraction must validate against trusted proxy list. Never blindly trust X-Forwarded-For as attackers can spoof headers to bypass rate limits.
+
+**Validation Order (per AGENTS.md Principle #5):**
+1. **Origin:** Request must come from known proxy or direct connection
+2. **Size:** Limit X-Forwarded-For header length (max 500 chars)
+3. **Lexical:** Validate IP format (IPv4/IPv6)
+4. **Syntax:** Ensure well-formed header structure
+5. **Semantic:** Only trust XFF if RemoteAddr is in trusted proxy list
+
 ```go
-func extractClientIP(r *http.Request) string {
-    // Trust X-Forwarded-For if behind proxy
-    if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-        ips := strings.Split(xff, ",")
-        return strings.TrimSpace(ips[0]) // First IP is client
+// ClientIP is a validated domain primitive for client IP addresses.
+// Enforces validity at creation time per AGENTS.md Principle #2.
+type ClientIP struct {
+    addr netip.Addr
+}
+
+// ExtractClientIP extracts and validates the client IP from a request.
+// Only trusts X-Forwarded-For if the request came from a trusted proxy.
+func ExtractClientIP(r *http.Request, trustedProxies []netip.Prefix) (ClientIP, error) {
+    // 1. Parse RemoteAddr
+    remoteIP, err := parseRemoteAddr(r.RemoteAddr)
+    if err != nil {
+        return ClientIP{}, err
     }
 
-    // Fallback to RemoteAddr
-    ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-    return ip
+    // 2. Check if request came from trusted proxy
+    xff := r.Header.Get("X-Forwarded-For")
+    if xff == "" || !isTrustedProxy(remoteIP, trustedProxies) {
+        return ClientIP{addr: remoteIP}, nil
+    }
+
+    // 3. Size limit (prevent header bombing)
+    if len(xff) > 500 {
+        return ClientIP{}, errors.New("X-Forwarded-For header too long")
+    }
+
+    // 4. Parse and validate first IP in chain
+    ips := strings.Split(xff, ",")
+    clientIP, err := netip.ParseAddr(strings.TrimSpace(ips[0]))
+    if err != nil {
+        return ClientIP{}, fmt.Errorf("invalid client IP in X-Forwarded-For: %w", err)
+    }
+
+    return ClientIP{addr: clientIP}, nil
 }
+
+func (c ClientIP) String() string { return c.addr.String() }
+func (c ClientIP) Addr() netip.Addr { return c.addr }
 ```
 
 ---
@@ -688,6 +779,35 @@ bombardier -c 20 -n 200 -m POST \
 - Postgres limiter tests cover partitioning/index effectiveness via EXPLAIN and correctness under concurrent writes.
 - DSA tests compare deque vs time-wheel implementations for correctness and complexity bounds.
 
+### Invariant-Focused Tests (per AGENTS.md Test Guidelines)
+
+Tests should assert domain invariants, not implementation details:
+
+```go
+// Invariant: A key cannot exceed its limit within any window slice
+func TestSlidingWindow_NeverExceedsLimit(t *testing.T) {
+    // Property-based test: for any sequence of requests,
+    // the count never exceeds limit within any contiguous window
+}
+
+// Invariant: RateLimitKey with empty identifier cannot be created
+func TestRateLimitKey_EmptyIdentifierFails(t *testing.T) {
+    _, err := NewRateLimitKey(ScopeIP, "", ClassAuth)
+    require.Error(t, err)
+}
+
+// Invariant: RateLimitDecision is immutable after creation
+func TestRateLimitDecision_Immutable(t *testing.T) {
+    // Verify no setter methods exist; state cannot change
+}
+
+// Invariant: Allowlisted entries bypass limits but still emit audit
+func TestAllowlist_BypassWithAudit(t *testing.T) {}
+
+// Invariant: Circuit breaker opens after threshold failures
+func TestCircuitBreaker_OpensAfterThreshold(t *testing.T) {}
+```
+
 ---
 
 ## 8. API Examples
@@ -764,6 +884,8 @@ curl -X POST http://localhost:8080/admin/rate-limit/allowlist \
 
 | Version | Date       | Author       | Changes                                                                                                         |
 | ------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------- |
+| 1.7     | 2025-12-18 | Engineering  | Simplified TR-0: Replaced domain primitives with boundary validation strategy. Use simple string keys internally, validate at middleware/handler boundaries. Reduced complexity without sacrificing security. |
+| 1.6     | 2025-12-18 | Security Eng | Secure-by-design review: trusted proxy validation in TR-5, mandatory in-memory fallback with circuit breaker in FR-7, invariant-focused tests, no-echo rule for error responses |
 | 1.5     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (deque/time-wheel, Postgres partitioning), atomic multi-key resets, expanded testing |
 | 1.4     | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests                           |
 | 1.3     | 2025-12-17 | Engineering  | Add comprehensive error responses for FR-4, FR-5, FR-2b; add FR-7 failure mode                                  |
