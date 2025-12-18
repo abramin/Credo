@@ -4,7 +4,6 @@
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
 **Dependencies:** PRD-001 (Authentication), PRD-016 (Token Lifecycle)
-**Last Updated:** 2025-12-18
 
 ---
 
@@ -163,6 +162,7 @@ Retry-After: 45 (seconds, only on 429 response)
 **Description:** Combine credential-specific throttles with global limits to slow brute force and credential stuffing.
 
 **Controls:**
+
 - Username/email and IP combined key with sliding window: 5 attempts/15 minutes, hard lock for 15 minutes after 10 failures/day; emit audit `auth.lockout`.
 - Progressive backoff before 401/429 responses (250ms → 500ms → 1s) to reduce online guessing speed.
 - Generic error messaging to prevent account enumeration (same response for invalid username vs password/MFA code).
@@ -357,25 +357,10 @@ type TokenBucket struct {
     mu        sync.Mutex
 }
 
-func (b *TokenBucket) Take(cost int) bool {
-    b.mu.Lock()
-    defer b.mu.Unlock()
-
-    // Refill tokens based on elapsed time
-    now := time.Now()
-    elapsed := now.Sub(b.lastRefill)
-    tokensToAdd := int(elapsed / b.refillRate)
-    b.tokens = min(b.tokens + tokensToAdd, b.capacity)
-    b.lastRefill = now
-
-    // Check if enough tokens
-    if b.tokens >= cost {
-        b.tokens -= cost
-        return true
-    }
-    return false
-}
+func (b *TokenBucket) Take(cost int) bool {}
 ```
+
+- Bucket refill/eviction should be handled by a background goroutine (context-aware) to amortize work across requests; emit metrics for refill latency, eviction counts, and queue depth when shared stores backpressure.
 
 **Sliding Window (Redis, production):**
 
@@ -414,34 +399,6 @@ type RateLimitMiddleware struct {
 func (m *RateLimitMiddleware) RateLimit(class EndpointClass) func(http.Handler) http.Handler {
     return func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            // Extract IP
-            ip := extractClientIP(r)
-
-            // Check allowlist
-            if allowed, _ := m.limiter.IsAllowlisted(r.Context(), ip); allowed {
-                next.ServeHTTP(w, r)
-                return
-            }
-
-            // Get limit config for endpoint class
-            limit, window := m.config.GetLimits(class)
-
-            // Check IP rate limit
-            key := fmt.Sprintf("ip:%s:%s", ip, class)
-            allowed, remaining, resetAt, err := m.limiter.Allow(r.Context(), key, limit, window)
-
-            // Add headers
-            w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
-            w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-            w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetAt.Unix(), 10))
-
-            if !allowed {
-                w.Header().Set("Retry-After", strconv.Itoa(int(window.Seconds())))
-                http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-                return
-            }
-
-            next.ServeHTTP(w, r)
         })
     }
 }
@@ -681,9 +638,9 @@ curl -X POST http://localhost:8080/admin/rate-limit/allowlist \
 
 ## Revision History
 
-| Version | Date       | Author       | Changes     |
-| ------- | ---------- | ------------ | ----------- |
+| Version | Date       | Author       | Changes                                                                                                         |
+| ------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------- |
 | 1.3     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (deque/time-wheel, Postgres partitioning), atomic multi-key resets, expanded testing |
-| 1.2     | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests |
-| 1.1     | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance |
-| 1.0     | 2025-12-12 | Product Team | Initial PRD |
+| 1.2     | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests                           |
+| 1.1     | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance                                             |
+| 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                     |
