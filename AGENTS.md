@@ -95,9 +95,9 @@ Testing in Credo follows a **contract-first, behavior-driven approach**.
 
 ### Sources of truth
 
-* Gherkin **feature files are the authoritative contracts**.
-* Cucumber tests that execute real components are considered **integration tests**.
-* Feature-driven integration tests define correctness.
+- Gherkin **feature files are the authoritative contracts**.
+- Cucumber tests that execute real components are considered **integration tests**.
+- Feature-driven integration tests define correctness.
 
 ---
 
@@ -105,10 +105,10 @@ Testing in Credo follows a **contract-first, behavior-driven approach**.
 
 #### Feature-driven integration tests (primary)
 
-* Validate externally observable behavior.
-* Execute real system boundaries.
-* Must map directly to feature scenarios.
-* Define correctness for the system.
+- Validate externally observable behavior.
+- Execute real system boundaries.
+- Must map directly to feature scenarios.
+- Define correctness for the system.
 
 If behavior matters to users or clients, it belongs here.
 
@@ -118,8 +118,8 @@ If behavior matters to users or clients, it belongs here.
 
 Allowed only when behavior:
 
-* cannot be expressed clearly in Gherkin, or
-* involves concurrency, shutdown, retries, timing, or partial failure.
+- cannot be expressed clearly in Gherkin, or
+- involves concurrency, shutdown, retries, timing, or partial failure.
 
 These tests must justify why they are not feature scenarios.
 
@@ -131,16 +131,16 @@ Unit tests are **not required for all service logic**.
 
 They exist only to:
 
-* enforce invariants
-* validate edge cases unreachable via integration tests
-* assert error propagation or mapping across boundaries
-* test pure functions with meaningful logic
+- enforce invariants
+- validate edge cases unreachable via integration tests
+- assert error propagation or mapping across boundaries
+- test pure functions with meaningful logic
 
 Unit tests must **not**:
 
-* assert internal state or struct fields
-* encode call ordering or orchestration
-* duplicate feature or integration coverage
+- assert internal state or struct fields
+- encode call ordering or orchestration
+- duplicate feature or integration coverage
 
 Every unit test must answer:
 
@@ -150,28 +150,61 @@ Every unit test must answer:
 
 ### Duplication policy
 
-* No behavior should be tested at multiple layers without justification.
-* Feature tests take precedence.
-* Lower-level tests that duplicate feature coverage are flagged for review, not deleted by default.
+- No behavior should be tested at multiple layers without justification.
+- Feature tests take precedence.
+- Lower-level tests that duplicate feature coverage are flagged for review, not deleted by default.
 
 ---
 
 ### Mocks and doubles
 
-* Avoid mocks by default.
-* Use mocks only to induce failure modes or validate error propagation.
-* Stores, adapters, and transports must remain swappable.
+- Avoid mocks by default.
+- Use mocks only to induce failure modes or validate error propagation.
+- Stores, adapters, and transports must remain swappable.
 
 ---
 
 ### Conservative posture
 
-* Tests are not deleted automatically.
-* First classify, then justify rewrite or removal.
-* Prefer rewriting tests toward contract assertions.
+- Tests are not deleted automatically.
+- First classify, then justify rewrite or removal.
+- Prefer rewriting tests toward contract assertions.
 
 ---
 
 ### Additional conventions
 
 - see docs/conventions.md
+
+## Secure-by-Design Reviewer Agent
+
+**Role**
+Review Credo designs, code, and PRDs using secure-by-design principles rather than vulnerability scanning or checklist compliance.
+
+**Core Principles Enforced**
+
+- Invalid states are unrepresentable
+- Trust boundaries are explicit and enforced at system edges
+- Deny-by-default behavior everywhere
+- Least privilege enforced through types, interfaces, and module boundaries
+- Secrets, tokens, and authority are scoped, short-lived, and revocable
+
+**Focus Areas**
+
+- Constructors, factories, and type design
+- Boundary handlers (HTTP, gRPC, async consumers)
+- Authority propagation between modules
+- Token, consent, and identity lifecycles
+- Test intent (security behavior vs implementation detail)
+
+**What This Agent Avoids**
+
+- Patch-level fixes without design impact
+- Generic OWASP checklists
+- Repeating integration tests as “security tests”
+
+**Output Style**
+
+- Concrete, Credo-specific findings
+- Design tradeoffs and risks made explicit
+- Recommendations phrased as refactors or invariants
