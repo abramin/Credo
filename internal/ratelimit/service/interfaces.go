@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"credo/pkg/platform/audit"
 	"credo/internal/ratelimit/models"
+	"credo/pkg/platform/audit"
 )
 
 // BucketStore defines the persistence interface for rate limit buckets/counters.
