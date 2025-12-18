@@ -107,12 +107,13 @@ func (c *Client) IsActive() bool {
 }
 
 // ClientResponse is returned to callers and includes the cleartext secret when rotated.
+// Note: client_secret is always present; empty string indicates secret is not returned (GET vs POST).
 type ClientResponse struct {
 	ID            uuid.UUID `json:"id"`
 	TenantID      uuid.UUID `json:"tenant_id"`
 	Name          string    `json:"name"`
 	ClientID      string    `json:"client_id"`
-	ClientSecret  string    `json:"client_secret,omitempty"`
+	ClientSecret  string    `json:"client_secret"`
 	RedirectURIs  []string  `json:"redirect_uris"`
 	AllowedGrants []string  `json:"allowed_grants"`
 	AllowedScopes []string  `json:"allowed_scopes"`
@@ -120,8 +121,12 @@ type ClientResponse struct {
 }
 
 // TenantDetails aggregates tenant metadata with counts for admin dashboards.
+// Note: Fields are flattened for easier client access (no nested "tenant" object).
 type TenantDetails struct {
-	Tenant      *Tenant `json:"tenant"`
-	UserCount   int     `json:"user_count"`
-	ClientCount int     `json:"client_count"`
+	ID          uuid.UUID    `json:"id"`
+	Name        string       `json:"name"`
+	Status      TenantStatus `json:"status"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UserCount   int          `json:"user_count"`
+	ClientCount int          `json:"client_count"`
 }

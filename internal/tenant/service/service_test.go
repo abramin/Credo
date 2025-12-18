@@ -132,7 +132,7 @@ func (s *ServiceSuite) TestGetTenantCounts() {
 	details, err := s.service.GetTenant(context.Background(), tenantRecord.ID)
 	require.NoError(s.T(), err)
 	assert.Equal(s.T(), 1, details.ClientCount)
-	assert.Equal(s.T(), tenantRecord.ID, details.Tenant.ID)
+	assert.Equal(s.T(), tenantRecord.ID, details.ID)
 }
 
 func (s *ServiceSuite) TestValidationErrors() {

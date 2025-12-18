@@ -78,7 +78,7 @@ func DomainCodeToHTTPCode(code dErrors.Code) string {
 	case dErrors.CodeBadRequest:
 		return "bad_request"
 	case dErrors.CodeValidation:
-		return "bad_request"
+		return "validation"
 	case dErrors.CodeInvalidInput:
 		return "bad_request"
 	case dErrors.CodeConflict:

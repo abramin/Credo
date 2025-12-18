@@ -91,7 +91,7 @@ func (s *Service) CreateTenant(ctx context.Context, name string) (*models.Tenant
 	}
 
 	if err := s.tenants.CreateIfNameAvailable(ctx, t); err != nil {
-		if dErrors.HasCode(err, dErrors.CodeConflict) {
+		if errors.Is(err, sentinel.ErrAlreadyUsed) || dErrors.HasCode(err, dErrors.CodeConflict) {
 			return nil, dErrors.New(dErrors.CodeConflict, "tenant name must be unique")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create tenant")
@@ -123,7 +123,14 @@ func (s *Service) GetTenant(ctx context.Context, id uuid.UUID) (*models.TenantDe
 		}
 	}
 
-	return &models.TenantDetails{Tenant: tenant, UserCount: userCount, ClientCount: clientCount}, nil
+	return &models.TenantDetails{
+		ID:          tenant.ID,
+		Name:        tenant.Name,
+		Status:      tenant.Status,
+		CreatedAt:   tenant.CreatedAt,
+		UserCount:   userCount,
+		ClientCount: clientCount,
+	}, nil
 }
 
 // CreateClient registers a client under a tenant.

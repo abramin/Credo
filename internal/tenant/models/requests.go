@@ -60,9 +60,9 @@ func (r *CreateClientRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
-	if r.TenantID == uuid.Nil {
-		return dErrors.New(dErrors.CodeValidation, "tenant_id is required")
-	}
+	// Note: We don't validate tenant_id != uuid.Nil here.
+	// Instead, we let the service look up the tenant and return 404 if not found.
+	// This gives consistent "tenant not found" behavior for both nil and non-existent UUIDs.
 	r.Name = strings.TrimSpace(r.Name)
 	if r.Name == "" {
 		return dErrors.New(dErrors.CodeValidation, "name is required")

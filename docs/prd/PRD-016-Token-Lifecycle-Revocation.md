@@ -649,6 +649,7 @@ type AccessTokenClaims struct {
 **Per-Tenant Issuer Format (RFC 8414 Compliance):**
 
 The `iss` claim uses a per-tenant issuer URL format:
+
 ```
 {base_url}/tenants/{tenant_id}
 ```
@@ -656,6 +657,7 @@ The `iss` claim uses a per-tenant issuer URL format:
 Example: `https://auth.credo.io/tenants/550e8400-e29b-41d4-a716-446655440000`
 
 Token validation must:
+
 1. Verify the issuer URL matches the expected base URL pattern
 2. Extract tenant ID from the issuer URL and validate it exists
 3. The `tenant_id` claim is also included for client convenience (avoids parsing the issuer URL)
@@ -1075,6 +1077,7 @@ curl -X POST http://localhost:8080/auth/logout-all?except_current=true \
 
 | Version | Date       | Author       | Changes                                                                                                                           |
 | ------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1.5     | 2025-12-18 | Security Eng | Added prefix/radix revocation requirement, constant-time comparisons, rotation/replay testing                                     |
 | 1.4     | 2025-12-17 | Engineering  | RFC 8414 compliance: Per-tenant issuer implementation                                                                             |
 |         |            |              | - Added per-tenant issuer format: `{base_url}/tenants/{tenant_id}`                                                                |
 |         |            |              | - Added TenantID to AccessTokenClaims struct                                                                                      |
@@ -1083,7 +1086,6 @@ curl -X POST http://localhost:8080/auth/logout-all?except_current=true \
 |         |            |              | - Token (refresh grant): Changed 401 → 400 for invalid_grant errors per RFC 6749 §5.2                                             |
 |         |            |              | - Revoke: Added explicit RFC 7009 §2.2 reference for idempotent 200 OK behavior                                                   |
 |         |            |              | - Added OAuth error codes (invalid_grant, invalid_request, unsupported_grant_type)                                                |
-| 1.3     | 2025-12-18 | Security Eng | Added prefix/radix revocation requirement, constant-time comparisons, rotation/replay testing                                     |
 | 1.2     | 2025-12-13 | Engineering  | remove IP Address from List sessions response                                                                                     |
 | 1.1     | 2025-12-13 | Engineering  | Updated device binding to reference DEVICE_BINDING.md; changed to layered security model (device ID + fingerprint, no IP binding) |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                                       |
