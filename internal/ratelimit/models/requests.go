@@ -3,7 +3,6 @@ package models
 import "time"
 
 // AddAllowlistRequest is the API request for adding an allowlist entry.
-// Per PRD-017 FR-4: POST /admin/rate-limit/allowlist
 type AddAllowlistRequest struct {
 	Type       AllowlistEntryType `json:"type" validate:"required,oneof=ip user_id"`
 	Identifier string             `json:"identifier" validate:"required"`

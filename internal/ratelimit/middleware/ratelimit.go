@@ -32,7 +32,6 @@ type RateLimiter interface {
 }
 
 // Middleware provides HTTP middleware for rate limiting.
-// Per PRD-017 TR-3: Middleware implementation.
 type Middleware struct {
 	limiter RateLimiter
 	logger  *slog.Logger
@@ -47,7 +46,6 @@ func New(limiter RateLimiter, logger *slog.Logger) *Middleware {
 }
 
 // RateLimit returns middleware that enforces per-IP rate limiting.
-// Per PRD-017 FR-1, TR-3: Per-IP rate limiting middleware.
 //
 // TODO: Implement this middleware
 // 1. Extract client IP from context (set by ClientMetadata middleware)
@@ -82,7 +80,6 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 }
 
 // RateLimitAuthenticated returns middleware that enforces both IP and user rate limits.
-// Per PRD-017 FR-2: Both limits must pass for authenticated endpoints.
 //
 // TODO: Implement this middleware
 // 1. Extract client IP and user ID from context
@@ -117,7 +114,6 @@ func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(htt
 }
 
 // RateLimitAuth returns middleware for authentication endpoints with lockout.
-// Per PRD-017 FR-2b: OWASP authentication-specific protections.
 //
 // TODO: Implement this middleware
 // This is applied to /auth/authorize, /auth/token, /auth/password-reset, /mfa/*
@@ -153,7 +149,6 @@ func (m *Middleware) RateLimitAuth() func(http.Handler) http.Handler {
 }
 
 // GlobalThrottle returns middleware for global DDoS protection.
-// Per PRD-017 FR-6: Global request throttling.
 //
 // TODO: Implement this middleware
 // 1. Call limiter.CheckGlobalThrottle
@@ -181,7 +176,6 @@ func (m *Middleware) GlobalThrottle() func(http.Handler) http.Handler {
 }
 
 // addRateLimitHeaders adds X-RateLimit-* headers to the response.
-// Per PRD-017 FR-1: Standard rate limit headers.
 //
 // TODO: Implement this helper
 // Headers:
@@ -198,7 +192,6 @@ func addRateLimitHeaders(w http.ResponseWriter, result *models.RateLimitResult) 
 }
 
 // writeRateLimitExceeded writes a 429 response for IP rate limit exceeded.
-// Per PRD-017 FR-1: 429 response format.
 //
 // TODO: Implement this helper
 func writeRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResult) {
@@ -213,7 +206,6 @@ func writeRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResul
 }
 
 // writeUserRateLimitExceeded writes a 429 response for user rate limit exceeded.
-// Per PRD-017 FR-2: User-specific rate limit response.
 //
 // TODO: Implement this helper
 func writeUserRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResult) {
@@ -230,7 +222,6 @@ func writeUserRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitR
 }
 
 // writeServiceOverloaded writes a 503 response for global throttle exceeded.
-// Per PRD-017 FR-6: 503 response for DDoS protection.
 //
 // TODO: Implement this helper
 func writeServiceOverloaded(w http.ResponseWriter) {

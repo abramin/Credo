@@ -27,7 +27,6 @@ type Service interface {
 }
 
 // Handler handles rate limit admin endpoints.
-// Per PRD-017 FR-4: Admin endpoints for allowlist management.
 type Handler struct {
 	service Service
 	logger  *slog.Logger
@@ -42,7 +41,6 @@ func New(service Service, logger *slog.Logger) *Handler {
 }
 
 // RegisterAdmin registers admin routes for rate limit management.
-// Per PRD-017 FR-4: POST /admin/rate-limit/allowlist
 func (h *Handler) RegisterAdmin(r chi.Router) {
 	r.Post("/admin/rate-limit/allowlist", h.HandleAddAllowlist)
 	r.Delete("/admin/rate-limit/allowlist", h.HandleRemoveAllowlist)
@@ -51,7 +49,6 @@ func (h *Handler) RegisterAdmin(r chi.Router) {
 }
 
 // HandleAddAllowlist implements POST /admin/rate-limit/allowlist.
-// Per PRD-017 FR-4: Add IP or user to allowlist.
 //
 // Input: { "type": "ip", "identifier": "192.168.1.100", "reason": "...", "expires_at": "..." }
 // Output: { "allowlisted": true, "identifier": "192.168.1.100", "expires_at": "..." }
@@ -86,7 +83,6 @@ func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRemoveAllowlist implements DELETE /admin/rate-limit/allowlist.
-// Per PRD-017 FR-4: Remove IP or user from allowlist.
 //
 // Input: { "type": "ip", "identifier": "192.168.1.100" }
 // Output: 204 No Content

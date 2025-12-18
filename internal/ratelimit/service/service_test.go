@@ -15,7 +15,6 @@ import (
 func TestConfig_Defaults(t *testing.T) {
 	cfg := DefaultConfig()
 
-	// Per PRD-017 FR-1: IP rate limits
 	authLimit, authWindow := cfg.GetIPLimit(models.ClassAuth)
 	assert.Equal(t, 10, authLimit)
 	assert.Equal(t, time.Minute, authWindow)
@@ -26,7 +25,6 @@ func TestConfig_Defaults(t *testing.T) {
 	readLimit, _ := cfg.GetIPLimit(models.ClassRead)
 	assert.Equal(t, 100, readLimit)
 
-	// Per PRD-017 FR-6: Global limits
 	assert.Equal(t, 1000, cfg.Global.PerInstancePerSecond)
 	assert.Equal(t, 10000, cfg.Global.GlobalPerSecond)
 }

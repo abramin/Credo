@@ -8,7 +8,6 @@ import (
 )
 
 // EndpointClass categorizes endpoints for differentiated rate limiting.
-// Per PRD-017 FR-1: Different endpoint classes have different rate limits.
 type EndpointClass string
 
 const (
@@ -54,17 +53,15 @@ func (t AllowlistEntryType) String() string {
 }
 
 // RateLimitResult represents the outcome of a rate limit check.
-// Per PRD-017 FR-1: Headers include X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset.
 type RateLimitResult struct {
-	Allowed   bool      `json:"allowed"`
-	Limit     int       `json:"limit"`
-	Remaining int       `json:"remaining"`
-	ResetAt   time.Time `json:"reset_at"`
-	RetryAfter int      `json:"retry_after,omitempty"` // seconds, only set when not allowed
+	Allowed    bool      `json:"allowed"`
+	Limit      int       `json:"limit"`
+	Remaining  int       `json:"remaining"`
+	ResetAt    time.Time `json:"reset_at"`
+	RetryAfter int       `json:"retry_after,omitempty"` // seconds, only set when not allowed
 }
 
 // AllowlistEntry represents an IP or user that bypasses rate limits.
-// Per PRD-017 FR-4: Admin can allowlist IPs or users.
 type AllowlistEntry struct {
 	ID         string             `json:"id"`
 	Type       AllowlistEntryType `json:"type"`
@@ -76,10 +73,9 @@ type AllowlistEntry struct {
 }
 
 // RateLimitViolation represents a recorded rate limit violation for audit.
-// Per PRD-017 FR-1: Emit audit event on rate_limit_exceeded.
 type RateLimitViolation struct {
 	ID            string        `json:"id"`
-	Identifier    string        `json:"identifier"`    // IP or user_id
+	Identifier    string        `json:"identifier"` // IP or user_id
 	EndpointClass EndpointClass `json:"endpoint_class"`
 	Endpoint      string        `json:"endpoint"`
 	Limit         int           `json:"limit"`
@@ -88,7 +84,6 @@ type RateLimitViolation struct {
 }
 
 // QuotaTier represents partner API quota configuration.
-// Per PRD-017 FR-5: Partner API quotas by tier.
 type QuotaTier string
 
 const (
@@ -99,7 +94,6 @@ const (
 )
 
 // APIKeyQuota tracks quota usage for a partner API key.
-// Per PRD-017 FR-5: Track monthly quotas per API key.
 type APIKeyQuota struct {
 	APIKeyID       string    `json:"api_key_id"`
 	Tier           QuotaTier `json:"tier"`
@@ -111,14 +105,13 @@ type APIKeyQuota struct {
 }
 
 // AuthLockout tracks authentication-specific lockout state.
-// Per PRD-017 FR-2b: OWASP authentication-specific protections.
 type AuthLockout struct {
-	Identifier      string    `json:"identifier"`      // username/email + IP composite key
-	FailureCount    int       `json:"failure_count"`   // failures in current window
-	DailyFailures   int       `json:"daily_failures"`  // failures today (for hard lock)
+	Identifier      string     `json:"identifier"`     // username/email + IP composite key
+	FailureCount    int        `json:"failure_count"`  // failures in current window
+	DailyFailures   int        `json:"daily_failures"` // failures today (for hard lock)
 	LockedUntil     *time.Time `json:"locked_until,omitempty"`
-	LastFailureAt   time.Time `json:"last_failure_at"`
-	RequiresCaptcha bool      `json:"requires_captcha"` // after 3 consecutive lockouts in 24h
+	LastFailureAt   time.Time  `json:"last_failure_at"`
+	RequiresCaptcha bool       `json:"requires_captcha"` // after 3 consecutive lockouts in 24h
 }
 
 // NewAllowlistEntry creates an AllowlistEntry with domain invariant validation.

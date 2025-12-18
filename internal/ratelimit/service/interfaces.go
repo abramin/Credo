@@ -9,19 +9,15 @@ import (
 )
 
 // BucketStore defines the persistence interface for rate limit buckets/counters.
-// Per PRD-017 TR-1: RateLimiter interface with Allow, AllowN, Reset operations.
 // Keys are simple strings - validation happens at the boundary (middleware/handler).
 type BucketStore interface {
 	// Allow checks if a request is allowed and increments the counter.
-	// Per PRD-017 TR-1: Allow(ctx, key, limit, window) -> (result, err)
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
 
 	// AllowN checks if a request with custom cost is allowed.
-	// Per PRD-017 TR-1: AllowN for operations that consume multiple tokens.
 	AllowN(ctx context.Context, key string, cost, limit int, window time.Duration) (*models.RateLimitResult, error)
 
 	// Reset clears the rate limit counter for a key.
-	// Per PRD-017 TR-1: Admin operation to reset limits.
 	Reset(ctx context.Context, key string) error
 
 	// GetCurrentCount returns the current request count for a key.
@@ -30,7 +26,6 @@ type BucketStore interface {
 }
 
 // AllowlistStore defines the persistence interface for rate limit allowlist.
-// Per PRD-017 FR-4: Allowlist management for IPs and users.
 type AllowlistStore interface {
 	// Add adds an identifier to the allowlist.
 	Add(ctx context.Context, entry *models.AllowlistEntry) error
@@ -39,7 +34,6 @@ type AllowlistStore interface {
 	Remove(ctx context.Context, entryType models.AllowlistEntryType, identifier string) error
 
 	// IsAllowlisted checks if an identifier is in the allowlist and not expired.
-	// Per PRD-017 TR-1: IsAllowlisted(ctx, identifier) -> (bool, error)
 	IsAllowlisted(ctx context.Context, identifier string) (bool, error)
 
 	// List returns all active allowlist entries.
@@ -47,7 +41,6 @@ type AllowlistStore interface {
 }
 
 // AuthLockoutStore defines the persistence interface for authentication lockouts.
-// Per PRD-017 FR-2b: OWASP authentication-specific protections.
 type AuthLockoutStore interface {
 	// RecordFailure records a failed authentication attempt.
 	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
@@ -63,7 +56,6 @@ type AuthLockoutStore interface {
 }
 
 // QuotaStore defines the persistence interface for partner API quotas.
-// Per PRD-017 FR-5: Partner API quota management.
 type QuotaStore interface {
 	// GetQuota retrieves the quota for an API key.
 	GetQuota(ctx context.Context, apiKeyID string) (*models.APIKeyQuota, error)
@@ -76,13 +68,11 @@ type QuotaStore interface {
 }
 
 // AuditPublisher defines the interface for publishing audit events.
-// Per PRD-017: Rate limit violations emit audit events.
 type AuditPublisher interface {
 	Emit(ctx context.Context, event audit.Event) error
 }
 
 // GlobalThrottleStore defines the interface for global request throttling.
-// Per PRD-017 FR-6: DDoS protection via global limits.
 type GlobalThrottleStore interface {
 	// IncrementGlobal increments the global request counter.
 	// Returns current count and whether limit is exceeded.
