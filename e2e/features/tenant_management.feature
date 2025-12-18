@@ -41,7 +41,7 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
   Scenario: Create tenant with empty name fails
     When I create a tenant with name ""
     Then the response status should be 400
-    And the response field "error" should equal "validation"
+    And the response field "error" should equal "bad_request"
 
     @admin @tenant @security
   Scenario: Create tenant without admin token fails
