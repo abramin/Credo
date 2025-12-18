@@ -63,15 +63,15 @@
       </p>
       <div class="hero-stats">
         <div class="stat">
-          <span class="stat-value">6</span>
+          <span class="stat-value">11</span>
           <span class="stat-label">Attack Types</span>
         </div>
         <div class="stat">
-          <span class="stat-value">3</span>
+          <span class="stat-value">4</span>
           <span class="stat-label">Learning Modes</span>
         </div>
         <div class="stat">
-          <span class="stat-value">10+</span>
+          <span class="stat-value">15+</span>
           <span class="stat-label">Security Controls</span>
         </div>
       </div>
@@ -305,6 +305,81 @@
           <div class="attack-defense">
             <span class="defense-label">Blocked by:</span>
             <span class="defense-control">HttpOnly Cookies</span>
+          </div>
+        </div>
+
+        <div class="attack-card">
+          <div class="attack-header">
+            <span class="badge badge-error">Critical</span>
+            <span class="attack-category">Token Security</span>
+          </div>
+          <h4 class="attack-title">JWT Algorithm Confusion</h4>
+          <p class="attack-description">
+            Attacker forges tokens by switching signing algorithm from RS256 to HS256.
+          </p>
+          <div class="attack-defense">
+            <span class="defense-label">Blocked by:</span>
+            <span class="defense-control">Algorithm Enforcement</span>
+          </div>
+        </div>
+
+        <div class="attack-card">
+          <div class="attack-header">
+            <span class="badge badge-warning">High</span>
+            <span class="attack-category">Token Security</span>
+          </div>
+          <h4 class="attack-title">Refresh Token Hijacking</h4>
+          <p class="attack-description">
+            Attacker steals refresh token for persistent access that survives password changes.
+          </p>
+          <div class="attack-defense">
+            <span class="defense-label">Blocked by:</span>
+            <span class="defense-control">Token Rotation</span>
+          </div>
+        </div>
+
+        <div class="attack-card">
+          <div class="attack-header">
+            <span class="badge badge-info">Medium</span>
+            <span class="attack-category">Code Flow</span>
+          </div>
+          <h4 class="attack-title">Open Redirect Phishing</h4>
+          <p class="attack-description">
+            Attacker uses OAuth endpoint as open redirector for convincing phishing URLs.
+          </p>
+          <div class="attack-defense">
+            <span class="defense-label">Blocked by:</span>
+            <span class="defense-control">Strict URI Validation</span>
+          </div>
+        </div>
+
+        <div class="attack-card">
+          <div class="attack-header">
+            <span class="badge badge-error">Critical</span>
+            <span class="attack-category">Code Flow</span>
+          </div>
+          <h4 class="attack-title">AS Mix-Up Attack</h4>
+          <p class="attack-description">
+            Attacker steals codes in multi-IdP scenarios by confusing which AS issued them.
+          </p>
+          <div class="attack-defense">
+            <span class="defense-label">Blocked by:</span>
+            <span class="defense-control">Issuer Validation</span>
+          </div>
+        </div>
+
+        <div class="attack-card">
+          <div class="attack-header">
+            <span class="badge badge-info">Medium</span>
+            <span class="attack-category">Authorization</span>
+          </div>
+          <h4 class="attack-title">Clickjacking Authorization</h4>
+          <p class="attack-description">
+            Attacker tricks users into clicking hidden authorize button via iframe overlay.
+          </p>
+          <div class="attack-defense">
+            <span class="defense-label">Blocked by:</span>
+            <span class="defense-control">Frame Protection</span>
           </div>
         </div>
       </div>
