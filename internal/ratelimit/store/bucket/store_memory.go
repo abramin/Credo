@@ -16,11 +16,6 @@ type InMemoryBucketStore struct {
 }
 
 // slidingWindow is the aggregate root for rate limit state.
-<<<<<<< HEAD
-=======
-// It enforces the sliding window invariant per PRD-017 FR-3.
-// The aggregate owns timestamps (value objects) and encapsulates the algorithm.
->>>>>>> b1bc0d0 (make sliding window aggregate)
 type slidingWindow struct {
 	timestamps []time.Time
 	window     time.Duration
@@ -28,14 +23,8 @@ type slidingWindow struct {
 
 // tryConsume attempts to consume tokens from the sliding window.
 // Returns whether the request was allowed, remaining capacity, and reset time.
-<<<<<<< HEAD
 func (sw *slidingWindow) tryConsume(cost, limit int, now time.Time) (allowed bool, remaining int, resetAt time.Time) {
 	sw.cleanupExpired(now)
-=======
-// This is the core domain logic per PRD-017 FR-3 algorithm.
-func (sw *slidingWindow) tryConsume(cost, limit int, now time.Time) (allowed bool, remaining int, resetAt time.Time) {
-	sw.cleanup(now)
->>>>>>> b1bc0d0 (make sliding window aggregate)
 
 	if len(sw.timestamps)+cost > limit {
 		return false, 0, now.Add(sw.window)
@@ -46,7 +35,6 @@ func (sw *slidingWindow) tryConsume(cost, limit int, now time.Time) (allowed boo
 		sw.timestamps = append(sw.timestamps, now)
 	}
 
-<<<<<<< HEAD
 	remaining = limit - len(sw.timestamps)
 	resetAt = sw.timestamps[0].Add(sw.window)
 	return true, remaining, resetAt
@@ -68,17 +56,6 @@ func (sw *slidingWindow) cleanupExpired(now time.Time) {
 	sw.timestamps = sw.timestamps[i:]
 }
 
-=======
-	return true, limit - len(sw.timestamps), sw.timestamps[0].Add(sw.window)
-}
-
-// count returns the current number of requests in the window.
-func (sw *slidingWindow) count(now time.Time) int {
-	sw.cleanup(now)
-	return len(sw.timestamps)
-}
-
->>>>>>> b1bc0d0 (make sliding window aggregate)
 // NewInMemoryBucketStore creates a new in-memory bucket store.
 func NewInMemoryBucketStore() *InMemoryBucketStore {
 	return &InMemoryBucketStore{
