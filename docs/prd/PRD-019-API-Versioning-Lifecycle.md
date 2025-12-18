@@ -133,6 +133,9 @@ Link: </docs/migration/v1-to-v2>; rel="deprecation"
 - [ ] Migration guides published
 - [ ] API changelog maintained
 - [ ] Version support policy documented
+- [ ] Schema-diff gates enforced in CI with signed migration manifests and rollback drills
+- [ ] Tokens carry version audience/claim; handlers reject cross-version replay
+- [ ] Deprecation notices include security impact notes and compensating controls
 
 ---
 

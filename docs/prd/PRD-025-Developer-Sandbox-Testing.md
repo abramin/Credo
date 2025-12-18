@@ -4,7 +4,7 @@
 **Priority:** P2 (Medium)
 **Owner:** Engineering Team
 **Dependencies:** PRD-001-005, PRD-014
-**Last Updated:** 2025-12-12
+**Last Updated:** 2025-12-18
 
 ## 1. Overview
 
@@ -44,8 +44,12 @@ High friction for partners to integrate - no test environment or test data.
 - [ ] Mock registry provides predictable data
 - [ ] API explorer functional
 - [ ] Developer dashboard shows usage
+- [ ] DSA katas included: LRU cache and rate limiter variants behind feature flags with fixtures to compare behaviors
+- [ ] SQL anti-pattern lab: migrations include intentional N+1/index issues; fixes validated via EXPLAIN
+- [ ] Security defaults: deny-by-default network egress, sealed secrets, and mutation testing for input validation paths
 
 ## Revision History
-| Version | Date       | Author       | Changes     |
-| ------- | ---------- | ------------ | ----------- |
-| 1.0     | 2025-12-12 | Product Team | Initial PRD |
+| Version | Date       | Author       | Changes                                                              |
+| ------- | ---------- | ------------ | -------------------------------------------------------------------- |
+| 1.1     | 2025-12-18 | Security Eng | Added DSA katas, SQL anti-pattern lab, and security defaults         |
+| 1.0     | 2025-12-12 | Product Team | Initial PRD                                                          |

@@ -4,7 +4,7 @@
 **Priority:** P1 (High)
 **Owner:** Engineering Team
 **Dependencies:** PRD-001 (Authentication), PRD-005B (Cerbos), PRD-017 (Rate Limiting), PRD-021 (MFA)
-**Last Updated:** 2025-12-12
+**Last Updated:** 2025-12-18
 
 ---
 
@@ -1042,6 +1042,8 @@ fraud_risk_scoring_duration_seconds
 - [ ] Metrics and dashboards operational (Grafana)
 - [ ] Latency <20ms p99 for risk scoring
 - [ ] Code passes security review
+- [ ] Feature store includes Count-Min Sketch/Bloom filters for velocity checks with documented false-positive bounds
+- [ ] Materialized views indexed for hot risk signals with EXPLAIN evidence under load
 
 ---
 
@@ -1123,3 +1125,4 @@ fraud_risk_scoring_duration_seconds
 |         |            |              | - Simple account graphing (shared IP/device detection)                  |
 |         |            |              | - Privacy guardrails (retention, regional routing, consent)             |
 |         |            |              | Updated dependencies to remove PRD-007B (ML-based, separate concern)    |
+| 2.1     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (Count-Min/Bloom velocity checks, materialized views with EXPLAIN) |

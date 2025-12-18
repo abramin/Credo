@@ -4,7 +4,7 @@
 **Priority:** P2 (Medium)
 **Owner:** Engineering Team
 **Dependencies:** PRD-001-007, PRD-020
-**Last Updated:** 2025-12-12
+**Last Updated:** 2025-12-18
 
 ## 1. Overview
 
@@ -401,8 +401,11 @@ POST /admin/review-queue/{id}/deny
 - [ ] Admin can export consent reports
 - [ ] System health dashboard displays metrics
 - [ ] Configuration changes applied without restart
+- [ ] Admin queries enforce RLS/tenant scoping with parameterized search; summaries use views/materialized views (no ad-hoc wide joins)
+- [ ] Admin auth uses short-lived tokens with explicit acquisition flow; CSRF defenses on state-changing operations
 
 ## Revision History
-| Version | Date       | Author       | Changes     |
-| ------- | ---------- | ------------ | ----------- |
-| 1.0     | 2025-12-12 | Product Team | Initial PRD |
+| Version | Date       | Author       | Changes                                                  |
+| ------- | ---------- | ------------ | -------------------------------------------------------- |
+| 1.1     | 2025-12-18 | Security Eng | Added RLS/tenant scoping, view-based summaries, short-lived admin auth/CSRF |
+| 1.0     | 2025-12-12 | Product Team | Initial PRD                                              |

@@ -4,7 +4,7 @@
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
 **Dependencies:** PRD-001 (Authentication & Session Management)
-**Last Updated:** 2025-12-12
+**Last Updated:** 2025-12-18
 
 ---
 
@@ -930,6 +930,8 @@ func (s *CleanupService) performCleanup(ctx context.Context) {
 - [x] Token revocation list uses TTL (no memory leak)
 - [x] All token lifecycle events emit audit events
 - [ ] Concurrent session limits enforced (optional)
+- [ ] Revocation list supports prefix/radix-tree lookups for JTIs (O(log n)) to revoke device families; constant-time token comparisons enforced
+- [ ] Key rotation drills and replay detection under concurrent refresh storms are tested and documented
 
 **Note:** The "password change triggers global session revocation" criterion requires password support from [PRD-022](./PRD-022-Account-Recovery-Credentials.md). This criterion will be completed alongside PRD-022 implementation in Phase 3.
 
@@ -1081,6 +1083,7 @@ curl -X POST http://localhost:8080/auth/logout-all?except_current=true \
 |         |            |              | - Token (refresh grant): Changed 401 → 400 for invalid_grant errors per RFC 6749 §5.2                                             |
 |         |            |              | - Revoke: Added explicit RFC 7009 §2.2 reference for idempotent 200 OK behavior                                                   |
 |         |            |              | - Added OAuth error codes (invalid_grant, invalid_request, unsupported_grant_type)                                                |
+| 1.3     | 2025-12-18 | Security Eng | Added prefix/radix revocation requirement, constant-time comparisons, rotation/replay testing                                     |
 | 1.2     | 2025-12-13 | Engineering  | remove IP Address from List sessions response                                                                                     |
 | 1.1     | 2025-12-13 | Engineering  | Updated device binding to reference DEVICE_BINDING.md; changed to layered security model (device ID + fingerprint, no IP binding) |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                                       |

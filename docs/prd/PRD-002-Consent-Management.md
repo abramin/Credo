@@ -616,8 +616,6 @@ READ PATH (Require):
                    └→ ConsentStore (fallback if cache miss)
 ```
 
----
-
 #### Components
 
 ##### 1. Projection Data Structure

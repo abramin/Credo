@@ -265,6 +265,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
 - Enforce write-once (no update/delete) at the storage layer (e.g., Postgres CHECKs/triggers) and require WORM-capable storage for exported archives.
 - Ingest path validates event schema and rejects missing correlation IDs/subjects; default deny on malformed events.
 - Reader interfaces are split: `AuditAppender` (write-only) and `AuditReader` (read-scoped per subject/tenant) to enforce least privilege.
+- Periodic anchoring of partition roots; verification APIs must prove inclusion/consistency against anchored roots.
 
 ### TR-5: Event Streaming & Indexing Pipeline
 
@@ -368,6 +369,7 @@ curl "http://localhost:8080/me/data-export?action=consent_granted" \
 
 | Version | Date       | Author       | Changes                                                                                         |
 | ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| 1.4     | 2025-12-18 | Security Eng | Added anchoring/verification requirements alongside partitioning and least-privilege interfaces |
 | 1.3     | 2025-12-18 | Security Eng | Added secure storage/integrity (hash chaining, partitioning, least-privilege interfaces)        |
 | 1.2     | 2025-12-12 | Engineering  | Add FR-3: Searchable Audit Queries (Investigations) & TR-5: Event Streaming & Indexing Pipeline |
 | 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                     |

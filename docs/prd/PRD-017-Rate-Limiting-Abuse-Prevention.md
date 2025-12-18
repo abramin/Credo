@@ -554,6 +554,9 @@ func extractClientIP(r *http.Request) string {
 - [ ] Rate limit violations emit audit events
 - [ ] Rate limits configurable via environment variables
 - [ ] Load test shows rate limits hold under 10,000 req/sec
+- [ ] Sliding-window deque and time-wheel alternatives implemented with O(1) amortized ops and documented complexity
+- [ ] Postgres-backed limiter with `INSERT ... ON CONFLICT`, hash partitioning, and EXPLAIN-verified indexes on `(key, window_end)`
+- [ ] Multi-key resets are atomic (transactional) and abuse thresholds emit lockouts + audit
 
 ---
 
@@ -601,6 +604,8 @@ bombardier -c 20 -n 200 -m POST \
 - Allowlist expiry and bypass validated; expired entries do not bypass.
 - Global throttle triggers 503 with Retry-After and audit when thresholds exceeded.
 - Lockout/FR-2b authentication throttles enforce backoff and shared counters across endpoints.
+- Postgres limiter tests cover partitioning/index effectiveness via EXPLAIN and correctness under concurrent writes.
+- DSA tests compare deque vs time-wheel implementations for correctness and complexity bounds.
 
 ---
 
@@ -678,6 +683,7 @@ curl -X POST http://localhost:8080/admin/rate-limit/allowlist \
 
 | Version | Date       | Author       | Changes     |
 | ------- | ---------- | ------------ | ----------- |
+| 1.3     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (deque/time-wheel, Postgres partitioning), atomic multi-key resets, expanded testing |
 | 1.2     | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests |
 | 1.1     | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance |
 | 1.0     | 2025-12-12 | Product Team | Initial PRD |

@@ -72,6 +72,12 @@ Aggregate secure-by-design requirements for already completed PRDs without alter
 - Expected denial paths (auth failure, consent missing, rate limit exceeded) return typed result objects, not generic errors or string parsing.
 - Service interfaces use result types for allow/deny so callers cannot accidentally treat errors as allow.
 
+### SR-10 Consent/Data Rights Persistence (from completed PRDs)
+
+- SQL posture: RLS enabled for tenant/user scoping and partial indexes on `(user_id, purpose, status)`; projections/read models carry documented `EXPLAIN` plans.
+- Event logs are append-only with hash chaining; projections rebuild from events and fail closed on missing schema/config.
+- GDPR redaction: PII fields are nulled/removed within SLA; rebuild paths enforce redaction and are audited.
+
 ---
 
 ## 4. Acceptance Criteria
@@ -86,6 +92,7 @@ Aggregate secure-by-design requirements for already completed PRDs without alter
 - [ ] Entities expose immutable identity fields; state transitions use validated methods/builders.
 - [ ] Secrets handled via read-once wrappers; user input is not echoed in errors/logs.
 - [ ] Result types cover expected deny paths; no reliance on stringly-typed errors.
+- [ ] Consent/data rights persistence uses RLS + partial indexes with EXPLAIN evidence; append-only event log with hash chaining and GDPR redaction enforced.
 
 ---
 

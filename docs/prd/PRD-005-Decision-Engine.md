@@ -357,6 +357,7 @@ func (h *Handler) handleDecisionEvaluate(w http.ResponseWriter, r *http.Request)
 - Execution must be deterministic (no timing-based branching); include a bounded LRU cache for rule results with defined eviction.
 - Policies/rules are published as signed, immutable bundles (versioned); service only loads validated signatures and emits audit events on publish/activation.
 - Inputs must be value objects (purpose enum, tenant/user IDs, evidence structs stripped of PII). Reject unvalidated maps in service boundaries.
+- Rule persistence uses normalized tables with versioning and immutability constraints; published rules are append-only with `CHECK` constraints for bounds and `EXPLAIN`-verified indexes for lookups.
 
 ---
 
@@ -391,6 +392,9 @@ func (h *Handler) handleDecisionEvaluate(w http.ResponseWriter, r *http.Request)
 - [ ] Evidence gathering handles registry errors gracefully
 - [ ] Derived identity contains no PII
 - [ ] Code passes tests and lint
+- [ ] Rule graph evaluated via DAG topological sort with cycle detection and memoization; complexity and cache eviction documented
+- [ ] Rules persisted in normalized, versioned tables with immutability constraints and `CHECK` bounds; indexes validated with EXPLAIN
+- [ ] Policy bundles are signed/immutable with audit on publish
 
 ---
 
@@ -453,6 +457,7 @@ curl -X POST http://localhost:8080/decision/evaluate \
 
 | Version | Date       | Author       | Changes                                    |
 | ------- | ---------- | ------------ | ------------------------------------------ |
+| 1.3     | 2025-12-18 | Security Eng | Added DSA/SQL requirements for rule DAGs and normalized, immutable rule storage |
 | 1.2     | 2025-12-18 | Security Eng | Added secure-by-design evaluation (DAG, default-deny, signed policy bundles) |
 | 1.0     | 2025-12-03 | Product Team | Initial PRD                                |
 | 1.1     | 2025-12-12 | Engineering  | Add TR-5 CQRS & Read-Optimized Projections |

@@ -83,6 +83,8 @@ Credo services emit high volumes of structured identity telemetry (token issuanc
 - If the internal queue is full:
   - Option A: block producers (default).
   - Option B: drop events with metrics (configurable).
+- Option C: drop oldest vs drop newest is configurable; metrics emitted per strategy.
+- Use an MPSC ring buffer implementation with O(1) enqueue/dequeue; document complexity.
 
 ### 5.4 Batching
 
@@ -119,6 +121,12 @@ Expose via HTTP `/metrics`:
 - Replay protection: producers include monotonic sequence numbers; ingester drops duplicates/out-of-order frames.
 - Least privilege: split interfaces `EventAppender` (write-only) vs any reader/debug tooling; sinks run with scoped credentials limited to append/insert.
 - Poison handling: batches that repeatedly fail are quarantined with alerts instead of being retried indefinitely.
+
+### 5.8 Sink Persistence (SQL Option)
+
+- Postgres sink uses COPY or batched INSERT with idempotency keys and retries with exponential backoff.
+- Hash partitioning on event key and indexes verified via EXPLAIN for hot queries.
+- Acceptance requires demonstrating reduced write amplification versus naive single-row inserts.
 
 ---
 
@@ -181,6 +189,8 @@ Producers (Auth, Token, Session services) → multiline JSON over TCP → TCP Li
 - File, Postgres, and mock Kafka sinks are implemented with simple configuration toggles.
 - `/metrics` endpoint exposes ingest rate, queue depth, open connections, dropped events, batch flush frequency, and sink latency.
 - Load test demonstrates 10k events/sec with <5% queue saturation and no producer-side latency regression.
+- Ring buffer and drop-oldest/drop-newest strategies are configurable and covered by metrics.
+- Postgres sink demonstrates idempotent batch persistence with EXPLAIN evidence of partition/index usage.
 
 ---
 
@@ -188,5 +198,6 @@ Producers (Auth, Token, Session services) → multiline JSON over TCP → TCP Li
 
 | Version | Date       | Author       | Changes                                                |
 | ------- | ---------- | ------------ | ------------------------------------------------------ |
+| 1.2     | 2025-12-18 | Security Eng | Added ring buffer/backpressure strategies and SQL sink (COPY/idempotency) requirements |
 | 1.1     | 2025-12-18 | Security Eng | Added secure-by-design requirements (auth, replay, LP) |
 | 1.0     | 2025-12-06 | Core Services| Initial draft                                          |
