@@ -10,15 +10,15 @@ import (
 
 // BucketStore defines the persistence interface for rate limit buckets/counters.
 // Per PRD-017 TR-1: RateLimiter interface with Allow, AllowN, Reset operations.
+// Keys are simple strings - validation happens at the boundary (middleware/handler).
 type BucketStore interface {
 	// Allow checks if a request is allowed and increments the counter.
-	// Returns the rate limit result with remaining tokens and reset time.
-	// Per PRD-017 TR-1: Allow(ctx, key, limit, window) -> (allowed, remaining, resetAt, err)
+	// Per PRD-017 TR-1: Allow(ctx, key, limit, window) -> (result, err)
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
 
 	// AllowN checks if a request with custom cost is allowed.
 	// Per PRD-017 TR-1: AllowN for operations that consume multiple tokens.
-	AllowN(ctx context.Context, key string, cost int, limit int, window time.Duration) (*models.RateLimitResult, error)
+	AllowN(ctx context.Context, key string, cost, limit int, window time.Duration) (*models.RateLimitResult, error)
 
 	// Reset clears the rate limit counter for a key.
 	// Per PRD-017 TR-1: Admin operation to reset limits.

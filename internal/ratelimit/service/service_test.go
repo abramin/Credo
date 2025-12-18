@@ -14,7 +14,7 @@ import (
 // MockBucketStore is a test double for BucketStore.
 type MockBucketStore struct {
 	AllowFunc           func(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
-	AllowNFunc          func(ctx context.Context, key string, cost int, limit int, window time.Duration) (*models.RateLimitResult, error)
+	AllowNFunc          func(ctx context.Context, key string, cost, limit int, window time.Duration) (*models.RateLimitResult, error)
 	ResetFunc           func(ctx context.Context, key string) error
 	GetCurrentCountFunc func(ctx context.Context, key string) (int, error)
 }
@@ -26,7 +26,7 @@ func (m *MockBucketStore) Allow(ctx context.Context, key string, limit int, wind
 	return &models.RateLimitResult{Allowed: true, Limit: limit, Remaining: limit - 1, ResetAt: time.Now().Add(window)}, nil
 }
 
-func (m *MockBucketStore) AllowN(ctx context.Context, key string, cost int, limit int, window time.Duration) (*models.RateLimitResult, error) {
+func (m *MockBucketStore) AllowN(ctx context.Context, key string, cost, limit int, window time.Duration) (*models.RateLimitResult, error) {
 	if m.AllowNFunc != nil {
 		return m.AllowNFunc(ctx, key, cost, limit, window)
 	}
@@ -103,7 +103,7 @@ func TestService_CheckIPRateLimit(t *testing.T) {
 
 	t.Run("request allowed under limit", func(t *testing.T) {
 		buckets.AllowFunc = func(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error) {
-			return &models.RateLimitResult{Allowed: true, Limit: 10, Remaining: 9}, nil
+			return &models.RateLimitResult{Allowed: true, Limit: 10, Remaining: 9, ResetAt: time.Now().Add(window)}, nil
 		}
 
 		result, err := svc.CheckIPRateLimit(ctx, "192.168.1.1", models.ClassAuth)
