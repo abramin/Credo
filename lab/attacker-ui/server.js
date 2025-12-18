@@ -43,9 +43,26 @@ function sendJSON(res, statusCode, payload) {
   res.end(JSON.stringify(payload, null, 2));
 }
 
+const STATIC_ROOT = __dirname;
+
 function serveStatic(req, res) {
   const requestPath = req.url === "/" ? "/index.html" : req.url;
-  const filePath = path.join(__dirname, requestPath);
+  // Build the absolute normalized path (no .. segments, etc.)
+  let unsafePath = path.join(STATIC_ROOT, requestPath);
+  let filePath;
+  try {
+    filePath = fs.realpathSync(unsafePath);
+  } catch (err) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Not Found");
+    return;
+  }
+  // Ensure filePath is within STATIC_ROOT
+  if (!filePath.startsWith(STATIC_ROOT)) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
+    res.end("Forbidden");
+    return;
+  }
   const ext = path.extname(filePath);
   const contentType = mimeTypes[ext] || "text/plain";
 
