@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"credo/internal/ratelimit/models"
-	dErrors "credo/pkg/domain-errors"
 )
 
 // InMemoryBucketStore implements BucketStore using in-memory sliding window.
@@ -32,51 +31,89 @@ func NewInMemoryBucketStore() *InMemoryBucketStore {
 }
 
 // Allow checks if a request is allowed and increments the counter.
-// Per PRD-017 TR-1, FR-3: Sliding window algorithm.
-//
-// TODO: Implement this method
-// 1. Lock the mutex
-// 2. Get or create sliding window for key
-// 3. Remove timestamps older than (now - window)
-// 4. Count remaining timestamps
-// 5. If count >= limit, return not allowed with remaining=0
-// 6. Add current timestamp
-// 7. Calculate reset time (oldest timestamp + window, or now + window if empty)
-// 8. Return RateLimitResult
 func (s *InMemoryBucketStore) Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error) {
-	// TODO: Implement - see steps above
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	return s.AllowN(ctx, key, 1, limit, window)
 }
 
 // AllowN checks if a request with custom cost is allowed.
-// Per PRD-017 TR-1: AllowN for operations that consume multiple tokens.
-//
-// TODO: Implement this method
 // Similar to Allow but adds 'cost' number of timestamps instead of 1
 func (s *InMemoryBucketStore) AllowN(ctx context.Context, key string, cost int, limit int, window time.Duration) (*models.RateLimitResult, error) {
-	// TODO: Implement
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cw := s.getOrCreateBucket(key, window)
+	cw.cleanup(time.Now())
+	count := len(cw.timestamps)
+
+	if count+cost <= limit {
+		now := time.Now()
+		for range cost {
+			cw.timestamps = append(cw.timestamps, now)
+		}
+
+		var resetAt time.Time
+		if len(cw.timestamps) > 0 {
+			resetAt = cw.timestamps[0].Add(window)
+		} else {
+			resetAt = now.Add(window)
+		}
+
+		return &models.RateLimitResult{
+			Allowed:   true,
+			Remaining: limit - len(cw.timestamps),
+			ResetAt:   resetAt,
+			Limit:     limit,
+		}, nil
+	}
+
+	return &models.RateLimitResult{
+		Allowed:   false,
+		Remaining: 0,
+		ResetAt:   time.Now().Add(window),
+	}, nil
 }
 
 // Reset clears the rate limit counter for a key.
-// Per PRD-017 TR-1: Admin reset operation.
-//
-// TODO: Implement this method
 func (s *InMemoryBucketStore) Reset(ctx context.Context, key string) error {
-	// TODO: Implement
-	return dErrors.New(dErrors.CodeInternal, "not implemented")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.buckets, key)
+	return nil
 }
 
 // GetCurrentCount returns the current request count for a key.
-//
-// TODO: Implement this method
 func (s *InMemoryBucketStore) GetCurrentCount(ctx context.Context, key string) (int, error) {
-	// TODO: Implement
-	return 0, dErrors.New(dErrors.CodeInternal, "not implemented")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	cw := s.buckets[key]
+	if cw == nil {
+		return 0, nil
+	}
+
+	cw.cleanup(time.Now())
+	return len(cw.timestamps), nil
 }
 
 // cleanup removes expired timestamps from a sliding window.
-// Helper method for internal use.
 func (sw *slidingWindow) cleanup(now time.Time) {
-	// TODO: Implement - remove timestamps older than (now - sw.window)
+	cutoff := now.Add(-sw.window)
+	i := 0
+	for ; i < len(sw.timestamps); i++ {
+		if sw.timestamps[i].After(cutoff) {
+			break
+		}
+	}
+	sw.timestamps = sw.timestamps[i:]
+}
+
+// getOrCreateBucket returns an existing bucket or creates a new one.
+// Must be called while holding s.mu lock.
+func (s *InMemoryBucketStore) getOrCreateBucket(key string, window time.Duration) *slidingWindow {
+	if cw := s.buckets[key]; cw != nil {
+		return cw
+	}
+	cw := &slidingWindow{timestamps: []time.Time{}, window: window}
+	s.buckets[key] = cw
+	return cw
 }

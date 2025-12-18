@@ -2,132 +2,150 @@ package bucket
 
 import (
 	"context"
+	"credo/internal/ratelimit/models"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
-// TestInMemoryBucketStore_Allow tests the basic Allow functionality.
+const (
+	testLimit  = 10
+	testWindow = time.Minute
+)
+
+type InMemoryBucketStoreSuite struct {
+	suite.Suite
+	store *InMemoryBucketStore
+	ctx   context.Context
+}
+
+func TestInMemoryBucketStoreSuite(t *testing.T) {
+	suite.Run(t, new(InMemoryBucketStoreSuite))
+}
+
+func (s *InMemoryBucketStoreSuite) SetupTest() {
+	s.store = NewInMemoryBucketStore()
+	s.ctx = context.Background()
+}
+
 // Per PRD-017 FR-1, FR-3: Sliding window rate limiting.
-func TestInMemoryBucketStore_Allow(t *testing.T) {
-	t.Skip("TODO: Implement test after Allow is implemented")
-
-	store := NewInMemoryBucketStore()
-	ctx := context.Background()
-
-	// TODO: Test cases to implement:
-	// 1. First request should be allowed
-	// 2. Requests up to limit should be allowed
-	// 3. Request at limit should be denied
-	// 4. After window expires, requests should be allowed again
-
-	t.Run("first request allowed", func(t *testing.T) {
-		result, err := store.Allow(ctx, "test:key:1", 10, time.Minute)
-		require.NoError(t, err)
-		assert.True(t, result.Allowed)
-		assert.Equal(t, 10, result.Limit)
-		assert.Equal(t, 9, result.Remaining)
+func (s *InMemoryBucketStoreSuite) TestAllow() {
+	s.Run("first request allowed", func() {
+		result, err := s.store.Allow(s.ctx, "test:key:allow:first", testLimit, testWindow)
+		s.Require().NoError(err)
+		s.True(result.Allowed)
+		s.Equal(testLimit, result.Limit)
+		s.Equal(testLimit-1, result.Remaining)
 	})
 
-	t.Run("requests up to limit allowed", func(t *testing.T) {
-		// TODO: Implement - make 9 more requests, all should be allowed
+	s.Run("requests up to limit allowed", func() {
+		var result *models.RateLimitResult
+		var err error
+		for range testLimit {
+			result, err = s.store.Allow(s.ctx, "test:key:allow:limit", testLimit, testWindow)
+		}
+		s.Require().NoError(err)
+		s.True(result.Allowed)
+		s.Equal(testLimit, result.Limit)
+		s.Equal(0, result.Remaining)
 	})
 
-	t.Run("request over limit denied", func(t *testing.T) {
-		// TODO: Implement - 11th request should be denied
+	s.Run("request over limit denied", func() {
+		for range testLimit {
+			_, err := s.store.Allow(s.ctx, "test:key:allow:over", testLimit, testWindow)
+			require.NoError(s.T(), err)
+		}
+		result, err := s.store.Allow(s.ctx, "test:key:allow:over", testLimit, testWindow)
+		s.Require().NoError(err)
+		s.False(result.Allowed)
+		s.Equal(0, result.Remaining)
 	})
 
-	t.Run("after window expires requests allowed", func(t *testing.T) {
-		// TODO: Implement - wait for window to expire, then request should be allowed
+	s.Run("after window expires requests allowed", func() {
+		_, err := s.store.Allow(s.ctx, "test:key:allow:reset", testLimit, testWindow)
+		s.Require().NoError(err)
+
+		s.store.mu.Lock()
+		if sw, exists := s.store.buckets["test:key:allow:reset"]; exists {
+			sw.timestamps = []time.Time{}
+		}
+		s.store.mu.Unlock()
+
+		result, err := s.store.Allow(s.ctx, "test:key:allow:reset", testLimit, testWindow)
+		s.Require().NoError(err)
+		s.True(result.Allowed)
+		s.Equal(testLimit, result.Limit)
+		s.Equal(testLimit-1, result.Remaining)
 	})
 }
 
-// TestInMemoryBucketStore_AllowN tests the AllowN functionality with custom cost.
 // Per PRD-017 TR-1: AllowN for operations consuming multiple tokens.
-func TestInMemoryBucketStore_AllowN(t *testing.T) {
-	t.Skip("TODO: Implement test after AllowN is implemented")
-
-	// store := NewInMemoryBucketStore()
-	// ctx := context.Background()
-
-	// TODO: Test cases to implement:
-	// 1. Request with cost 1 behaves like Allow
-	// 2. Request with cost 5 consumes 5 tokens
-	// 3. Request with cost > remaining should be denied
-
-	t.Run("cost of 1 behaves like Allow", func(t *testing.T) {
-		// TODO: Implement
+func (s *InMemoryBucketStoreSuite) TestAllowN() {
+	s.Run("cost of 1 behaves like Allow", func() {
+		result, err := s.store.AllowN(s.ctx, "test:key:allown:one", 1, testLimit, testWindow)
+		s.Require().NoError(err)
+		s.True(result.Allowed)
+		s.Equal(testLimit, result.Limit)
+		s.Equal(testLimit-1, result.Remaining)
 	})
 
-	t.Run("cost of 5 consumes 5 tokens", func(t *testing.T) {
-		// TODO: Implement
+	s.Run("cost of 5 consumes 5 tokens", func() {
+		result, err := s.store.AllowN(s.ctx, "test:key:allown:five", 5, testLimit, testWindow)
+		s.Require().NoError(err)
+		s.True(result.Allowed)
+		s.Equal(testLimit, result.Limit)
+		s.Equal(5, result.Remaining)
 	})
 
-	t.Run("cost greater than remaining denied", func(t *testing.T) {
-		// TODO: Implement
+	s.Run("cost greater than remaining denied", func() {
+		firstResult, err := s.store.AllowN(s.ctx, "test:key:allown:deny", 7, testLimit, testWindow)
+		s.Require().NoError(err)
+		s.Require().True(firstResult.Allowed)
+
+		result, err := s.store.AllowN(s.ctx, "test:key:allown:deny", 4, testLimit, testWindow)
+		s.Require().NoError(err)
+		s.False(result.Allowed)
+		s.Equal(0, result.Remaining)
 	})
 }
 
-// TestInMemoryBucketStore_Reset tests the Reset functionality.
 // Per PRD-017 TR-1: Admin reset operation.
-func TestInMemoryBucketStore_Reset(t *testing.T) {
-	t.Skip("TODO: Implement test after Reset is implemented")
+func (s *InMemoryBucketStoreSuite) TestReset() {
+	_, err := s.store.AllowN(s.ctx, "test:key:reset", 5, testLimit, testWindow)
+	s.Require().NoError(err)
 
-	// store := NewInMemoryBucketStore()
-	// ctx := context.Background()
+	err = s.store.Reset(s.ctx, "test:key:reset")
+	s.Require().NoError(err)
 
-	// TODO: Test cases to implement:
-	// 1. Reset clears counter for key
-	// 2. Reset on non-existent key is no-op
-	// 3. After reset, full limit is available
-
-	t.Run("reset clears counter", func(t *testing.T) {
-		// TODO: Implement
-	})
-
-	t.Run("reset non-existent key is no-op", func(t *testing.T) {
-		// TODO: Implement
-	})
+	result, err := s.store.AllowN(s.ctx, "test:key:reset", testLimit, testLimit, testWindow)
+	s.Require().NoError(err)
+	s.True(result.Allowed)
+	s.Equal(testLimit, result.Limit)
+	s.Equal(0, result.Remaining)
 }
 
-// TestInMemoryBucketStore_SlidingWindow tests sliding window behavior.
-// Per PRD-017 FR-3: Sliding window prevents boundary attacks.
-func TestInMemoryBucketStore_SlidingWindow(t *testing.T) {
-	t.Skip("TODO: Implement test after Allow is implemented")
+func (s *InMemoryBucketStoreSuite) TestConcurrent() {
+	limit := 100 // Different from testLimit for concurrency testing
+	key := "test:key:concurrent"
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	allowedCount := 0
 
-	// store := NewInMemoryBucketStore()
-	// ctx := context.Background()
+	for range 200 {
+		wg.Go(func() {
+			result, err := s.store.Allow(s.ctx, key, limit, testWindow)
+			s.Require().NoError(err)
+			if result.Allowed {
+				mu.Lock()
+				allowedCount++
+				mu.Unlock()
+			}
+		})
+	}
 
-	// TODO: Test cases to implement:
-	// 1. Timestamps outside window are cleaned up
-	// 2. Boundary attack prevented (requests at window boundary)
-	// 3. Smooth rate distribution over time
-
-	t.Run("old timestamps cleaned up", func(t *testing.T) {
-		// TODO: Implement
-	})
-
-	t.Run("boundary attack prevented", func(t *testing.T) {
-		// TODO: Implement - spike at window edge should not allow double limit
-	})
-}
-
-// TestInMemoryBucketStore_Concurrent tests concurrent access.
-func TestInMemoryBucketStore_Concurrent(t *testing.T) {
-	t.Skip("TODO: Implement test after Allow is implemented")
-
-	store := NewInMemoryBucketStore()
-	ctx := context.Background()
-
-	// TODO: Test cases to implement:
-	// 1. Concurrent requests are handled safely
-	// 2. Total allowed does not exceed limit under concurrency
-
-	t.Run("concurrent requests safe", func(t *testing.T) {
-		// TODO: Implement - use goroutines to make concurrent requests
-		_ = store
-		_ = ctx
-	})
+	wg.Wait()
+	s.Equal(limit, allowedCount)
 }
