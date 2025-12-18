@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attack Lab - Hacker Desktop</title>
+  <link rel="stylesheet" href="css/shared.css">
+  <link rel="stylesheet" href="css/hacker-desktop.css">
+
+  <!-- WinBox.js for window management -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/winbox@0.2.82/dist/css/winbox.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/winbox@0.2.82/dist/js/winbox.min.js"></script>
+
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <!-- Stores -->
+  <script src="js/stores/theme-store.js"></script>
+  <script src="js/stores/config-store.js"></script>
+  <script src="js/stores/mock-api-store.js"></script>
+  <script src="js/stores/flow-store.js"></script>
+
+  <!-- Utils -->
+  <script src="js/utils/jwt.js"></script>
+  <script src="js/utils/formatting.js"></script>
+</head>
+<body x-data="hackerDesktop">
+  <!-- Taskbar -->
+  <nav class="taskbar">
+    <div class="taskbar-brand">
+      <a href="index.html" class="back-btn" title="Back to modules">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+      </a>
+      <span class="brand-text glow">ATTACK_LAB</span>
+      <span class="brand-version">v1.0</span>
+    </div>
+
+    <div class="taskbar-windows">
+      <button
+        class="taskbar-btn"
+        :class="{ 'active': windows.flowDiagram.open }"
+        @click="toggleWindow('flowDiagram')"
+        title="Flow Diagram"
+      >
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/>
+          <rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/>
+          <path d="M10 6.5h4M17.5 10v4M10 17.5h4M6.5 10v4"/>
+        </svg>
+        <span>Flow</span>
+      </button>
+      <button
+        class="taskbar-btn"
+        :class="{ 'active': windows.terminal.open }"
+        @click="toggleWindow('terminal')"
+        title="Hacker Terminal"
+      >
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="4 17 10 11 4 5"/>
+          <line x1="12" y1="19" x2="20" y2="19"/>
+        </svg>
+        <span>Terminal</span>
+      </button>
+      <button
+        class="taskbar-btn"
+        :class="{ 'active': windows.inspector.open }"
+        @click="toggleWindow('inspector')"
+        title="Request Inspector"
+      >
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        <span>Inspector</span>
+      </button>
+      <button
+        class="taskbar-btn"
+        :class="{ 'active': windows.config.open }"
+        @click="toggleWindow('config')"
+        title="Security Config"
+      >
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span>Config</span>
+      </button>
+    </div>
+
+    <div class="taskbar-status">
+      <div class="status-item">
+        <span class="status-label">SCORE:</span>
+        <span class="status-value glow" x-text="$store.config.securityScore"></span>
+      </div>
+      <div class="status-item">
+        <span class="status-indicator" :class="$store.flow.isAttacking ? 'indicator-danger' : 'indicator-idle'"></span>
+        <span x-text="$store.flow.isAttacking ? 'ATTACKING' : 'IDLE'"></span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Desktop Area -->
+  <main class="desktop" id="desktop">
+    <!-- Window contents are injected by WinBox -->
+
+    <!-- Welcome overlay when no windows open -->
+    <div class="welcome-overlay" x-show="!anyWindowOpen">
+      <div class="welcome-content">
+        <div class="welcome-logo">
+          <pre class="ascii-art">
+   ___  _____ _____ ___   _____ _  __  _      ___  ___
+  / _ \|_   _|_   _/ _ \ / ____| |/ / | |    / _ \| _ )
+ | |_| | | |   | || |_| || |    | ' <  | |__ | |_| | _ \
+ |_/ \_| |_|   |_||_/ \_||_|    |_|\_\ |____||_/ \_|___/
+          </pre>
+        </div>
+        <h2 class="glow">Welcome to Attack Lab</h2>
+        <p>Click the buttons in the taskbar to open windows</p>
+        <div class="welcome-hints">
+          <div class="hint-item">
+            <kbd>Flow</kbd> - Visualize OAuth flows and attacks
+          </div>
+          <div class="hint-item">
+            <kbd>Terminal</kbd> - Execute attack commands
+          </div>
+          <div class="hint-item">
+            <kbd>Inspector</kbd> - Analyze requests and responses
+          </div>
+          <div class="hint-item">
+            <kbd>Config</kbd> - Toggle security defenses
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Hidden templates for window content -->
+  <template id="flow-diagram-content">
+    <div class="window-content flow-diagram" x-data="flowDiagram">
+      <div class="flow-header">
+        <div class="flow-scenario">
+          <label class="form-label">Scenario:</label>
+          <select class="form-select" x-model="$store.flow.currentScenario" @change="loadScenario()">
+            <option value="">Select attack scenario...</option>
+            <option value="pkce_bypass">PKCE Bypass Attack</option>
+            <option value="redirect_hijack">Redirect URI Hijacking</option>
+            <option value="token_replay">Token Replay Attack</option>
+            <option value="csrf_login">CSRF Login Attack</option>
+          </select>
+        </div>
+        <div class="flow-controls">
+          <button class="btn btn-sm btn-secondary" @click="resetFlow()" :disabled="!$store.flow.currentScenario">
+            Reset
+          </button>
+          <button class="btn btn-sm btn-primary" @click="stepForward()" :disabled="!canStep">
+            <span x-text="$store.flow.isComplete ? 'Complete' : 'Next Step'"></span>
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="flow-canvas">
+        <!-- Services -->
+        <div class="service-nodes">
+          <div class="service-node" :class="{ 'active': isNodeActive('victim') }" id="node-victim">
+            <div class="node-icon">👤</div>
+            <div class="node-label">Victim</div>
+          </div>
+          <div class="service-node" :class="{ 'active': isNodeActive('client') }" id="node-client">
+            <div class="node-icon">💻</div>
+            <div class="node-label">Client App</div>
+          </div>
+          <div class="service-node" :class="{ 'active': isNodeActive('authserver') }" id="node-authserver">
+            <div class="node-icon">🔐</div>
+            <div class="node-label">Auth Server</div>
+            <div class="node-status" :class="getServerStatus()">
+              <span x-text="getServerStatusText()"></span>
+            </div>
+          </div>
+          <div class="service-node" :class="{ 'active': isNodeActive('resource') }" id="node-resource">
+            <div class="node-icon">📦</div>
+            <div class="node-label">Resource Server</div>
+          </div>
+          <div class="service-node attacker" :class="{ 'active': isNodeActive('attacker') }" id="node-attacker">
+            <div class="node-icon">☠️</div>
+            <div class="node-label">Attacker</div>
+          </div>
+        </div>
+
+        <!-- Flow arrows will be drawn here -->
+        <svg class="flow-arrows" id="flow-arrows">
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="var(--accent-primary)"/>
+            </marker>
+            <marker id="arrowhead-danger" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="var(--error)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+
+      <div class="flow-info" x-show="$store.flow.currentStep">
+        <div class="step-badge">
+          Step <span x-text="$store.flow.stepIndex + 1"></span>
+        </div>
+        <h4 class="step-title" x-text="$store.flow.currentStep?.title"></h4>
+        <p class="step-description" x-text="$store.flow.currentStep?.description"></p>
+        <div class="step-request" x-show="$store.flow.currentStep?.request">
+          <code x-text="$store.flow.currentStep?.request"></code>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="terminal-content">
+    <div class="window-content terminal" x-data="hackerTerminal">
+      <div class="terminal-output" id="terminal-output">
+        <div class="terminal-line system">
+          <span class="prompt">system@attack-lab:~$</span>
+          <span>Welcome to Attack Lab Terminal v1.0</span>
+        </div>
+        <div class="terminal-line system">
+          <span>Type 'help' for available commands</span>
+        </div>
+        <template x-for="(line, index) in history" :key="index">
+          <div class="terminal-line" :class="line.type">
+            <template x-if="line.type === 'input'">
+              <span><span class="prompt">hacker@attack-lab:~$</span> <span x-text="line.text"></span></span>
+            </template>
+            <template x-if="line.type !== 'input'">
+              <span x-html="line.text"></span>
+            </template>
+          </div>
+        </template>
+      </div>
+      <div class="terminal-input-line">
+        <span class="prompt">hacker@attack-lab:~$</span>
+        <input
+          type="text"
+          class="terminal-input"
+          x-model="currentInput"
+          @keydown.enter="executeCommand()"
+          @keydown.up="historyUp()"
+          @keydown.down="historyDown()"
+          @keydown.tab.prevent="autoComplete()"
+          placeholder="Enter command..."
+          autofocus
+        >
+      </div>
+    </div>
+  </template>
+
+  <template id="inspector-content">
+    <div class="window-content inspector" x-data="requestInspector">
+      <div class="inspector-tabs">
+        <button class="tab" :class="{ 'active': activeTab === 'request' }" @click="activeTab = 'request'">Request</button>
+        <button class="tab" :class="{ 'active': activeTab === 'response' }" @click="activeTab = 'response'">Response</button>
+        <button class="tab" :class="{ 'active': activeTab === 'token' }" @click="activeTab = 'token'">Token</button>
+      </div>
+
+      <div class="inspector-content" x-show="activeTab === 'request'">
+        <div class="inspector-section">
+          <h4>Current Request</h4>
+          <div class="request-display" x-show="$store.flow.currentRequest">
+            <div class="request-method" x-text="$store.flow.currentRequest?.method || 'GET'"></div>
+            <div class="request-url" x-text="$store.flow.currentRequest?.url"></div>
+          </div>
+          <div class="empty-state" x-show="!$store.flow.currentRequest">
+            <p>No request captured yet. Run an attack from the terminal or step through a flow.</p>
+          </div>
+        </div>
+
+        <div class="inspector-section" x-show="$store.flow.currentRequest?.headers">
+          <h4>Headers</h4>
+          <div class="headers-list">
+            <template x-for="(value, key) in $store.flow.currentRequest?.headers || {}" :key="key">
+              <div class="header-row">
+                <span class="header-key" x-text="key"></span>
+                <span class="header-value" x-text="value"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div class="inspector-section" x-show="$store.flow.currentRequest?.body">
+          <h4>Body</h4>
+          <pre class="code-block" x-text="formatJson($store.flow.currentRequest?.body)"></pre>
+        </div>
+      </div>
+
+      <div class="inspector-content" x-show="activeTab === 'response'">
+        <div class="inspector-section">
+          <h4>Response</h4>
+          <div class="response-display" x-show="$store.flow.currentResponse">
+            <div class="response-status" :class="$store.flow.currentResponse?.success ? 'status-success' : 'status-error'">
+              <span x-text="$store.flow.currentResponse?.success ? '200 OK' : '401 Unauthorized'"></span>
+            </div>
+            <pre class="code-block" x-text="formatJson($store.flow.currentResponse)"></pre>
+          </div>
+          <div class="empty-state" x-show="!$store.flow.currentResponse">
+            <p>No response yet.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="inspector-content" x-show="activeTab === 'token'">
+        <div class="inspector-section">
+          <h4>Captured Token</h4>
+          <div class="token-display" x-show="$store.flow.capturedToken">
+            <div class="token-raw">
+              <code x-text="truncate($store.flow.capturedToken, 60)"></code>
+              <button class="btn btn-sm btn-ghost" @click="copyToken()">Copy</button>
+            </div>
+            <div class="token-decoded" x-show="decodedToken">
+              <h5>Header</h5>
+              <pre class="code-block" x-text="formatJson(decodedToken?.header)"></pre>
+              <h5>Payload</h5>
+              <pre class="code-block" x-text="formatJson(decodedToken?.payload)"></pre>
+            </div>
+          </div>
+          <div class="empty-state" x-show="!$store.flow.capturedToken">
+            <p>No token captured yet. Complete an authorization flow to capture a token.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="config-content">
+    <div class="window-content config-panel" x-data>
+      <div class="config-header">
+        <h4>Security Defenses</h4>
+        <div class="preset-buttons">
+          <button class="btn btn-sm" :class="getPresetClass('insecure')" @click="$store.config.applyPreset('insecure')">Vulnerable</button>
+          <button class="btn btn-sm" :class="getPresetClass('partial')" @click="$store.config.applyPreset('partial')">Partial</button>
+          <button class="btn btn-sm" :class="getPresetClass('secure')" @click="$store.config.applyPreset('secure')">Secure</button>
+        </div>
+      </div>
+
+      <div class="config-controls">
+        <label class="toggle">
+          <input type="checkbox" class="toggle-input" x-model="$store.config.requirePkce">
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">PKCE Required</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" class="toggle-input" x-model="$store.config.strictRedirectUri">
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">Strict Redirect URI</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" class="toggle-input" x-model="$store.config.validateAudience">
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">Audience Validation</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" class="toggle-input" x-model="$store.config.requireStateParam">
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">State Parameter</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" class="toggle-input" x-model="$store.config.httpsOnlyRedirects">
+          <span class="toggle-switch"></span>
+          <span class="toggle-label">HTTPS Only</span>
+        </label>
+      </div>
+
+      <div class="config-score">
+        <div class="score-ring">
+          <svg viewBox="0 0 100 100">
+            <circle class="score-bg" cx="50" cy="50" r="45"/>
+            <circle
+              class="score-fill"
+              cx="50" cy="50" r="45"
+              :stroke-dasharray="`${$store.config.securityScore * 2.83} 283`"
+            />
+          </svg>
+          <div class="score-text">
+            <span class="score-value glow" x-text="$store.config.securityScore"></span>
+            <span class="score-label">/ 100</span>
+          </div>
+        </div>
+        <div class="score-level" :class="`level-${$store.config.securityLevel.color}`">
+          <span x-text="$store.config.securityLevel.label"></span>
+        </div>
+      </div>
+
+      <div class="config-vulns" x-show="$store.config.vulnerabilities.length > 0">
+        <h5>Active Vulnerabilities</h5>
+        <template x-for="vuln in $store.config.vulnerabilities" :key="vuln.id">
+          <div class="vuln-item">
+            <span class="vuln-severity" :class="`severity-${vuln.severity}`" x-text="vuln.severity"></span>
+            <span class="vuln-name" x-text="vuln.name"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    // Wait for Alpine and WinBox to be ready
+    document.addEventListener('alpine:init', () => {
+      // Flow store for shared state between windows
+      Alpine.store('flow', {
+        currentScenario: '',
+        stepIndex: -1,
+        currentStep: null,
+        steps: [],
+        isAttacking: false,
+        isComplete: false,
+        currentRequest: null,
+        currentResponse: null,
+        capturedToken: null,
+        activeNodes: [],
+
+        setScenario(scenario, steps) {
+          this.currentScenario = scenario;
+          this.steps = steps;
+          this.stepIndex = -1;
+          this.currentStep = null;
+          this.isComplete = false;
+          this.activeNodes = [];
+        },
+
+        nextStep() {
+          if (this.stepIndex < this.steps.length - 1) {
+            this.stepIndex++;
+            this.currentStep = this.steps[this.stepIndex];
+            this.activeNodes = this.currentStep.nodes || [];
+            this.isAttacking = this.currentStep.isAttack || false;
+            return true;
+          }
+          this.isComplete = true;
+          this.isAttacking = false;
+          return false;
+        },
+
+        reset() {
+          this.stepIndex = -1;
+          this.currentStep = null;
+          this.isComplete = false;
+          this.isAttacking = false;
+          this.activeNodes = [];
+          this.currentRequest = null;
+          this.currentResponse = null;
+        }
+      });
+
+      // Main desktop controller
+      Alpine.data('hackerDesktop', () => ({
+        windows: {
+          flowDiagram: { open: false, instance: null },
+          terminal: { open: false, instance: null },
+          inspector: { open: false, instance: null },
+          config: { open: false, instance: null }
+        },
+
+        get anyWindowOpen() {
+          return Object.values(this.windows).some(w => w.open);
+        },
+
+        init() {
+          // Restore window states from localStorage
+          const saved = localStorage.getItem('attack-lab-windows');
+          if (saved) {
+            const states = JSON.parse(saved);
+            // Don't auto-open, just remember positions
+          }
+        },
+
+        toggleWindow(name) {
+          if (this.windows[name].open) {
+            this.closeWindow(name);
+          } else {
+            this.openWindow(name);
+          }
+        },
+
+        openWindow(name) {
+          if (this.windows[name].open) {
+            // Focus existing window
+            this.windows[name].instance?.focus();
+            return;
+          }
+
+          const configs = {
+            flowDiagram: {
+              title: '📊 Flow Diagram',
+              width: '600px',
+              height: '500px',
+              x: 50,
+              y: 50,
+              template: 'flow-diagram-content'
+            },
+            terminal: {
+              title: '💀 Hacker Terminal',
+              width: '700px',
+              height: '400px',
+              x: 100,
+              y: 150,
+              template: 'terminal-content',
+              class: ['terminal-window']
+            },
+            inspector: {
+              title: '🔍 Request Inspector',
+              width: '500px',
+              height: '450px',
+              x: 700,
+              y: 50,
+              template: 'inspector-content'
+            },
+            config: {
+              title: '🛡️ Security Config',
+              width: '320px',
+              height: '500px',
+              x: 'right',
+              y: 'center',
+              template: 'config-content'
+            }
+          };
+
+          const cfg = configs[name];
+          const template = document.getElementById(cfg.template);
+          const content = template.content.cloneNode(true);
+
+          const win = new WinBox({
+            title: cfg.title,
+            width: cfg.width,
+            height: cfg.height,
+            x: cfg.x,
+            y: cfg.y,
+            mount: content,
+            class: cfg.class || [],
+            background: '#0d1117',
+            border: 1,
+            onclose: () => {
+              this.windows[name].open = false;
+              this.windows[name].instance = null;
+              this.saveWindowStates();
+              return false;
+            },
+            onfocus: () => {
+              // Update taskbar active state
+            }
+          });
+
+          this.windows[name].open = true;
+          this.windows[name].instance = win;
+          this.saveWindowStates();
+
+          // Initialize Alpine on the mounted content
+          setTimeout(() => {
+            Alpine.initTree(win.body);
+          }, 0);
+        },
+
+        closeWindow(name) {
+          if (this.windows[name].instance) {
+            this.windows[name].instance.close();
+          }
+          this.windows[name].open = false;
+          this.windows[name].instance = null;
+        },
+
+        saveWindowStates() {
+          const states = {};
+          for (const [name, win] of Object.entries(this.windows)) {
+            if (win.instance) {
+              states[name] = {
+                x: win.instance.x,
+                y: win.instance.y,
+                width: win.instance.width,
+                height: win.instance.height
+              };
+            }
+          }
+          localStorage.setItem('attack-lab-windows', JSON.stringify(states));
+        }
+      }));
+
+      // Flow Diagram component
+      Alpine.data('flowDiagram', () => ({
+        scenarios: {
+          pkce_bypass: [
+            { id: 1, title: 'User initiates login', description: 'Victim clicks "Login with OAuth"', nodes: ['victim', 'client'], request: 'GET /login' },
+            { id: 2, title: 'Authorization request', description: 'Client redirects to auth server (without PKCE)', nodes: ['client', 'authserver'], request: 'GET /authorize?client_id=app&redirect_uri=...', isAttack: false },
+            { id: 3, title: 'Attacker intercepts', description: 'Attacker captures the authorization code from redirect', nodes: ['authserver', 'attacker'], isAttack: true },
+            { id: 4, title: 'Code replay', description: 'Attacker uses stolen code to get tokens', nodes: ['attacker', 'authserver'], request: 'POST /token (with stolen code)', isAttack: true },
+            { id: 5, title: 'Token obtained!', description: 'Attacker now has valid access token', nodes: ['attacker'], isAttack: true }
+          ],
+          redirect_hijack: [
+            { id: 1, title: 'Attacker crafts malicious link', description: 'Creates auth URL with attacker-controlled redirect_uri', nodes: ['attacker'], isAttack: true },
+            { id: 2, title: 'Victim clicks link', description: 'User is tricked into clicking the malicious authorization link', nodes: ['victim', 'attacker'], isAttack: true },
+            { id: 3, title: 'Auth server accepts', description: 'Server allows the malicious redirect URI (validation disabled)', nodes: ['authserver'], request: 'GET /authorize?redirect_uri=https://evil.com' },
+            { id: 4, title: 'Code sent to attacker', description: 'Authorization code is sent to attacker\'s server', nodes: ['authserver', 'attacker'], isAttack: true },
+            { id: 5, title: 'Attacker exchanges code', description: 'Attacker gets tokens using the stolen code', nodes: ['attacker', 'authserver'], isAttack: true }
+          ],
+          token_replay: [
+            { id: 1, title: 'Attacker obtains token', description: 'Gets a valid token for Service A', nodes: ['attacker', 'authserver'] },
+            { id: 2, title: 'Token inspection', description: 'Attacker examines token - no audience restriction', nodes: ['attacker'], request: 'Token: {aud: undefined}' },
+            { id: 3, title: 'Replay to Service B', description: 'Attacker sends same token to different service', nodes: ['attacker', 'resource'], isAttack: true },
+            { id: 4, title: 'Service accepts!', description: 'Service B accepts token without audience validation', nodes: ['resource'], isAttack: true }
+          ],
+          csrf_login: [
+            { id: 1, title: 'Attacker prepares', description: 'Attacker gets their own authorization code', nodes: ['attacker', 'authserver'] },
+            { id: 2, title: 'Malicious callback', description: 'Crafts callback URL with attacker\'s code (no state)', nodes: ['attacker'], request: '/callback?code=ATTACKER_CODE', isAttack: true },
+            { id: 3, title: 'Victim tricked', description: 'Victim\'s browser loads the malicious callback', nodes: ['victim', 'client'], isAttack: true },
+            { id: 4, title: 'Account linked', description: 'Victim\'s session now linked to attacker\'s account', nodes: ['client'], isAttack: true }
+          ]
+        },
+
+        get canStep() {
+          return Alpine.store('flow').currentScenario && !Alpine.store('flow').isComplete;
+        },
+
+        loadScenario() {
+          const scenario = Alpine.store('flow').currentScenario;
+          if (scenario && this.scenarios[scenario]) {
+            Alpine.store('flow').setScenario(scenario, this.scenarios[scenario]);
+          }
+        },
+
+        stepForward() {
+          Alpine.store('flow').nextStep();
+        },
+
+        resetFlow() {
+          Alpine.store('flow').reset();
+        },
+
+        isNodeActive(node) {
+          return Alpine.store('flow').activeNodes.includes(node);
+        },
+
+        getServerStatus() {
+          const config = Alpine.store('config');
+          if (config.securityScore >= 80) return 'status-secure';
+          if (config.securityScore >= 50) return 'status-partial';
+          return 'status-vulnerable';
+        },
+
+        getServerStatusText() {
+          const config = Alpine.store('config');
+          if (config.securityScore >= 80) return 'SECURE';
+          if (config.securityScore >= 50) return 'PARTIAL';
+          return 'VULNERABLE';
+        }
+      }));
+
+      // Terminal component
+      Alpine.data('hackerTerminal', () => ({
+        history: [],
+        commandHistory: [],
+        historyIndex: -1,
+        currentInput: '',
+
+        commands: {
+          help: () => `Available commands:
+  <span class="cmd">scan</span>          - Scan target for vulnerabilities
+  <span class="cmd">attack &lt;type&gt;</span> - Launch attack (pkce, redirect, replay, csrf)
+  <span class="cmd">intercept</span>     - Start intercepting requests
+  <span class="cmd">status</span>        - Show current attack status
+  <span class="cmd">config</span>        - Show target security config
+  <span class="cmd">token</span>         - Show captured token
+  <span class="cmd">clear</span>         - Clear terminal
+  <span class="cmd">help</span>          - Show this help`,
+
+          scan: function() {
+            const config = Alpine.store('config');
+            const vulns = config.vulnerabilities;
+            if (vulns.length === 0) {
+              return '<span class="success">Target appears secure. No vulnerabilities detected.</span>';
+            }
+            let result = `<span class="warning">Found ${vulns.length} vulnerabilities:</span>\n`;
+            vulns.forEach(v => {
+              result += `  <span class="error">[${v.severity.toUpperCase()}]</span> ${v.name}\n`;
+            });
+            return result;
+          },
+
+          attack: function(args) {
+            const type = args[0];
+            if (!type) {
+              return '<span class="error">Usage: attack &lt;pkce|redirect|replay|csrf&gt;</span>';
+            }
+            const scenarios = {
+              pkce: 'pkce_bypass',
+              redirect: 'redirect_hijack',
+              replay: 'token_replay',
+              csrf: 'csrf_login'
+            };
+            if (!scenarios[type]) {
+              return `<span class="error">Unknown attack type: ${type}</span>`;
+            }
+            Alpine.store('flow').currentScenario = scenarios[type];
+            return `<span class="success">Loaded ${type} attack scenario. Use Flow Diagram to execute.</span>`;
+          },
+
+          intercept: () => {
+            Alpine.store('flow').isAttacking = true;
+            return '<span class="warning">Intercepting requests... (simulated)</span>';
+          },
+
+          status: function() {
+            const flow = Alpine.store('flow');
+            return `Attack Status:
+  Scenario: ${flow.currentScenario || 'none'}
+  Step: ${flow.stepIndex + 1}/${flow.steps.length}
+  Active: ${flow.isAttacking ? '<span class="error">YES</span>' : '<span class="success">NO</span>'}`;
+          },
+
+          config: function() {
+            const cfg = Alpine.store('config');
+            return `Target Security Config:
+  PKCE: ${cfg.requirePkce ? '<span class="success">ON</span>' : '<span class="error">OFF</span>'}
+  Strict Redirect: ${cfg.strictRedirectUri ? '<span class="success">ON</span>' : '<span class="error">OFF</span>'}
+  Audience Check: ${cfg.validateAudience ? '<span class="success">ON</span>' : '<span class="error">OFF</span>'}
+  State Param: ${cfg.requireStateParam ? '<span class="success">ON</span>' : '<span class="error">OFF</span>'}
+  Score: ${cfg.securityScore}/100`;
+          },
+
+          token: function() {
+            const token = Alpine.store('flow').capturedToken;
+            if (!token) {
+              return '<span class="warning">No token captured yet.</span>';
+            }
+            return `Captured Token:\n<span class="token">${token.substring(0, 50)}...</span>`;
+          },
+
+          clear: function() {
+            return '__CLEAR__';
+          }
+        },
+
+        executeCommand() {
+          const input = this.currentInput.trim();
+          if (!input) return;
+
+          // Add to history
+          this.history.push({ type: 'input', text: input });
+          this.commandHistory.push(input);
+          this.historyIndex = this.commandHistory.length;
+
+          // Parse command
+          const parts = input.split(/\s+/);
+          const cmd = parts[0].toLowerCase();
+          const args = parts.slice(1);
+
+          // Execute
+          let output;
+          if (cmd === 'clear') {
+            this.history = [];
+            this.currentInput = '';
+            return;
+          } else if (this.commands[cmd]) {
+            output = typeof this.commands[cmd] === 'function'
+              ? this.commands[cmd](args)
+              : this.commands[cmd];
+          } else {
+            output = `<span class="error">Command not found: ${cmd}</span>. Type 'help' for available commands.`;
+          }
+
+          this.history.push({ type: 'output', text: output });
+          this.currentInput = '';
+
+          // Scroll to bottom
+          this.$nextTick(() => {
+            const el = document.getElementById('terminal-output');
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+        },
+
+        historyUp() {
+          if (this.historyIndex > 0) {
+            this.historyIndex--;
+            this.currentInput = this.commandHistory[this.historyIndex];
+          }
+        },
+
+        historyDown() {
+          if (this.historyIndex < this.commandHistory.length - 1) {
+            this.historyIndex++;
+            this.currentInput = this.commandHistory[this.historyIndex];
+          } else {
+            this.historyIndex = this.commandHistory.length;
+            this.currentInput = '';
+          }
+        },
+
+        autoComplete() {
+          const input = this.currentInput.toLowerCase();
+          const cmds = Object.keys(this.commands);
+          const match = cmds.find(c => c.startsWith(input));
+          if (match) {
+            this.currentInput = match;
+          }
+        }
+      }));
+
+      // Inspector component
+      Alpine.data('requestInspector', () => ({
+        activeTab: 'request',
+
+        get decodedToken() {
+          const token = Alpine.store('flow').capturedToken;
+          if (!token) return null;
+          return JWTUtils.decode(token);
+        },
+
+        formatJson(obj) {
+          return FormatUtils.prettyJson(obj);
+        },
+
+        truncate(str, len) {
+          return FormatUtils.truncate(str, len);
+        },
+
+        async copyToken() {
+          const token = Alpine.store('flow').capturedToken;
+          if (token) {
+            await FormatUtils.copyToClipboard(token);
+          }
+        }
+      }));
+    });
+
+    // Helper for config panel
+    function getPresetClass(preset) {
+      const config = Alpine.store('config');
+      // Determine current preset based on config values
+      if (preset === 'insecure' && config.securityScore < 30) return 'btn-danger active';
+      if (preset === 'partial' && config.securityScore >= 30 && config.securityScore < 80) return 'btn-secondary active';
+      if (preset === 'secure' && config.securityScore >= 80) return 'btn-primary active';
+      return 'btn-ghost';
+    }
+  </script>
+</body>
+</html>

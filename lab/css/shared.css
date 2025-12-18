@@ -1,62 +1,64 @@
 /* Attack Lab - Shared Styles */
-/* Supports both light and dark themes */
+/* Matrix-themed (green/black) */
 
 :root {
-  /* Dark theme (default) */
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --bg-card: #1e293b;
-  --bg-input: #0f172a;
+  /* Matrix Dark theme (default) */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #0d1117;
+  --bg-tertiary: #161b22;
+  --bg-card: #0d1117;
+  --bg-input: #010409;
 
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-primary: #00ff41;
+  --text-secondary: #00cc33;
+  --text-muted: #238636;
 
-  --border-color: rgba(255, 255, 255, 0.1);
-  --border-hover: rgba(255, 255, 255, 0.2);
+  --border-color: rgba(0, 255, 65, 0.15);
+  --border-hover: rgba(0, 255, 65, 0.3);
 
-  --accent-primary: #8b5cf6;
-  --accent-secondary: #06b6d4;
-  --accent-gradient: linear-gradient(135deg, #8b5cf6, #06b6d4);
+  --accent-primary: #00ff41;
+  --accent-secondary: #39ff14;
+  --accent-gradient: linear-gradient(135deg, #00ff41, #39ff14);
 
-  --success: #22c55e;
-  --success-bg: rgba(34, 197, 94, 0.15);
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.15);
-  --error: #ef4444;
-  --error-bg: rgba(239, 68, 68, 0.15);
-  --info: #3b82f6;
-  --info-bg: rgba(59, 130, 246, 0.15);
+  --success: #00ff41;
+  --success-bg: rgba(0, 255, 65, 0.15);
+  --warning: #ffb000;
+  --warning-bg: rgba(255, 176, 0, 0.15);
+  --error: #ff3333;
+  --error-bg: rgba(255, 51, 51, 0.15);
+  --info: #00bfff;
+  --info-bg: rgba(0, 191, 255, 0.15);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+  --glow-primary: 0 0 10px rgba(0, 255, 65, 0.3);
+  --glow-strong: 0 0 20px rgba(0, 255, 65, 0.5);
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
 
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
   --transition-slow: 400ms ease;
 }
 
-/* Light theme */
+/* Light theme - still Matrix-ish but readable */
 [data-theme="light"] {
-  --bg-primary: #f8fafc;
+  --bg-primary: #f0fff4;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f1f5f9;
+  --bg-tertiary: #e6ffed;
   --bg-card: #ffffff;
-  --bg-input: #f8fafc;
+  --bg-input: #f6fff8;
 
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-primary: #0d4020;
+  --text-secondary: #166534;
+  --text-muted: #4ade80;
 
-  --border-color: rgba(0, 0, 0, 0.1);
-  --border-hover: rgba(0, 0, 0, 0.2);
+  --border-color: rgba(0, 100, 30, 0.2);
+  --border-hover: rgba(0, 100, 30, 0.4);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
@@ -227,12 +229,14 @@ pre {
 
 .btn-primary {
   background: var(--accent-gradient);
-  color: white;
+  color: #0a0a0a;
   border: none;
+  font-weight: 600;
+  text-shadow: none;
 }
 
 .btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
+  box-shadow: var(--glow-primary);
   transform: translateY(-1px);
 }
 
@@ -368,6 +372,7 @@ pre {
 
 .toggle-input:checked + .toggle-switch {
   background: var(--accent-primary);
+  box-shadow: var(--glow-primary);
 }
 
 .toggle-input:checked + .toggle-switch::after {
@@ -881,7 +886,52 @@ pre {
 /* Selection */
 ::selection {
   background: var(--accent-primary);
-  color: white;
+  color: #0a0a0a;
+}
+
+/* Matrix-specific styles */
+.glow {
+  text-shadow: 0 0 10px var(--accent-primary);
+}
+
+.glow-box {
+  box-shadow: var(--glow-primary);
+}
+
+.terminal-text {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  color: var(--text-primary);
+  text-shadow: 0 0 5px rgba(0, 255, 65, 0.5);
+}
+
+/* Scanline effect for terminal-like areas */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.15),
+    rgba(0, 0, 0, 0.15) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+}
+
+/* Flickering cursor for terminal */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.cursor-blink::after {
+  content: '█';
+  animation: blink 1s step-end infinite;
+  color: var(--accent-primary);
 }
 
 /* Focus Visible */
