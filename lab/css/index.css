@@ -180,24 +180,24 @@
 }
 
 .module-icon-control {
-  background: rgba(0, 191, 255, 0.15);
-  color: #00bfff;
+  background: rgba(0, 111, 159, 0.18);
+  color: #006f9f;
 }
 
 .module-icon-hacker {
-  background: rgba(0, 255, 65, 0.2);
-  color: #00ff41;
+  background: rgba(0, 154, 46, 0.2);
+  color: #009a2e;
   box-shadow: 0 0 15px rgba(0, 255, 65, 0.3);
 }
 
 .module-icon-story {
-  background: rgba(255, 176, 0, 0.15);
-  color: #ffb000;
+  background: rgba(183, 107, 0, 0.18);
+  color: #b76b00;
 }
 
 .module-icon-technical {
-  background: rgba(0, 255, 65, 0.15);
-  color: #00ff41;
+  background: rgba(0, 154, 46, 0.18);
+  color: #009a2e;
 }
 
 .module-content {
