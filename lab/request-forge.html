@@ -544,10 +544,10 @@
 
               // Compare mode
               if (this.compareMode) {
-                const savedConfig = { ...Alpine.store('config') };
+                const savedConfig = this.saveConfig();
                 Alpine.store('config').applyPreset('secure');
                 this.compareResponse = await api.authorize(this.authorize);
-                Object.assign(Alpine.store('config'), savedConfig);
+                this.restoreConfig(savedConfig);
               }
             }
             else if (this.activeEndpoint === 'token') {
@@ -559,10 +559,10 @@
               }
 
               if (this.compareMode) {
-                const savedConfig = { ...Alpine.store('config') };
+                const savedConfig = this.saveConfig();
                 Alpine.store('config').applyPreset('secure');
                 this.compareResponse = await api.token(this.token);
-                Object.assign(Alpine.store('config'), savedConfig);
+                this.restoreConfig(savedConfig);
               }
             }
             else if (this.activeEndpoint === 'resource') {
@@ -572,13 +572,13 @@
               );
 
               if (this.compareMode) {
-                const savedConfig = { ...Alpine.store('config') };
+                const savedConfig = this.saveConfig();
                 Alpine.store('config').applyPreset('secure');
                 this.compareResponse = await api.resourceServer(
                   this.resource.access_token,
                   this.resource.target_audience
                 );
-                Object.assign(Alpine.store('config'), savedConfig);
+                this.restoreConfig(savedConfig);
               }
             }
 
@@ -675,6 +675,42 @@
             httpsOnlyRedirects: 'HTTPS Only'
           };
           return labels[control] || control;
+        },
+
+        // Save only settable config properties (not computed getters)
+        saveConfig() {
+          const config = Alpine.store('config');
+          return {
+            requirePkce: config.requirePkce,
+            pkceMethod: config.pkceMethod,
+            strictRedirectUri: config.strictRedirectUri,
+            allowWildcardRedirects: config.allowWildcardRedirects,
+            httpsOnlyRedirects: config.httpsOnlyRedirects,
+            validateAudience: config.validateAudience,
+            shortTokenLifetime: config.shortTokenLifetime,
+            tokenLifetimeMinutes: config.tokenLifetimeMinutes,
+            requireStateParam: config.requireStateParam,
+            enableRefreshTokenRotation: config.enableRefreshTokenRotation,
+            bindTokenToDevice: config.bindTokenToDevice,
+            requireClientSecret: config.requireClientSecret
+          };
+        },
+
+        // Restore saved config properties
+        restoreConfig(saved) {
+          const config = Alpine.store('config');
+          config.requirePkce = saved.requirePkce;
+          config.pkceMethod = saved.pkceMethod;
+          config.strictRedirectUri = saved.strictRedirectUri;
+          config.allowWildcardRedirects = saved.allowWildcardRedirects;
+          config.httpsOnlyRedirects = saved.httpsOnlyRedirects;
+          config.validateAudience = saved.validateAudience;
+          config.shortTokenLifetime = saved.shortTokenLifetime;
+          config.tokenLifetimeMinutes = saved.tokenLifetimeMinutes;
+          config.requireStateParam = saved.requireStateParam;
+          config.enableRefreshTokenRotation = saved.enableRefreshTokenRotation;
+          config.bindTokenToDevice = saved.bindTokenToDevice;
+          config.requireClientSecret = saved.requireClientSecret;
         }
       }));
     });

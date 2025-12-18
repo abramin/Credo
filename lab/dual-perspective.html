@@ -53,7 +53,7 @@
     </div>
   </nav>
 
-  <main class="main-layout">
+  <main class="main-layout" :class="{ 'scenario-active': activeScenario }">
     <!-- Scenario Selector Sidebar -->
     <aside class="sidebar" x-show="!activeScenario">
       <div class="sidebar-header">

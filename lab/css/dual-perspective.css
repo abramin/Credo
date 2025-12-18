@@ -7,6 +7,11 @@
   min-height: calc(100vh - 60px);
 }
 
+/* When scenario is active, use single column */
+.main-layout.scenario-active {
+  grid-template-columns: 1fr;
+}
+
 /* Sidebar */
 .sidebar {
   background: var(--bg-secondary);
