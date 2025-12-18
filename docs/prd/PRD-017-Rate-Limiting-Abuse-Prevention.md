@@ -525,16 +525,19 @@ For authentication endpoints (`/auth/*`, `/mfa/*`), maintain a local in-memory r
 **Approach:** Validate at system boundaries (middleware, handlers), use simple types internally.
 
 **Rationale:** Domain primitives add complexity without proportional benefit for internal infrastructure code like rate limiting. The cost of over-engineering (development time, cognitive load, testing surface) exceeds the benefit when:
+
 - Inputs come from trusted internal sources (already validated at API boundaries)
 - The domain is well-understood with few edge cases
 - Code is not exposed to external consumers
 
 **When to use strict domain primitives:**
+
 - External-facing APIs with untrusted input
 - Cross-service boundaries
 - Complex business rules that vary by type
 
 **When simple types suffice:**
+
 - Internal infrastructure (rate limiting, caching, logging)
 - Single-service, single-team ownership
 - Inputs already validated upstream
@@ -705,6 +708,7 @@ func LoadRateLimitConfig() RateLimitConfig {
 **Secure-by-Design:** IP extraction must validate against trusted proxy list. Never blindly trust X-Forwarded-For as attackers can spoof headers to bypass rate limits.
 
 **Validation Order (per AGENTS.md Principle #5):**
+
 1. **Origin:** Request must come from known proxy or direct connection
 2. **Size:** Limit X-Forwarded-For header length (max 500 chars)
 3. **Lexical:** Validate IP format (IPv4/IPv6)
@@ -991,15 +995,15 @@ and differential retention policies.
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                                                                         |
-| ------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------- |
-| 1.9     | 2025-12-19 | Engineering  | Added FR-2c: Per-Client Rate Limiting for OAuth client_id with trust-based tiers (confidential vs public)       |
-| 1.8     | 2025-12-19 | Engineering  | Added Section 10: GDPR/Privacy Compliance - IP anonymization requirements for logging |
+| Version | Date       | Author       | Changes                                                                                                                                                                                                       |
+| ------- | ---------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.9     | 2025-12-19 | Engineering  | Added FR-2c: Per-Client Rate Limiting for OAuth client_id with trust-based tiers (confidential vs public)                                                                                                     |
+| 1.8     | 2025-12-19 | Engineering  | Added Section 10: GDPR/Privacy Compliance - IP anonymization requirements for logging                                                                                                                         |
 | 1.7     | 2025-12-18 | Engineering  | Simplified TR-0: Replaced domain primitives with boundary validation strategy. Use simple string keys internally, validate at middleware/handler boundaries. Reduced complexity without sacrificing security. |
-| 1.6     | 2025-12-18 | Security Eng | Secure-by-design review: trusted proxy validation in TR-5, mandatory in-memory fallback with circuit breaker in FR-7, invariant-focused tests, no-echo rule for error responses |
-| 1.5     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (deque/time-wheel, Postgres partitioning), atomic multi-key resets, expanded testing |
-| 1.4     | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests                           |
-| 1.3     | 2025-12-17 | Engineering  | Add comprehensive error responses for FR-4, FR-5, FR-2b; add FR-7 failure mode                                  |
-| 1.2     | 2025-12-16 | Engineering  | Add background refill/eviction requirement with metrics for token buckets                                       |
-| 1.1     | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance                                             |
-| 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                     |
+| 1.6     | 2025-12-18 | Security Eng | Secure-by-design review: trusted proxy validation in TR-5, mandatory in-memory fallback with circuit breaker in FR-7, invariant-focused tests, no-echo rule for error responses                               |
+| 1.5     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (deque/time-wheel, Postgres partitioning), atomic multi-key resets, expanded testing                                                                                               |
+| 1.4     | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests                                                                                                                         |
+| 1.3     | 2025-12-17 | Engineering  | Add comprehensive error responses for FR-4, FR-5, FR-2b; add FR-7 failure mode                                                                                                                                |
+| 1.2     | 2025-12-16 | Engineering  | Add background refill/eviction requirement with metrics for token buckets                                                                                                                                     |
+| 1.1     | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance                                                                                                                                           |
+| 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                                                                                                                   |
