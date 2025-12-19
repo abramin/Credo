@@ -1268,16 +1268,24 @@ and differential retention policies.
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                                                                                                                                                                       |
+<<<<<<< HEAD
+| Version | Date | Author | Changes |
 | ------- | ---------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2.0     | 2025-12-21 | Engineering  | Added TR-6: SQL Indexing Patterns (B-Tree anatomy, composite keys, covering indexes, partial indexes, DML impact, NULL handling, hash partitioning) with exercises from "Use The Index, Luke"                 |
-| 1.9     | 2025-12-19 | Engineering  | Added FR-2c: Per-Client Rate Limiting for OAuth client_id with trust-based tiers (confidential vs public)                                                                                                     |
-| 1.8     | 2025-12-19 | Engineering  | Added Section 10: GDPR/Privacy Compliance - IP anonymization requirements for logging                                                                                                                         |
-| 1.7     | 2025-12-18 | Engineering  | Simplified TR-0: Replaced domain primitives with boundary validation strategy. Use simple string keys internally, validate at middleware/handler boundaries. Reduced complexity without sacrificing security. |
-| 1.6     | 2025-12-18 | Security Eng | Secure-by-design review: trusted proxy validation in TR-5, mandatory in-memory fallback with circuit breaker in FR-7, invariant-focused tests, no-echo rule for error responses                               |
-| 1.5     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (deque/time-wheel, Postgres partitioning), atomic multi-key resets, expanded testing                                                                                               |
-| 1.4     | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests                                                                                                                         |
-| 1.3     | 2025-12-17 | Engineering  | Add comprehensive error responses for FR-4, FR-5, FR-2b; add FR-7 failure mode                                                                                                                                |
-| 1.2     | 2025-12-16 | Engineering  | Add background refill/eviction requirement with metrics for token buckets                                                                                                                                     |
-| 1.1     | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance                                                                                                                                           |
-| 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                                                                                                                                                   |
+| 2.0 | 2025-12-21 | Engineering | Added TR-6: SQL Indexing Patterns (B-Tree anatomy, composite keys, covering indexes, partial indexes, DML impact, NULL handling, hash partitioning) with exercises from "Use The Index, Luke" |
+| 1.9 | 2025-12-19 | Engineering | Added FR-2c: Per-Client Rate Limiting for OAuth client_id with trust-based tiers (confidential vs public) |
+| 1.8 | 2025-12-19 | Engineering | Added Section 10: GDPR/Privacy Compliance - IP anonymization requirements for logging |
+=======
+| Version | Date | Author | Changes |
+| ------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------- |
+| 1.9 | 2025-12-19 | Engineering | Added FR-2c: Per-Client Rate Limiting for OAuth client_id with trust-based tiers (confidential vs public) |
+| 1.8 | 2025-12-19 | Engineering | Added Section 10: GDPR/Privacy Compliance - IP anonymization requirements for logging |
+
+> > > > > > > 1b61b9a (Add privacy prd details, add client id rate limiting docs)
+> > > > > > > | 1.7 | 2025-12-18 | Engineering | Simplified TR-0: Replaced domain primitives with boundary validation strategy. Use simple string keys internally, validate at middleware/handler boundaries. Reduced complexity without sacrificing security. |
+> > > > > > > | 1.6 | 2025-12-18 | Security Eng | Secure-by-design review: trusted proxy validation in TR-5, mandatory in-memory fallback with circuit breaker in FR-7, invariant-focused tests, no-echo rule for error responses |
+> > > > > > > | 1.5 | 2025-12-18 | Security Eng | Added DSA/SQL requirements (deque/time-wheel, Postgres partitioning), atomic multi-key resets, expanded testing |
+> > > > > > > | 1.4 | 2025-12-18 | Security Eng | Added default-deny posture when limits missing, atomicity, and security-focused tests |
+> > > > > > > | 1.3 | 2025-12-17 | Engineering | Add comprehensive error responses for FR-4, FR-5, FR-2b; add FR-7 failure mode |
+> > > > > > > | 1.2 | 2025-12-16 | Engineering | Add background refill/eviction requirement with metrics for token buckets |
+> > > > > > > | 1.1 | 2025-12-12 | Product Team | Added OWASP authentication-specific throttling and lockout guidance |
+> > > > > > > | 1.0 | 2025-12-12 | Product Team | Initial PRD |
