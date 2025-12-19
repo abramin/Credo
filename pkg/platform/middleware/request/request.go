@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"credo/pkg/platform/metrics"
-	"credo/pkg/platform/privacy"
 	metadata "credo/pkg/platform/middleware/metadata"
+	"credo/pkg/platform/privacy"
 
 	"github.com/google/uuid"
 )
