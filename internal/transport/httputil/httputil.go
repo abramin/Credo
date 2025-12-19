@@ -11,10 +11,9 @@ import (
 func WriteJSON(w http.ResponseWriter, status int, response any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		// best-effort fallback; don't override status for the caller
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
-	}
+	// Errors after WriteHeader cannot change the status code, so we ignore encoding errors.
+	// The response body may be incomplete, but headers are already sent.
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // WriteError centralizes domain error translation to HTTP responses.
