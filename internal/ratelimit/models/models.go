@@ -5,6 +5,8 @@ import (
 
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+
+	"github.com/google/uuid"
 )
 
 // EndpointClass categorizes endpoints for differentiated rate limiting.
@@ -20,6 +22,15 @@ const (
 	// ClassWrite: Write operations (50 req/min) - general mutations
 	ClassWrite EndpointClass = "write"
 )
+
+// IsValid checks if the endpoint class is one of the supported enum values.
+func (c EndpointClass) IsValid() bool {
+	switch c {
+	case ClassAuth, ClassSensitive, ClassRead, ClassWrite:
+		return true
+	}
+	return false
+}
 
 // AllowlistEntryType defines whether an allowlist entry is for an IP or user.
 type AllowlistEntryType string
@@ -93,6 +104,15 @@ const (
 	QuotaTierEnterprise QuotaTier = "enterprise"
 )
 
+// IsValid checks if the quota tier is one of the supported enum values.
+func (t QuotaTier) IsValid() bool {
+	switch t {
+	case QuotaTierFree, QuotaTierStarter, QuotaTierBusiness, QuotaTierEnterprise:
+		return true
+	}
+	return false
+}
+
 // APIKeyQuota tracks quota usage for a partner API key.
 type APIKeyQuota struct {
 	APIKeyID       string    `json:"api_key_id"`
@@ -116,19 +136,18 @@ type AuthLockout struct {
 
 // NewAllowlistEntry creates an AllowlistEntry with domain invariant validation.
 func NewAllowlistEntry(entryType AllowlistEntryType, identifier, reason string, createdBy id.UserID, expiresAt *time.Time) (*AllowlistEntry, error) {
+	if !entryType.IsValid() {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid allowlist entry type")
+	}
 	if identifier == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")
-	}
-	if entryType != AllowlistTypeIP && entryType != AllowlistTypeUserID {
-		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid allowlist entry type")
 	}
 	if reason == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "reason cannot be empty")
 	}
 
-	// TODO: Implement - generate unique ID
 	return &AllowlistEntry{
-		ID:         "", // TODO: generate UUID
+		ID:         uuid.NewString(),
 		Type:       entryType,
 		Identifier: identifier,
 		Reason:     reason,
@@ -144,4 +163,88 @@ func (e *AllowlistEntry) IsExpired() bool {
 		return false
 	}
 	return time.Now().After(*e.ExpiresAt)
+}
+
+// NewAuthLockout creates an AuthLockout with domain invariant validation.
+func NewAuthLockout(identifier string) (*AuthLockout, error) {
+	if identifier == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")
+	}
+	return &AuthLockout{
+		Identifier:      identifier,
+		FailureCount:    0,
+		DailyFailures:   0,
+		LockedUntil:     nil,
+		LastFailureAt:   time.Now(),
+		RequiresCaptcha: false,
+	}, nil
+}
+
+// IsLocked checks if the account is currently locked.
+func (l *AuthLockout) IsLocked() bool {
+	if l.LockedUntil == nil {
+		return false
+	}
+	return time.Now().Before(*l.LockedUntil)
+}
+
+// NewAPIKeyQuota creates an APIKeyQuota with domain invariant validation.
+func NewAPIKeyQuota(apiKeyID string, tier QuotaTier, monthlyLimit int, overageAllowed bool) (*APIKeyQuota, error) {
+	if apiKeyID == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "api_key_id cannot be empty")
+	}
+	if !tier.IsValid() {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid quota tier")
+	}
+	if monthlyLimit < 0 {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "monthly_limit cannot be negative")
+	}
+
+	now := time.Now()
+	periodStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	periodEnd := periodStart.AddDate(0, 1, 0).Add(-time.Nanosecond)
+
+	return &APIKeyQuota{
+		APIKeyID:       apiKeyID,
+		Tier:           tier,
+		MonthlyLimit:   monthlyLimit,
+		CurrentUsage:   0,
+		OverageAllowed: overageAllowed,
+		PeriodStart:    periodStart,
+		PeriodEnd:      periodEnd,
+	}, nil
+}
+
+// IsOverQuota checks if the API key has exceeded its monthly quota.
+func (q *APIKeyQuota) IsOverQuota() bool {
+	return q.CurrentUsage >= q.MonthlyLimit
+}
+
+// NewRateLimitViolation creates a RateLimitViolation with domain invariant validation.
+func NewRateLimitViolation(identifier string, class EndpointClass, endpoint string, limit, windowSeconds int) (*RateLimitViolation, error) {
+	if identifier == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")
+	}
+	if !class.IsValid() {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid endpoint class")
+	}
+	if endpoint == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "endpoint cannot be empty")
+	}
+	if limit <= 0 {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "limit must be positive")
+	}
+	if windowSeconds <= 0 {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "window_seconds must be positive")
+	}
+
+	return &RateLimitViolation{
+		ID:            uuid.NewString(),
+		Identifier:    identifier,
+		EndpointClass: class,
+		Endpoint:      endpoint,
+		Limit:         limit,
+		WindowSeconds: windowSeconds,
+		OccurredAt:    time.Now(),
+	}, nil
 }

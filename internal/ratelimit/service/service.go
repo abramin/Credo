@@ -98,7 +98,7 @@ func (s *Service) CheckIPRateLimit(ctx context.Context, ip string, class models.
 	}
 
 	requestsPerWindow, window := s.config.GetIPLimit(class)
-	key := fmt.Sprintf("ip:%s:%d", ip, class)
+	key := fmt.Sprintf("ip:%s:%s", ip, class)
 
 	result, err := s.buckets.Allow(ctx, key, requestsPerWindow, window)
 	if err != nil {
