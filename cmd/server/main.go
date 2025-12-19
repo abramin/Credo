@@ -29,6 +29,11 @@ import (
 	"credo/internal/platform/logger"
 	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
+	rateLimitMW "credo/internal/ratelimit/middleware"
+	rateLimitModels "credo/internal/ratelimit/models"
+	rateLimit "credo/internal/ratelimit/service"
+	rwallowlistStore "credo/internal/ratelimit/store/allowlist"
+	rwbucketStore "credo/internal/ratelimit/store/bucket"
 	"credo/internal/seeder"
 	tenantHandler "credo/internal/tenant/handler"
 	tenantService "credo/internal/tenant/service"
@@ -78,6 +83,13 @@ func main() {
 		panic(err)
 	}
 
+	rateLimitService, err := buildRateLimitService(infra.Log)
+	if err != nil {
+		infra.Log.Error("failed to initialize rate limit service", "error", err)
+		os.Exit(1)
+	}
+	rateLimitMiddleware := rateLimitMW.New(rateLimitService, infra.Log)
+
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 	tenantMod := buildTenantModule(infra)
@@ -91,7 +103,7 @@ func main() {
 	startCleanupWorker(appCtx, infra.Log, authMod.Cleanup)
 
 	r := setupRouter(infra)
-	registerRoutes(r, infra, authMod, consentMod, tenantMod)
+	registerRoutes(r, infra, authMod, consentMod, tenantMod, rateLimitMiddleware)
 
 	mainSrv := httpserver.New(infra.Cfg.Addr, r)
 	startServer(mainSrv, infra.Log, "main API")
@@ -104,6 +116,21 @@ func main() {
 	}
 
 	waitForShutdown([]*http.Server{mainSrv, adminSrv}, infra.Log, cancelApp)
+}
+
+func buildRateLimitService(logger *slog.Logger) (*rateLimit.Service, error) {
+	bucketStore := rwbucketStore.NewInMemoryBucketStore()
+	allowlistStore := rwallowlistStore.NewInMemoryAllowlistStore()
+	svc, err := rateLimit.New(
+		bucketStore,
+		allowlistStore,
+		rateLimit.WithLogger(logger),
+	)
+	if err != nil {
+		logger.Error("failed to create rate limit service", "error", err)
+		return nil, err
+	}
+	return svc, nil
 }
 
 func buildInfra() (*infraBundle, error) {
@@ -189,6 +216,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		cleanupWorker.WithCleanupInterval(infra.Cfg.Auth.AuthCleanupInterval),
 	)
 	if err != nil {
+		infra.Log.Error("failed to create auth cleanup service", "error", err)
 		return nil, err
 	}
 
@@ -284,7 +312,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 }
 
 // registerRoutes wires HTTP handlers to the shared router
-func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule) {
+func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, rateLimitMiddleware *rateLimitMW.Middleware) {
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
@@ -298,20 +326,38 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 		})
 	}
 
-	r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
-	r.Post("/auth/token", authMod.Handler.HandleToken)
-	r.Post("/auth/revoke", authMod.Handler.HandleRevoke)
-
+	// Auth public endpoints - ClassAuth (10 req/min)
 	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassAuth))
+		r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
+		r.Post("/auth/token", authMod.Handler.HandleToken)
+		r.Post("/auth/revoke", authMod.Handler.HandleRevoke)
+		r.Delete("/auth/sessions/{session_id}", authMod.Handler.HandleRevokeSession)
+	})
+
+	// Protected read endpoints - ClassRead (100 req/min)
+	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassRead))
 		r.Use(middleware.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
 		r.Get("/auth/userinfo", authMod.Handler.HandleUserInfo)
 		r.Get("/auth/sessions", authMod.Handler.HandleListSessions)
-		r.Delete("/auth/sessions/{session_id}", authMod.Handler.HandleRevokeSession)
-		consentMod.Handler.Register(r)
+		r.Get("/auth/consent", consentMod.Handler.HandleGetConsents)
 	})
 
+	// Protected sensitive endpoints - ClassSensitive (30 req/min)
+	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassSensitive))
+		r.Use(middleware.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
+		r.Post("/auth/consent", consentMod.Handler.HandleGrantConsent)
+		r.Post("/auth/consent/revoke", consentMod.Handler.HandleRevokeConsent)
+		r.Post("/auth/consent/revoke-all", consentMod.Handler.HandleRevokeAllConsents)
+		r.Delete("/auth/consent", consentMod.Handler.HandleDeleteAllConsents)
+	})
+
+	// Admin endpoints - ClassWrite (50 req/min)
 	if infra.Cfg.Security.AdminAPIToken != "" {
 		r.Group(func(r chi.Router) {
+			r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassWrite))
 			r.Use(middleware.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
 			authMod.Handler.RegisterAdmin(r)
 			tenantMod.Handler.Register(r)

@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"credo/internal/consent/models"
 	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
@@ -45,17 +43,8 @@ func New(consent Service, logger *slog.Logger, metrics *metrics.Metrics) *Handle
 	}
 }
 
-// Register registers the consent routes with the chi router.
-func (h *Handler) Register(r chi.Router) {
-	r.Post("/auth/consent", h.handleGrantConsent)
-	r.Post("/auth/consent/revoke", h.handleRevokeConsent)
-	r.Post("/auth/consent/revoke-all", h.handleRevokeAllConsents)
-	r.Delete("/auth/consent", h.handleDeleteAllConsents)
-	r.Get("/auth/consent", h.handleGetConsents)
-}
-
-// handleGrantConsent grants consent for the authenticated user per PRD-002 FR-1.
-func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
+// HandleGrantConsent grants consent for the authenticated user per PRD-002 FR-1.
+func (h *Handler) HandleGrantConsent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
 	defer func() {
@@ -118,7 +107,7 @@ func (h *Handler) handleGrantConsent(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, toGrantResponse(records, time.Now()))
 }
 
-func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 	userIDStr := middleware.GetUserID(ctx)
@@ -174,7 +163,7 @@ func (h *Handler) handleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, toRevokeResponse(records, time.Now()))
 }
 
-func (h *Handler) handleRevokeAllConsents(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleRevokeAllConsents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 	userIDStr := middleware.GetUserID(ctx)
@@ -213,7 +202,7 @@ func (h *Handler) handleRevokeAllConsents(w http.ResponseWriter, r *http.Request
 	})
 }
 
-func (h *Handler) handleDeleteAllConsents(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleDeleteAllConsents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 	userIDStr := middleware.GetUserID(ctx)
@@ -250,7 +239,7 @@ func (h *Handler) handleDeleteAllConsents(w http.ResponseWriter, r *http.Request
 	})
 }
 
-func (h *Handler) handleGetConsents(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleGetConsents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
 	userIDStr := middleware.GetUserID(ctx)
