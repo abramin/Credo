@@ -81,16 +81,47 @@ type TxAuthStores struct {
 	RefreshTokens RefreshTokenStore
 }
 
-type mutexAuthTx struct {
-	mu     *sync.Mutex
+// shardedAuthTx provides fine-grained locking using sharded mutexes.
+// Instead of a single global lock, operations are distributed across N shards
+// based on a hash of the resource key, reducing contention under concurrent load.
+const numAuthShards = 32
+
+type shardedAuthTx struct {
+	shards [numAuthShards]sync.Mutex
 	stores TxAuthStores
 }
 
-func (t *mutexAuthTx) RunInTx(ctx context.Context, fn func(stores TxAuthStores) error) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+// RunInTx acquires a shard lock based on context and executes the transaction.
+// Falls back to shard 0 if no session key is in context.
+func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores TxAuthStores) error) error {
+	shard := t.selectShard(ctx)
+	t.shards[shard].Lock()
+	defer t.shards[shard].Unlock()
 	return fn(t.stores)
 }
+
+// selectShard picks a shard based on session ID from context, or defaults to shard 0.
+func (t *shardedAuthTx) selectShard(ctx context.Context) int {
+	// Try to get session ID from context for consistent sharding
+	if sessionID, ok := ctx.Value(txSessionKeyCtx).(string); ok && sessionID != "" {
+		return int(hashString(sessionID) % numAuthShards)
+	}
+	return 0
+}
+
+// hashString provides a simple hash for shard selection.
+func hashString(s string) uint32 {
+	var h uint32
+	for i := 0; i < len(s); i++ {
+		h = h*31 + uint32(s[i])
+	}
+	return h
+}
+
+// txSessionKey is the context key for session-based sharding.
+type txSessionKey struct{}
+
+var txSessionKeyCtx = txSessionKey{}
 
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {
@@ -173,8 +204,7 @@ func New(
 		sessions:      sessions,
 		codes:         codes,
 		refreshTokens: refreshTokens,
-		tx: &mutexAuthTx{
-			mu: &sync.Mutex{},
+		tx: &shardedAuthTx{
 			stores: TxAuthStores{
 				Users:         users,
 				Codes:         codes,
