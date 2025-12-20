@@ -36,7 +36,7 @@ type Client struct {
 	ID               id.ClientID  `json:"id"`
 	TenantID         id.TenantID  `json:"tenant_id"`
 	Name             string       `json:"name"`
-	PublicClientID   string       `json:"public_client_id"`
+	PublicClientID   string       `json:"client_id"`
 	ClientSecretHash string       `json:"client_secret_hash,omitempty"`
 	RedirectURIs     []string     `json:"redirect_uris"`
 	AllowedGrants    []string     `json:"allowed_grants"`
@@ -102,7 +102,7 @@ type ClientResponse struct {
 	ID             id.ClientID `json:"id"`
 	TenantID       id.TenantID `json:"tenant_id"`
 	Name           string      `json:"name"`
-	PublicClientID string      `json:"public_client_id"`
+	PublicClientID string      `json:"client_id"`
 	ClientSecret   string      `json:"client_secret"`
 	RedirectURIs   []string    `json:"redirect_uris"`
 	AllowedGrants  []string    `json:"allowed_grants"`
