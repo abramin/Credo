@@ -22,8 +22,11 @@ Keep the model sharp: clear aggregates, invariants, domain primitives, and clean
 ## What I avoid
 
 - Anemic domain + orchestration in handlers.
-- “Everything is an aggregate” or “entities with setters” design.
+- "Everything is an aggregate" or "entities with setters" design.
 - Leaking transport concepts into domain (DTO rules in entities).
+- Over-engineering: struct wrappers when type aliases suffice (e.g., `type UserID uuid.UUID` not `type UserID struct { value uuid.UUID }`).
+- Recommending patterns that require 100+ lines when 10 lines + tests achieve the same goal.
+- Methods that contradict stated invariants (e.g., IsZero() on a type whose invariant is "never zero").
 
 ## Review checklist
 
@@ -32,10 +35,13 @@ Keep the model sharp: clear aggregates, invariants, domain primitives, and clean
 - Are domain checks expressed as methods (IsPending/CanX)?
 - Are request validation rules mistakenly treated as invariants?
 - Are boundaries clean (handler → service → store/adapters)?
+- Is this the simplest solution that works? (Type alias + Parse* + test > struct wrapper + Unmarshaler + Scanner)
+- Does the recommendation leverage existing library types? (uuid.UUID already handles JSON/SQL)
+- Will tests guard the invariant? If yes, prefer tests over defensive code.
 
 ## Output format
 
 - **Model diagnosis:** 3–6 bullets
 - **Aggregate sketch:** root + entities/value objects + invariants
-- **API shape:** commands/events you’d expose (names only)
+- **API shape:** commands/events you'd expose (names only)
 - **Refactor steps:** 1–5, smallest safe steps
