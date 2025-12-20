@@ -192,15 +192,13 @@ func (s *ServiceSuite) TestToken_Exchange() {
 				codeRec := *validCodeRecord
 				sess := *validSession
 
-				// resolveTokenContext mocks
+				// Pre-transaction mocks: code lookup, session lookup, resolve context
 				s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(&codeRec, nil)
 				s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 				s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientID).Return(mockClient, mockTenant, nil)
 				s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
 
-				// Transaction mocks
-				s.mockCodeStore.EXPECT().ConsumeAuthCode(gomock.Any(), req.Code, req.RedirectURI, gomock.Any()).Return(&codeRec, nil)
-				s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
+				// JWT generation happens BEFORE transaction - errors prevent tx from running
 				tt.setupMocks(s.T())
 
 				result, err := s.service.Token(context.Background(), &req)
