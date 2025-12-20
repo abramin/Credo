@@ -52,14 +52,12 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	userAgent := middleware.GetUserAgent(ctx)
 	deviceDisplayName := device.ParseUserAgent(userAgent)
 
-	deviceID := ""
+	// Always generate device ID for session tracking; DeviceBindingEnabled controls enforcement only
+	deviceID := middleware.GetDeviceID(ctx)
 	deviceIDToSet := ""
-	if s.DeviceBindingEnabled {
-		deviceID = middleware.GetDeviceID(ctx)
-		if deviceID == "" {
-			deviceID = s.deviceService.GenerateDeviceID()
-			deviceIDToSet = deviceID
-		}
+	if deviceID == "" {
+		deviceID = s.deviceService.GenerateDeviceID()
+		deviceIDToSet = deviceID
 	}
 
 	// Fingerprint is now pre-computed by Device middleware
