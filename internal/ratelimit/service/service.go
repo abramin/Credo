@@ -205,13 +205,16 @@ func (s *Service) ClearAuthFailures(ctx context.Context, identifier, ip string) 
 }
 
 // GetProgressiveBackoff calculates backoff delay based on failure count.
-//
-// TODO: Implement this method
-// Returns delay duration based on failure count
+// Per PRD-017 FR-2b: 250ms → 500ms → 1s (capped).
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
-	// TODO: Implement progressive backoff calculation
-	// Base: 250ms, doubles each failure, max 1s
-	return 0
+	if failureCount <= 0 {
+		return 0
+	}
+	base := 250 * time.Millisecond
+	delay := min(
+		// 250ms, 500ms, 1s, 2s...
+		base*time.Duration(1<<(failureCount-1)), time.Second)
+	return delay
 }
 
 // CheckAPIKeyQuota checks quota for partner API key.
