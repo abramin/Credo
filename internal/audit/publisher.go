@@ -3,6 +3,8 @@ package audit
 import (
 	"context"
 	"time"
+
+	id "credo/pkg/domain"
 )
 
 // Publisher captures structured audit events. It is append-only and uses the
@@ -22,6 +24,6 @@ func (p *Publisher) Emit(ctx context.Context, base Event) error {
 	return p.store.Append(ctx, base)
 }
 
-func (p *Publisher) List(ctx context.Context, userID string) ([]Event, error) {
+func (p *Publisher) List(ctx context.Context, userID id.UserID) ([]Event, error) {
 	return p.store.ListByUser(ctx, userID)
 }

@@ -22,6 +22,7 @@ import (
 	"credo/internal/auth/handler/mocks"
 	"credo/internal/auth/models"
 	"credo/internal/platform/middleware"
+	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 )
 
@@ -160,8 +161,8 @@ func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 }
 
 func (s *AuthHandlerSuite) TestHandler_ListSessions() {
-	userID := uuid.New()
-	currentSessionID := uuid.New()
+	userID := id.UserID(uuid.New())
+	currentSessionID := id.SessionID(uuid.New())
 
 	s.T().Run("invalid user id in context - 401", func(t *testing.T) {
 		mockService, router := s.newHandler(t, nil)
@@ -191,8 +192,8 @@ func (s *AuthHandlerSuite) TestHandler_ListSessions() {
 }
 
 func (s *AuthHandlerSuite) TestHandler_RevokeSession() {
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := id.UserID(uuid.New())
+	sessionID := id.SessionID(uuid.New())
 	path := "/auth/sessions/" + sessionID.String()
 
 	s.T().Run("invalid user id in context - 401", func(t *testing.T) {
@@ -213,7 +214,7 @@ func (s *AuthHandlerSuite) TestHandler_RevokeSession() {
 }
 
 func (s *AuthHandlerSuite) TestHandler_AdminDeleteUser() {
-	userID := uuid.New()
+	userID := id.UserID(uuid.New())
 	validPath := "/admin/auth/users/" + userID.String()
 
 	s.T().Run("invalid user id", func(t *testing.T) {

@@ -1,4 +1,4 @@
-# DDD Patterns Agent (Credo)
+# DDD Patterns Agent
 
 ## Mission
 
@@ -35,7 +35,7 @@ Keep the model sharp: clear aggregates, invariants, domain primitives, and clean
 - Are domain checks expressed as methods (IsPending/CanX)?
 - Are request validation rules mistakenly treated as invariants?
 - Are boundaries clean (handler → service → store/adapters)?
-- Is this the simplest solution that works? (Type alias + Parse* + test > struct wrapper + Unmarshaler + Scanner)
+- Is this the simplest solution that works? (Type alias + Parse\* + test > struct wrapper + Unmarshaler + Scanner)
 - Does the recommendation leverage existing library types? (uuid.UUID already handles JSON/SQL)
 - Will tests guard the invariant? If yes, prefer tests over defensive code.
 

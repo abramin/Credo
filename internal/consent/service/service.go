@@ -14,6 +14,7 @@ import (
 	"credo/internal/consent/models"
 	"credo/internal/consent/store"
 	"credo/internal/platform/metrics"
+	id "credo/pkg/domain"
 	pkgerrors "credo/pkg/domain-errors"
 )
 
@@ -35,12 +36,12 @@ func (t *mutexConsentTx) RunInTx(_ context.Context, fn func(store Store) error) 
 // - Other methods return nil on success or wrapped errors on failure
 type Store interface {
 	Save(ctx context.Context, consent *models.Record) error
-	FindByUserAndPurpose(ctx context.Context, userID string, purpose models.Purpose) (*models.Record, error)
-	ListByUser(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.Record, error)
+	FindByUserAndPurpose(ctx context.Context, userID id.UserID, purpose models.Purpose) (*models.Record, error)
+	ListByUser(ctx context.Context, userID id.UserID, filter *models.RecordFilter) ([]*models.Record, error)
 	Update(ctx context.Context, consent *models.Record) error
-	RevokeByUserAndPurpose(ctx context.Context, userID string, purpose models.Purpose, revokedAt time.Time) (*models.Record, error)
-	RevokeAllByUser(ctx context.Context, userID string, revokedAt time.Time) (int, error)
-	DeleteByUser(ctx context.Context, userID string) error
+	RevokeByUserAndPurpose(ctx context.Context, userID id.UserID, purpose models.Purpose, revokedAt time.Time) (*models.Record, error)
+	RevokeAllByUser(ctx context.Context, userID id.UserID, revokedAt time.Time) (int, error)
+	DeleteByUser(ctx context.Context, userID id.UserID) error
 }
 
 type Option func(*Service)
@@ -126,9 +127,9 @@ func WithGrantWindow(window time.Duration) Option {
 
 // Grant grants consent for the specified purposes.
 // Returns the granted records (domain objects), not HTTP response DTOs.
-func (s *Service) Grant(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error) {
-	if userID == "" {
-		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models.Purpose) ([]*models.Record, error) {
+	if userID.IsNil() {
+		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "user ID required")
 	}
 	if len(purposes) == 0 {
 		return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "purposes array must not be empty")
@@ -158,7 +159,7 @@ func (s *Service) Grant(ctx context.Context, userID string, purposes []models.Pu
 	return granted, nil
 }
 
-func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID string, purpose models.Purpose) (*models.Record, error) {
+func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID id.UserID, purpose models.Purpose) (*models.Record, error) {
 	now := time.Now()
 	expiry := now.Add(s.consentTTL)
 	existing, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
@@ -201,7 +202,7 @@ func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID strin
 
 	// First-time consent grant - create new record using constructor
 	record, err := models.NewRecord(
-		fmt.Sprintf("consent_%s", uuid.New().String()),
+		id.ConsentID(uuid.New()),
 		userID,
 		purpose,
 		now,
@@ -228,9 +229,9 @@ func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID strin
 
 // Revoke revokes consent for the specified purposes.
 // Returns the revoked records (domain objects), not HTTP response DTOs.
-func (s *Service) Revoke(ctx context.Context, userID string, purposes []models.Purpose) ([]*models.Record, error) {
-	if userID == "" {
-		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []models.Purpose) ([]*models.Record, error) {
+	if userID.IsNil() {
+		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "user ID required")
 	}
 	for _, purpose := range purposes {
 		if !purpose.IsValid() {
@@ -289,11 +290,10 @@ func (s *Service) Revoke(ctx context.Context, userID string, purposes []models.P
 // RevokeAll revokes all active consents for a user.
 // Intended for test cleanup and administrative purposes.
 // Returns the count of revoked consents.
-func (s *Service) RevokeAll(ctx context.Context, userID string) (int, error) {
-	if userID == "" {
-		return 0, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) {
+	if userID.IsNil() {
+		return 0, pkgerrors.New(pkgerrors.CodeBadRequest, "user ID required")
 	}
-
 	now := time.Now()
 	count, err := s.store.RevokeAllByUser(ctx, userID, now)
 	if err != nil {
@@ -316,11 +316,10 @@ func (s *Service) RevokeAll(ctx context.Context, userID string) (int, error) {
 
 // DeleteAll removes all consent records for a user.
 // Intended for GDPR right to erasure and test cleanup.
-func (s *Service) DeleteAll(ctx context.Context, userID string) error {
-	if userID == "" {
-		return pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+func (s *Service) DeleteAll(ctx context.Context, userID id.UserID) error {
+	if userID.IsNil() {
+		return pkgerrors.New(pkgerrors.CodeBadRequest, "user ID required")
 	}
-
 	if err := s.store.DeleteByUser(ctx, userID); err != nil {
 		return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to delete all consents")
 	}
@@ -338,11 +337,10 @@ func (s *Service) DeleteAll(ctx context.Context, userID string) error {
 
 // List returns all consent records for a user.
 // Returns domain objects, not HTTP response DTOs.
-func (s *Service) List(ctx context.Context, userID string, filter *models.RecordFilter) ([]*models.Record, error) {
-	if userID == "" {
-		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+func (s *Service) List(ctx context.Context, userID id.UserID, filter *models.RecordFilter) ([]*models.Record, error) {
+	if userID.IsNil() {
+		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "user ID required")
 	}
-
 	records, err := s.store.ListByUser(ctx, userID, filter)
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to list consents")
@@ -351,9 +349,9 @@ func (s *Service) List(ctx context.Context, userID string, filter *models.Record
 	return records, nil
 }
 
-func (s *Service) Require(ctx context.Context, userID string, purpose models.Purpose) error {
-	if userID == "" {
-		return pkgerrors.New(pkgerrors.CodeUnauthorized, "missing user context")
+func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.Purpose) error {
+	if userID.IsNil() {
+		return pkgerrors.New(pkgerrors.CodeUnauthorized, "user ID required")
 	}
 	if !purpose.IsValid() {
 		return pkgerrors.New(pkgerrors.CodeBadRequest, fmt.Sprintf("invalid purpose: %s", purpose))
@@ -475,12 +473,12 @@ func (s *Service) decrementActiveConsents(count float64) {
 	}
 }
 
-func (s *Service) logConsentCheck(ctx context.Context, level slog.Level, msg string, userID string, purpose models.Purpose, state string) {
+func (s *Service) logConsentCheck(ctx context.Context, level slog.Level, msg string, userID id.UserID, purpose models.Purpose, state string) {
 	if s.logger == nil {
 		return
 	}
 	s.logger.Log(ctx, level, msg,
-		"user_id", userID,
+		"user_id", userID.String(),
 		"purpose", purpose,
 		"state", state,
 	)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"credo/internal/auth/models"
+	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 
 	"github.com/google/uuid"
@@ -29,10 +30,10 @@ import (
 // RFC 6749 §5.2 invalid_grant scenarios are covered by e2e feature tests
 // (auth_normal_flow.feature, auth_token_lifecycle.feature).
 func (s *ServiceSuite) TestToken_Exchange() {
-	sessionID := uuid.New()
-	userID := uuid.New()
-	tenantID := uuid.New()
-	clientUUID := uuid.New()
+	sessionID := id.SessionID(uuid.New())
+	userID := id.UserID(uuid.New())
+	tenantID := id.TenantID(uuid.New())
+	clientUUID := id.ClientID(uuid.New())
 	clientID := "client-123"
 	redirectURI := "https://client.app/callback"
 	code := "authz_12345"
@@ -63,7 +64,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 		TenantID:       tenantID,
 		RequestedScope: []string{"openid", "profile"},
 		DeviceID:       "device-123",
-		Status:         string(models.SessionStatusPendingConsent), // Should be pending_consent before token exchange
+		Status: models.SessionStatusPendingConsent, // Should be pending_consent before token exchange
 		CreatedAt:      time.Now().Add(-5 * time.Minute),
 		ExpiresAt:      time.Now().Add(24 * time.Hour),
 	}

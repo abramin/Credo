@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"credo/internal/audit"
 	"credo/internal/auth/device"
 	"credo/internal/auth/models"
@@ -19,6 +21,7 @@ import (
 	"credo/internal/platform/middleware"
 	"credo/internal/sentinel"
 	"credo/pkg/attrs"
+	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 )
 
@@ -213,11 +216,12 @@ func (s *Service) logAudit(ctx context.Context, event string, attributes ...any)
 	if s.auditPublisher == nil {
 		return
 	}
-	userID := attrs.ExtractString(attributes, "user_id")
+	userIDStr := attrs.ExtractString(attributes, "user_id")
+	userID, _ := id.ParseUserID(userIDStr) // Best-effort for audit - ignore parse errors
 	// TODO: log errors from audit publisher?
 	_ = s.auditPublisher.Emit(ctx, audit.Event{
 		UserID:  userID,
-		Subject: userID,
+		Subject: userIDStr,
 		Action:  event,
 	})
 }
@@ -338,8 +342,8 @@ func (s *Service) handleTokenError(ctx context.Context, err error, clientID stri
 func (s *Service) generateTokenArtifacts(session *models.Session) (*tokenArtifacts, error) {
 	// Generate tokens before mutating persistence state so failures do not leave partial writes.
 	accessToken, accessTokenJTI, err := s.jwt.GenerateAccessTokenWithJTI(
-		session.UserID,
-		session.ID,
+		uuid.UUID(session.UserID),
+		uuid.UUID(session.ID),
 		session.ClientID.String(),
 		session.TenantID.String(),
 		session.RequestedScope,
@@ -348,7 +352,7 @@ func (s *Service) generateTokenArtifacts(session *models.Session) (*tokenArtifac
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate access token")
 	}
 
-	idToken, err := s.jwt.GenerateIDToken(session.UserID, session.ID, session.ClientID.String(), session.TenantID.String())
+	idToken, err := s.jwt.GenerateIDToken(uuid.UUID(session.UserID), uuid.UUID(session.ID), session.ClientID.String(), session.TenantID.String())
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate ID token")
 	}
