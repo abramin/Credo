@@ -30,7 +30,8 @@ func TestConfig_Defaults(t *testing.T) {
 func TestService_GetProgressiveBackoff(t *testing.T) {
 	buckets := &noopBucketStore{}
 	allowlist := &noopAllowlistStore{}
-	svc, err := New(buckets, allowlist)
+	authLockout := &noopAuthLockoutStore{}
+	svc, err := New(buckets, allowlist, authLockout)
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}
@@ -95,4 +96,22 @@ func (n *noopAllowlistStore) IsAllowlisted(_ context.Context, _ string) (bool, e
 
 func (n *noopAllowlistStore) List(_ context.Context) ([]*models.AllowlistEntry, error) {
 	return nil, nil
+}
+
+type noopAuthLockoutStore struct{}
+
+func (n *noopAuthLockoutStore) RecordFailure(_ context.Context, identifier string) (*models.AuthLockout, error) {
+	return &models.AuthLockout{Identifier: identifier, FailureCount: 1}, nil
+}
+
+func (n *noopAuthLockoutStore) Get(_ context.Context, _ string) (*models.AuthLockout, error) {
+	return nil, nil
+}
+
+func (n *noopAuthLockoutStore) Clear(_ context.Context, _ string) error {
+	return nil
+}
+
+func (n *noopAuthLockoutStore) IsLocked(_ context.Context, _ string) (bool, *time.Time, error) {
+	return false, nil, nil
 }

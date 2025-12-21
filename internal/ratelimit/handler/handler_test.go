@@ -14,6 +14,7 @@ import (
 
 	"credo/internal/ratelimit/service"
 	"credo/internal/ratelimit/store/allowlist"
+	"credo/internal/ratelimit/store/authlockout"
 	"credo/internal/ratelimit/store/bucket"
 )
 
@@ -30,10 +31,11 @@ type HandlerSuite struct {
 
 func (s *HandlerSuite) SetupTest() {
 	// Use real in-memory stores - no mocks per AGENTS.md
-	buckets := bucket.NewInMemoryBucketStore()
-	allowlistStore := allowlist.NewInMemoryAllowlistStore()
+	buckets := bucket.New()
+	allowlistStore := allowlist.New()
+	authLockoutStore := authlockout.New()
 
-	svc, err := service.New(buckets, allowlistStore)
+	svc, err := service.New(buckets, allowlistStore, authLockoutStore)
 	require.NoError(s.T(), err)
 
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))

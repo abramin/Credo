@@ -64,10 +64,12 @@ func WithGlobalThrottleStore(store GlobalThrottleStore) Option {
 
 const keyPrefixUser = "user"
 const keyPrefixIP = "ip"
+const keyPrefixAuth = "auth"
 
 func New(
 	buckets BucketStore,
 	allowlist AllowlistStore,
+	authLockout AuthLockoutStore,
 	opts ...Option,
 ) (*Service, error) {
 	if buckets == nil {
@@ -76,11 +78,15 @@ func New(
 	if allowlist == nil {
 		return nil, fmt.Errorf("allowlist store is required")
 	}
+	if authLockout == nil {
+		return nil, fmt.Errorf("auth lockout store is required")
+	}
 
 	svc := &Service{
-		buckets:   buckets,
-		allowlist: allowlist,
-		config:    DefaultConfig(),
+		buckets:     buckets,
+		allowlist:   allowlist,
+		authLockout: authLockout,
+		config:      DefaultConfig(),
 	}
 
 	for _, opt := range opts {
@@ -175,42 +181,89 @@ func (s *Service) CheckBothLimits(ctx context.Context, ip, userID string, class 
 	}
 }
 
-// CheckAuthRateLimit checks authentication-specific rate limits with lockout.
-//
-// TODO: Implement this method
-// 1. Build composite key: "{email/username}:{ip}"
-// 2. Check if currently locked out
-// 3. If locked, return 429 with lockout info
-// 4. Check standard IP rate limit for auth class
-// 5. Apply progressive backoff delay if approaching limit
-// 6. Return result with lockout state
+// }- Build a key from identifier (email) and IP
+// - Look up any existing lockout record
+// - If no record exists, allow the request
+// - If a record exists and is currently locked (LockedUntil is in the future), reject with retry-after information
+// - If approaching the limit, check if should trigger a lock
+
 func (s *Service) CheckAuthRateLimit(ctx context.Context, identifier, ip string) (*models.RateLimitResult, error) {
-	// TODO: Implement - see steps above
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	// 1. Build composite key: "{email/username}:{ip}"
+	// key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, identifier, ip)
+	failureRecord, err := s.authLockout.Get(ctx, identifier)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get auth lockout record")
+	}
+	if failureRecord != nil && failureRecord.LockedUntil != nil && time.Now().Before(*failureRecord.LockedUntil) {
+		retryAfter := int(failureRecord.LockedUntil.Sub(time.Now()).Seconds())
+		s.logAudit(ctx, "auth_lockout_triggered",
+			"identifier", identifier,
+			"ip", ip,
+			"locked_until", failureRecord.LockedUntil,
+		)
+		return &models.RateLimitResult{
+			Allowed:    false,
+			Limit:      0,
+			Remaining:  0,
+			ResetAt:    *failureRecord.LockedUntil,
+			RetryAfter: retryAfter,
+		}, nil
+	}
+	// 3. If locked, return 429 with lockout info
+	// 4. Check standard IP rate limit for auth class
+	requestsPerWindow, window := s.config.GetIPLimit(models.ClassAuth)
+	// If approaching the limit, check if should trigger a lock
+
+	return s.checkRateLimit(ctx, ip, models.ClassAuth, keyPrefixIP, requestsPerWindow, window, privacy.AnonymizeIP(ip))
+
+	// 5. Apply progressive backoff delay if approaching limit
+
+	// 6. Return result with lockout state
+	// Allow the request
 }
 
 // RecordAuthFailure records a failed authentication attempt.
-//
-// TODO: Implement this method
-// 1. Record failure in authLockout store
-// 2. Check if hard lock threshold reached (10 failures/day)
-// 3. If threshold reached, set locked_until
-// 4. Emit audit event "auth.lockout" if locked
-// 5. Check if CAPTCHA should be required
 func (s *Service) RecordAuthFailure(ctx context.Context, identifier, ip string) (*models.AuthLockout, error) {
-	// TODO: Implement - see steps above
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	current, err := s.authLockout.RecordFailure(ctx, identifier)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to record auth failure")
+	}
+
+	if current.FailureCount >= s.config.AuthLockout.HardLockThreshold {
+		lockDuration := s.config.AuthLockout.HardLockDuration
+		lockedUntil := time.Now().Add(lockDuration)
+		current.LockedUntil = &lockedUntil
+
+		//TODO: use event constant
+		s.logAudit(ctx, "auth_lockout_triggered",
+			"identifier", identifier,
+			"ip", ip,
+			"locked_until", current.LockedUntil,
+		)
+	}
+	// Require CAPTCHA or out-of-band verification after 3 consecutive lockouts within 24 hours.
+	if current.DailyFailures >= s.config.AuthLockout.CaptchaAfterLockouts {
+		current.RequiresCaptcha = true
+	}
+
+	return current, nil
 }
 
 // ClearAuthFailures clears auth failure state after successful login.
-//
-// TODO: Implement this method
 func (s *Service) ClearAuthFailures(ctx context.Context, identifier, ip string) error {
-	// TODO: Implement
-	return dErrors.New(dErrors.CodeInternal, "not implemented")
+	err := s.authLockout.Clear(ctx, identifier)
+	if err != nil {
+		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to clear auth failures")
+	}
+
+	s.logAudit(ctx, "auth_lockout_cleared",
+		"identifier", identifier,
+		"ip", ip,
+	)
+
+	return nil
 }
 
-// GetProgressiveBackoff calculates backoff delay based on failure count.
 // Per PRD-017 FR-2b: 250ms → 500ms → 1s (capped).
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
 	if failureCount <= 0 {

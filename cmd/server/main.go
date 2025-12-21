@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"credo/internal/admin"
+	authAdapters "credo/internal/auth/adapters"
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
 	authService "credo/internal/auth/service"
@@ -30,6 +31,7 @@ import (
 	rateLimitModels "credo/internal/ratelimit/models"
 	rateLimit "credo/internal/ratelimit/service"
 	rwallowlistStore "credo/internal/ratelimit/store/allowlist"
+	authlockoutStore "credo/internal/ratelimit/store/authlockout"
 	rwbucketStore "credo/internal/ratelimit/store/bucket"
 	"credo/internal/seeder"
 	tenantHandler "credo/internal/tenant/handler"
@@ -98,7 +100,7 @@ func main() {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 	tenantMod := buildTenantModule(infra)
-	authMod, err := buildAuthModule(appCtx, infra, tenantMod.Service)
+	authMod, err := buildAuthModule(appCtx, infra, tenantMod.Service, rateLimitService)
 	if err != nil {
 		infra.Log.Error("failed to initialize auth module", "error", err)
 		os.Exit(1)
@@ -129,11 +131,13 @@ func main() {
 }
 
 func buildRateLimitService(logger *slog.Logger) (*rateLimit.Service, *rwallowlistStore.InMemoryAllowlistStore, error) {
-	bucketStore := rwbucketStore.NewInMemoryBucketStore()
-	allowlistStore := rwallowlistStore.NewInMemoryAllowlistStore()
+	bucketStore := rwbucketStore.New()
+	allowlistStore := rwallowlistStore.New()
+	authLockout := authlockoutStore.New()
 	svc, err := rateLimit.New(
 		bucketStore,
 		allowlistStore,
+		authLockout,
 		rateLimit.WithLogger(logger),
 	)
 	if err != nil {
@@ -177,7 +181,7 @@ func buildInfra() (*infraBundle, error) {
 	}, nil
 }
 
-func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *tenantService.Service) (*authModule, error) {
+func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *tenantService.Service, rateLimitService *rateLimit.Service) (*authModule, error) {
 	users := userStore.NewInMemoryUserStore()
 	sessions := sessionStore.NewInMemorySessionStore()
 	codes := authCodeStore.NewInMemoryAuthorizationCodeStore()
@@ -230,9 +234,12 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		return nil, err
 	}
 
+	// Create rate limit adapter for auth handler
+	rateLimitAdapter := authAdapters.NewRateLimitAdapter(rateLimitService)
+
 	return &authModule{
 		Service:       authSvc,
-		Handler:       authHandler.New(authSvc, infra.Log, infra.Cfg.Auth.DeviceCookieName, infra.Cfg.Auth.DeviceCookieMaxAge),
+		Handler:       authHandler.New(authSvc, rateLimitAdapter, infra.Log, infra.Cfg.Auth.DeviceCookieName, infra.Cfg.Auth.DeviceCookieMaxAge),
 		AdminSvc:      admin.NewService(users, sessions, auditStore),
 		Cleanup:       cleanupSvc,
 		Users:         users,

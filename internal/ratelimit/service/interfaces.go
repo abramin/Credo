@@ -46,10 +46,10 @@ type AuthLockoutStore interface {
 	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
 
 	// GetLockout retrieves the current lockout state for an identifier.
-	GetLockout(ctx context.Context, identifier string) (*models.AuthLockout, error)
+	Get(ctx context.Context, identifier string) (*models.AuthLockout, error)
 
 	// ClearLockout clears the lockout state after successful authentication.
-	ClearLockout(ctx context.Context, identifier string) error
+	Clear(ctx context.Context, identifier string) error
 
 	// IsLocked checks if an identifier is currently locked out.
 	IsLocked(ctx context.Context, identifier string) (bool, *time.Time, error)

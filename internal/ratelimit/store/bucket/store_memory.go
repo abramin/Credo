@@ -8,13 +8,6 @@ import (
 	"credo/internal/ratelimit/models"
 )
 
-// InMemoryBucketStore implements BucketStore using in-memory sliding window.
-// For production, use RedisStore instead.
-type InMemoryBucketStore struct {
-	mu      sync.RWMutex
-	buckets map[string]*slidingWindow // key.String() -> sliding window
-}
-
 // slidingWindow is the aggregate root for rate limit state.
 type slidingWindow struct {
 	timestamps []time.Time
@@ -56,8 +49,15 @@ func (sw *slidingWindow) cleanupExpired(now time.Time) {
 	sw.timestamps = sw.timestamps[i:]
 }
 
-// NewInMemoryBucketStore creates a new in-memory bucket store.
-func NewInMemoryBucketStore() *InMemoryBucketStore {
+// InMemoryBucketStore implements BucketStore using in-memory sliding window.
+// For production, use RedisStore instead.
+type InMemoryBucketStore struct {
+	mu      sync.RWMutex
+	buckets map[string]*slidingWindow // key.String() -> sliding window
+}
+
+// New creates a new in-memory bucket store.
+func New() *InMemoryBucketStore {
 	return &InMemoryBucketStore{
 		buckets: make(map[string]*slidingWindow),
 	}
