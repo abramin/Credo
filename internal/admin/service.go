@@ -46,15 +46,16 @@ type Stats struct {
 	Timestamp      time.Time `json:"timestamp"`
 }
 
-// UserInfo contains user information with session details
+// UserInfo contains user information with session details.
+// Internal type - converted to UserInfoResponse for HTTP serialization.
 type UserInfo struct {
-	ID           id.UserID `json:"id"`
-	Email        string    `json:"email"`
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	SessionCount int       `json:"session_count"`
-	LastActive   time.Time `json:"last_active"`
-	Verified     bool      `json:"verified"`
+	ID           id.UserID
+	Email        string
+	FirstName    string
+	LastName     string
+	SessionCount int
+	LastActive   time.Time
+	Verified     bool
 }
 
 // GetStats returns overall system statistics
