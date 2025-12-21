@@ -594,14 +594,9 @@ curl http://localhost:8080/auth/userinfo -H "Authorization: Bearer $TOKEN"
 
 ## Revision History
 
-| Version | Date | Author | Changes |
-| ------- | ---- | ------ | ------- |
-
-<<<<<<< HEAD
-| 1.3 | 2025-12-21 | Engineering | Enhanced TR-4: Added seek pagination, covering indexes, batch deletion patterns |
-=======
-
-> > > > > > > b731cdb (update prds with sql practice)
-> > > > > > > | 1.2 | 2025-12-21 | Engineering | Added TR-4: SQL Query Patterns (UNION ALL, CTEs, cascade deletes, anti-joins, FK constraints) |
-> > > > > > > | 1.1 | 2025-12-13 | Engineering | Specify concurrent data-export fan-out, add service-layer orchestration TR, handler stays thin |
-> > > > > > > | 1.0 | 2025-12-03 | Product Team | Initial PRD |
+| Version | Date       | Author       | Changes                                                                                        |
+| ------- | ---------- | ------------ | ---------------------------------------------------------------------------------------------- |
+| 1.3     | 2025-12-21 | Engineering  | Enhanced TR-4: Added seek pagination, covering indexes, batch deletion patterns                |
+| 1.2     | 2025-12-21 | Engineering  | Added TR-4: SQL Query Patterns (UNION ALL, CTEs, cascade deletes, anti-joins, FK constraints)  |
+| 1.1     | 2025-12-13 | Engineering  | Specify concurrent data-export fan-out, add service-layer orchestration TR, handler stays thin |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                    |

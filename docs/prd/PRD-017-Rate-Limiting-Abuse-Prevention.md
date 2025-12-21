@@ -814,6 +814,15 @@ func (c ClientIP) Addr() netip.Addr { return c.addr }
 | `rate_limits` | `idx_ratelimit_cleanup`    | B-Tree           | `(window_end)`                                       | Background cleanup worker   |
 | `allowlist`   | `idx_allowlist_type_id`    | B-Tree           | `(type, identifier)`                                 | Allowlist bypass check      |
 
+=======
+| Table | Index | Type | Columns | Purpose |
+|-------|-------|------|---------|---------|
+| `rate_limits` | `idx_ratelimit_key_window` | B-Tree | `(key, window_end)` | Primary lookup for Allow() |
+| `rate_limits` | `idx_ratelimit_covering` | B-Tree | `(key, window_end) INCLUDE (remaining, limit_value)` | Index-only scan for Allow() |
+| `rate_limits` | `idx_ratelimit_blocked` | B-Tree (partial) | `(key) WHERE remaining = 0` | Abuse reporting queries |
+| `rate_limits` | `idx_ratelimit_cleanup` | B-Tree | `(window_end)` | Background cleanup worker |
+| `allowlist` | `idx_allowlist_type_id` | B-Tree | `(type, identifier)` | Allowlist bypass check |
+
 ---
 
 #### Query Patterns with WHY

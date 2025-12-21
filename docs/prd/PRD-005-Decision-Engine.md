@@ -644,10 +644,17 @@ curl -X POST http://localhost:8080/decision/evaluate \
 
 ## Revision History
 
+<<<<<<< HEAD
 | Version | Date       | Author       | Changes                                                                                    |
 | ------- | ---------- | ------------ | ------------------------------------------------------------------------------------------ |
 | 1.6     | 2025-12-21 | Engineering  | Enhanced TR-7: Added join strategy comparison, index design for high-write tables, EXPLAIN |
 | 1.5     | 2025-12-21 | Engineering  | Added TR-7: SQL Query Patterns (CTEs, window functions, CASE, subqueries, self-joins, 3NF) |
+=======
+| Version | Date       | Author       | Changes                                                                                        |
+| ------- | ---------- | ------------ | ---------------------------------------------------------------------------------------------- |
+| 1.6     | 2025-12-21 | Engineering  | Enhanced TR-7: Added join strategy comparison, index design for high-write tables, EXPLAIN    |
+| 1.5     | 2025-12-21 | Engineering  | Added TR-7: SQL Query Patterns (CTEs, window functions, CASE, subqueries, self-joins, 3NF)     |
+>>>>>>> 823466d (add more extensive DB/SQL details, update implementation plan)
 | 1.4     | 2025-12-18 | Security Eng | Added DSA/SQL requirements for rule DAGs and normalized, immutable rule storage            |
 | 1.3     | 2025-12-18 | Security Eng | Added secure-by-design evaluation (DAG, default-deny, signed policy bundles)               |
 | 1.2     | 2025-12-16 | Engineering  | Add concurrent evidence-gathering requirements and acceptance criteria                     |

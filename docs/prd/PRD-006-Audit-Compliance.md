@@ -275,6 +275,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
 **Query Patterns Required:**
 
 - **CTEs for Event Chain Correlation:** Use CTEs to trace related audit events:
+
   ```sql
   WITH session_events AS (
     SELECT id, user_id, action, timestamp, request_id
@@ -290,6 +291,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
   ```
 
 - **Window Functions for Audit Analytics:** Use `LEAD()`, `LAG()`, sliding windows for pattern detection:
+
   ```sql
   SELECT user_id, action, timestamp,
          LEAD(action) OVER (PARTITION BY user_id ORDER BY timestamp) AS next_action,
@@ -305,6 +307,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
   ```
 
 - **Aggregate Functions with HAVING for Compliance Reports:**
+
   ```sql
   SELECT user_id,
          COUNT(*) AS total_events,
@@ -319,6 +322,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
   ```
 
 - **Set Operations for Cross-User Investigation:**
+
   ```sql
   -- Users who did both consent_granted and data_exported
   SELECT DISTINCT user_id FROM audit_events WHERE action = 'consent_granted'
@@ -332,6 +336,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
   ```
 
 - **Correlated Subqueries for Event Comparison:**
+
   ```sql
   SELECT a.id, a.user_id, a.action, a.timestamp,
          (SELECT COUNT(*) FROM audit_events b
@@ -346,6 +351,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
   ```
 
 - **Self-Join for Suspicious Pattern Detection (Semi-Join/Anti-Join):**
+
   ```sql
   -- Find users with rapid successive failed decisions (semi-join pattern)
   SELECT DISTINCT a1.user_id
@@ -378,6 +384,7 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
   - `(action, timestamp)` for action-based filtering
   - `(request_id)` for correlation lookups
 - **Materialized Views:** Pre-aggregate daily/weekly compliance summaries:
+
   ```sql
   CREATE MATERIALIZED VIEW daily_audit_summary AS
   SELECT DATE(timestamp) AS audit_date,
@@ -394,6 +401,11 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
 - **WORM Storage Compliance:** Audit tables use `pg_dumpall` with append-only semantics; no UPDATE/DELETE triggers allowed
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+
+> > > > > > > 823466d (add more extensive DB/SQL details, update implementation plan)
+
 ---
 
 **SQL Indexing Enhancements (from "Use The Index, Luke"):**
@@ -522,9 +534,13 @@ GROUP BY a.user_id;
 
 ---
 
-=======
->>>>>>> b731cdb (update prds with sql practice)
-**Acceptance Criteria (SQL):**
+# <<<<<<< HEAD
+
+> > > > > > > # b731cdb (update prds with sql practice)
+> > > > > > >
+> > > > > > > 823466d (add more extensive DB/SQL details, update implementation plan)
+> > > > > > > **Acceptance Criteria (SQL):**
+
 - [ ] Event correlation uses CTEs with window functions
 - [ ] Audit analytics use sliding window aggregations
 - [ ] Compliance reports use GROUP BY/HAVING with aggregate filters
@@ -532,12 +548,16 @@ GROUP BY a.user_id;
 - [ ] Suspicious pattern detection uses semi-joins and anti-joins
 - [ ] Partitioned tables verified with `EXPLAIN ANALYZE` showing partition pruning
 - [ ] Materialized views for summaries with scheduled refresh
-<<<<<<< HEAD
+      <<<<<<< HEAD
+      <<<<<<< HEAD
+- [ ] **NEW:** Data export uses seek pagination, not offset
+- [ ] **NEW:** Partition pruning verified (only relevant partitions scanned)
+- [ ] # **NEW:** Large compliance reports use appropriate join strategy (Merge/Hash)
+  > > > > > > > # b731cdb (update prds with sql practice)
 - [ ] **NEW:** Data export uses seek pagination, not offset
 - [ ] **NEW:** Partition pruning verified (only relevant partitions scanned)
 - [ ] **NEW:** Large compliance reports use appropriate join strategy (Merge/Hash)
-=======
->>>>>>> b731cdb (update prds with sql practice)
+  > > > > > > > 823466d (add more extensive DB/SQL details, update implementation plan)
 
 ---
 
@@ -629,10 +649,7 @@ curl "http://localhost:8080/me/data-export?action=consent_granted" \
 
 | Version | Date       | Author       | Changes                                                                                                     |
 | ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
-<<<<<<< HEAD
 | 1.7     | 2025-12-21 | Engineering  | Enhanced TR-6: Added partition pruning, seek pagination, sort-merge joins, EXPLAIN requirements             |
-=======
->>>>>>> b731cdb (update prds with sql practice)
 | 1.6     | 2025-12-21 | Engineering  | Added TR-6: SQL Query Patterns (CTEs, window functions, aggregates, set operations, semi/anti-joins, views) |
 | 1.5     | 2025-12-18 | Security Eng | Added anchoring/verification requirements alongside partitioning and least-privilege interfaces             |
 | 1.4     | 2025-12-18 | Security Eng | Added secure storage/integrity (hash chaining, partitioning, least-privilege interfaces)                    |
