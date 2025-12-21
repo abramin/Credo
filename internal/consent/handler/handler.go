@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"credo/internal/consent/models"
-	auth "credo/pkg/platform/middleware/auth"
-	request "credo/pkg/platform/middleware/request"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
 	"credo/pkg/platform/metrics"
+	auth "credo/pkg/platform/middleware/auth"
+	request "credo/pkg/platform/middleware/request"
 )
 
 // Service defines the interface for consent operations.

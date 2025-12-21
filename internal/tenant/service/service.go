@@ -9,14 +9,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
 	"credo/internal/tenant/models"
 	"credo/internal/tenant/secrets"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/attrs"
+	"credo/pkg/platform/audit"
 	"credo/pkg/platform/metrics"
+	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/sentinel"
 )
 

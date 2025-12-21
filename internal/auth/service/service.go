@@ -12,16 +12,16 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/pkg/platform/audit"
 	"credo/internal/auth/device"
 	"credo/internal/auth/models"
 	"credo/internal/auth/store/revocation"
 	sessionStore "credo/internal/auth/store/session"
-	request "credo/pkg/platform/middleware/request"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/attrs"
+	"credo/pkg/platform/audit"
 	"credo/pkg/platform/metrics"
+	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/sentinel"
 )
 
