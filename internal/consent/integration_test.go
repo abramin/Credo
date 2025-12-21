@@ -44,12 +44,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"credo/internal/audit"
+	auditpublisher "credo/pkg/platform/audit/publisher"
+	auditstore "credo/pkg/platform/audit/store/memory"
 	"credo/internal/consent/handler"
 	consentModel "credo/internal/consent/models"
 	"credo/internal/consent/service"
 	"credo/internal/consent/store"
-	"credo/internal/platform/middleware"
+	authmw "credo/pkg/platform/middleware/auth"
 	id "credo/pkg/domain"
 )
 
@@ -58,17 +59,17 @@ import (
 type consentTestHarness struct {
 	server       *httptest.Server
 	consentStore *store.InMemoryStore
-	auditStore   *audit.InMemoryStore
+	auditStore   *auditstore.InMemoryStore
 	userID       id.UserID
 }
 
 func newConsentTestHarness(userIDStr string) *consentTestHarness {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	consentStore := store.NewInMemoryStore()
-	auditStore := audit.NewInMemoryStore()
+	auditStore := auditstore.NewInMemoryStore()
 	svc := service.NewService(
 		consentStore,
-		audit.NewPublisher(auditStore),
+		auditpublisher.NewPublisher(auditStore),
 		logger,
 		service.WithConsentTTL(365*24*time.Hour),
 	)
@@ -77,9 +78,9 @@ func newConsentTestHarness(userIDStr string) *consentTestHarness {
 	router := chi.NewRouter()
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), middleware.ContextKeyUserID, userIDStr)
-			ctx = context.WithValue(ctx, middleware.ContextKeySessionID, "session-"+userIDStr)
-			ctx = context.WithValue(ctx, middleware.ContextKeyClientID, "client-"+userIDStr)
+			ctx := context.WithValue(r.Context(), authmw.ContextKeyUserID, userIDStr)
+			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, "session-"+userIDStr)
+			ctx = context.WithValue(ctx, authmw.ContextKeyClientID, "client-"+userIDStr)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})

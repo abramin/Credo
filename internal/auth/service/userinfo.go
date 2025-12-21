@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/models"
 	sessionStore "credo/internal/auth/store/session"
 	userStore "credo/internal/auth/store/user"

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	sessionStore "credo/internal/auth/store/session"
 	userStore "credo/internal/auth/store/user"
 	id "credo/pkg/domain"

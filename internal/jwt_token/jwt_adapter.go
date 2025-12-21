@@ -1,11 +1,11 @@
 package jwttoken
 
 import (
-	"credo/internal/platform/middleware"
+	authmw "credo/pkg/platform/middleware/auth"
 )
 
-func ToMiddlewareClaims(claims *AccessTokenClaims) *middleware.JWTClaims {
-	return &middleware.JWTClaims{
+func ToMiddlewareClaims(claims *AccessTokenClaims) *authmw.JWTClaims {
+	return &authmw.JWTClaims{
 		UserID:    claims.UserID,
 		SessionID: claims.SessionID,
 		ClientID:  claims.ClientID,
@@ -21,7 +21,7 @@ func NewJWTServiceAdapter(service *JWTService) *JWTServiceAdapter {
 	return &JWTServiceAdapter{service: service}
 }
 
-func (a *JWTServiceAdapter) ValidateToken(tokenString string) (*middleware.JWTClaims, error) {
+func (a *JWTServiceAdapter) ValidateToken(tokenString string) (*authmw.JWTClaims, error) {
 	claims, err := a.service.ValidateToken(tokenString)
 	if err != nil {
 		return nil, err

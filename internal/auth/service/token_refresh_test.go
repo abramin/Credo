@@ -7,10 +7,10 @@ import (
 
 	"credo/internal/auth/device"
 	"credo/internal/auth/models"
-	"credo/internal/platform/middleware"
 	tenantModels "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	devicectx "credo/pkg/platform/middleware/device"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -191,7 +191,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		refreshRec := *validRefreshToken
 		sess := *validSession
 		sess.DeviceID = "session-device"
-		ctx := middleware.WithDeviceID(context.Background(), "cookie-device-1")
+		ctx := devicectx.WithDeviceID(context.Background(), "cookie-device-1")
 
 		// Enable device binding for this specific scenario
 		prevBinding := s.service.DeviceBindingEnabled

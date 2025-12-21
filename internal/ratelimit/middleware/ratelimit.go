@@ -7,7 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	platformMW "credo/internal/platform/middleware"
+	auth "credo/pkg/platform/middleware/auth"
+	metadata "credo/pkg/platform/middleware/metadata"
 	"credo/internal/ratelimit/models"
 	"credo/pkg/platform/httputil"
 	"credo/pkg/platform/privacy"
@@ -37,7 +38,7 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			ip := platformMW.GetClientIP(ctx)
+			ip := metadata.GetClientIP(ctx)
 
 			result, err := m.limiter.CheckIPRateLimit(ctx, ip, class)
 			if err != nil {
@@ -64,8 +65,8 @@ func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(htt
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			ip := platformMW.GetClientIP(ctx)
-			userID := platformMW.GetUserID(ctx)
+			ip := metadata.GetClientIP(ctx)
+			userID := auth.GetUserID(ctx)
 
 			result, err := m.limiter.CheckBothLimits(ctx, ip, userID, class)
 			if err != nil {
@@ -100,7 +101,7 @@ func (m *Middleware) RateLimitAuth() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			ip := platformMW.GetClientIP(ctx)
+			ip := metadata.GetClientIP(ctx)
 
 			// TODO: Implement auth rate limit with lockout
 			// Note: May need to peek at request body to get email/username

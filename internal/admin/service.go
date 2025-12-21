@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/models"
 	id "credo/pkg/domain"
 )

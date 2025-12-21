@@ -9,11 +9,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/device"
 	"credo/internal/auth/email"
 	"credo/internal/auth/models"
-	"credo/internal/platform/middleware"
+	devicemw "credo/pkg/platform/middleware/device"
+	metadata "credo/pkg/platform/middleware/metadata"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 )
@@ -40,11 +41,11 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	now := time.Now()
 	scopes := req.Scopes
 
-	userAgent := middleware.GetUserAgent(ctx)
+	userAgent := metadata.GetUserAgent(ctx)
 	deviceDisplayName := device.ParseUserAgent(userAgent)
 
 	// Always generate device ID for session tracking; DeviceBindingEnabled controls enforcement only
-	deviceID := middleware.GetDeviceID(ctx)
+	deviceID := devicemw.GetDeviceID(ctx)
 	deviceIDToSet := ""
 	if deviceID == "" {
 		deviceID = s.deviceService.GenerateDeviceID()
@@ -52,7 +53,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	}
 
 	// Fingerprint is now pre-computed by Device middleware
-	deviceFingerprint := middleware.GetDeviceFingerprint(ctx)
+	deviceFingerprint := devicemw.GetDeviceFingerprint(ctx)
 
 	var user *models.User
 	var authCode *models.AuthorizationCodeRecord

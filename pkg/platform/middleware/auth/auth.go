@@ -1,10 +1,12 @@
-package middleware
+package auth
 
 import (
 	"context"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	request "credo/pkg/platform/middleware/request"
 )
 
 // JWTValidator defines the interface for validating JWT tokens
@@ -73,7 +75,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 				claims, err := validator.ValidateToken(token)
 				if err != nil {
 					ctx := r.Context()
-					requestID := GetRequestID(ctx)
+					requestID := request.GetRequestID(ctx)
 					logger.WarnContext(ctx, "unauthorized access - invalid token",
 						"error", err,
 						"request_id", requestID,
@@ -95,7 +97,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 				// TR-4: Middleware revocation check (PRD-016).
 				if revocationChecker != nil {
 					if claims.JTI == "" {
-						requestID := GetRequestID(ctx)
+						requestID := request.GetRequestID(ctx)
 						logger.WarnContext(ctx, "unauthorized access - missing token jti",
 							"request_id", requestID,
 						)
@@ -107,7 +109,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 
 					revoked, err := revocationChecker.IsTokenRevoked(ctx, claims.JTI)
 					if err != nil {
-						requestID := GetRequestID(ctx)
+						requestID := request.GetRequestID(ctx)
 						logger.ErrorContext(ctx, "failed to check token revocation",
 							"error", err,
 							"request_id", requestID,
@@ -118,7 +120,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 						return
 					}
 					if revoked {
-						requestID := GetRequestID(ctx)
+						requestID := request.GetRequestID(ctx)
 						logger.WarnContext(ctx, "unauthorized access - token revoked",
 							"jti", claims.JTI,
 							"request_id", requestID,
@@ -140,7 +142,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 
 			// No Authorization header or invalid format
 			ctx := r.Context()
-			requestID := GetRequestID(ctx)
+			requestID := request.GetRequestID(ctx)
 			logger.WarnContext(ctx, "unauthorized access - missing token",
 				"request_id", requestID,
 			)

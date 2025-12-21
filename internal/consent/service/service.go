@@ -10,7 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
+	auditpublisher "credo/pkg/platform/audit/publisher"
 	"credo/internal/consent/models"
 	"credo/internal/consent/store"
 	id "credo/pkg/domain"
@@ -106,14 +107,14 @@ const (
 type Service struct {
 	store                  Store
 	tx                     ConsentStoreTx
-	auditor                *audit.Publisher
+	auditor                *auditpublisher.Publisher
 	metrics                *metrics.Metrics
 	logger                 *slog.Logger
 	consentTTL             time.Duration
 	grantIdempotencyWindow time.Duration
 }
 
-func NewService(store Store, auditor *audit.Publisher, logger *slog.Logger, opts ...Option) *Service {
+func NewService(store Store, auditor *auditpublisher.Publisher, logger *slog.Logger, opts ...Option) *Service {
 	svc := &Service{
 		store:                  store,
 		tx:                     &shardedConsentTx{store: store},

@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"credo/internal/admin"
-	"credo/internal/audit"
+	auditpublisher "credo/pkg/platform/audit/publisher"
+	auditstore "credo/pkg/platform/audit/store/memory"
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
 	authService "credo/internal/auth/service"
@@ -27,7 +28,6 @@ import (
 	"credo/internal/platform/config"
 	"credo/internal/platform/httpserver"
 	"credo/internal/platform/logger"
-	"credo/internal/platform/middleware"
 	rateLimitMW "credo/internal/ratelimit/middleware"
 	rateLimitModels "credo/internal/ratelimit/models"
 	rateLimit "credo/internal/ratelimit/service"
@@ -38,6 +38,11 @@ import (
 	tenantService "credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
+	adminmw "credo/pkg/platform/middleware/admin"
+	auth "credo/pkg/platform/middleware/auth"
+	devicemw "credo/pkg/platform/middleware/device"
+	metadata "credo/pkg/platform/middleware/metadata"
+	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/metrics"
 
 	"github.com/go-chi/chi/v5"
@@ -62,7 +67,7 @@ type authModule struct {
 	Sessions      *sessionStore.InMemorySessionStore
 	Codes         *authCodeStore.InMemoryAuthorizationCodeStore
 	RefreshTokens *refreshTokenStore.InMemoryRefreshTokenStore
-	AuditStore    *audit.InMemoryStore
+	AuditStore    *auditstore.InMemoryStore
 }
 
 type consentModule struct {
@@ -177,7 +182,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 	sessions := sessionStore.NewInMemorySessionStore()
 	codes := authCodeStore.NewInMemoryAuthorizationCodeStore()
 	refreshTokens := refreshTokenStore.NewInMemoryRefreshTokenStore()
-	auditStore := audit.NewInMemoryStore()
+	auditStore := auditstore.NewInMemoryStore()
 
 	if infra.Cfg.DemoMode {
 		seederSvc := seeder.New(users, sessions, codes, refreshTokens, auditStore, infra.Log)
@@ -206,7 +211,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		authService.WithLogger(infra.Log),
 		authService.WithJWTService(infra.JWTService),
 		authService.WithTRL(trl),
-		authService.WithAuditPublisher(audit.NewPublisher(auditStore)),
+		authService.WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
 		authService.WithClientResolver(tenantService),
 	)
 	if err != nil {
@@ -241,7 +246,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 func buildConsentModule(infra *infraBundle) *consentModule {
 	consentSvc := consentService.NewService(
 		consentStore.NewInMemoryStore(),
-		audit.NewPublisher(audit.NewInMemoryStore()),
+		auditpublisher.NewPublisher(auditstore.NewInMemoryStore()),
 		infra.Log,
 		consentService.WithConsentTTL(infra.Cfg.Consent.ConsentTTL),
 		consentService.WithGrantWindow(infra.Cfg.Consent.ConsentGrantWindow),
@@ -294,17 +299,17 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Common middleware for all routes (must be defined before routes)
-	r.Use(middleware.ClientMetadata)
-	r.Use(middleware.Device(&middleware.DeviceConfig{
+	r.Use(metadata.ClientMetadata)
+	r.Use(devicemw.Device(&devicemw.DeviceConfig{
 		CookieName:    infra.Cfg.Auth.DeviceCookieName,
 		FingerprintFn: infra.DeviceService.ComputeFingerprint,
 	}))
-	r.Use(middleware.Recovery(infra.Log))
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger(infra.Log))
-	r.Use(middleware.Timeout(30 * time.Second)) // TODO: make configurable
-	r.Use(middleware.ContentTypeJSON)
-	r.Use(middleware.LatencyMiddleware(infra.Metrics))
+	r.Use(request.Recovery(infra.Log))
+	r.Use(request.RequestID)
+	r.Use(request.Logger(infra.Log))
+	r.Use(request.Timeout(30 * time.Second)) // TODO: make configurable
+	r.Use(request.ContentTypeJSON)
+	r.Use(request.LatencyMiddleware(infra.Metrics))
 
 	// Add Prometheus metrics endpoint (no auth required)
 	r.Handle("/metrics", promhttp.Handler())
@@ -343,7 +348,7 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 	// Protected read endpoints - ClassRead (100 req/min)
 	r.Group(func(r chi.Router) {
 		r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassRead))
-		r.Use(middleware.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
+		r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
 		r.Get("/auth/userinfo", authMod.Handler.HandleUserInfo)
 		r.Get("/auth/sessions", authMod.Handler.HandleListSessions)
 		r.Get("/auth/consent", consentMod.Handler.HandleGetConsents)
@@ -352,7 +357,7 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 	// Protected sensitive endpoints - ClassSensitive (30 req/min)
 	r.Group(func(r chi.Router) {
 		r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassSensitive))
-		r.Use(middleware.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
+		r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
 		r.Post("/auth/consent", consentMod.Handler.HandleGrantConsent)
 		r.Post("/auth/consent/revoke", consentMod.Handler.HandleRevokeConsent)
 		r.Post("/auth/consent/revoke-all", consentMod.Handler.HandleRevokeAllConsents)
@@ -363,7 +368,7 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 	if infra.Cfg.Security.AdminAPIToken != "" {
 		r.Group(func(r chi.Router) {
 			r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassWrite))
-			r.Use(middleware.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
+			r.Use(adminmw.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
 			authMod.Handler.RegisterAdmin(r)
 			tenantMod.Handler.Register(r)
 		})
@@ -375,11 +380,11 @@ func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *
 	r := chi.NewRouter()
 
 	// Common middleware for all routes
-	r.Use(middleware.Recovery(log))
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger(log))
-	r.Use(middleware.Timeout(30 * time.Second))
-	r.Use(middleware.ContentTypeJSON)
+	r.Use(request.Recovery(log))
+	r.Use(request.RequestID)
+	r.Use(request.Logger(log))
+	r.Use(request.Timeout(30 * time.Second))
+	r.Use(request.ContentTypeJSON)
 
 	// Health check and metrics
 	r.Handle("/metrics", promhttp.Handler())
@@ -401,7 +406,7 @@ func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *
 	// All admin routes require authentication
 	adminHandler := admin.New(adminSvc, log)
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.RequireAdminToken(cfg.Security.AdminAPIToken, log))
+		r.Use(adminmw.RequireAdminToken(cfg.Security.AdminAPIToken, log))
 		adminHandler.Register(r)
 		tenantHandler.Register(r)
 	})

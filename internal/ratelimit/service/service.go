@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"credo/internal/audit"
-	"credo/internal/platform/middleware"
+	"credo/pkg/platform/audit"
+	request "credo/pkg/platform/middleware/request"
 	"credo/internal/ratelimit/models"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/privacy"
@@ -288,7 +288,7 @@ func (s *Service) ResetRateLimit(ctx context.Context, req *models.ResetRateLimit
 
 // logAudit emits an audit event for rate limiting operations.
 func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attrs = append(attrs, "request_id", requestID)
 	}
 	args := append(attrs, "event", event, "log_type", "audit")

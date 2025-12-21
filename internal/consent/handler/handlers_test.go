@@ -28,7 +28,7 @@ import (
 
 	"credo/internal/consent/handler/mocks"
 	consentModel "credo/internal/consent/models"
-	"credo/internal/platform/middleware"
+	authmw "credo/pkg/platform/middleware/auth"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 )
@@ -139,7 +139,7 @@ func (s *ConsentHandlerSuite) TestHandleGetConsents_ErrorMapping() {
 			Return(nil, dErrors.New(dErrors.CodeInternal, "storage system unavailable"))
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/consent", nil)
-		ctx := context.WithValue(req.Context(), middleware.ContextKeyUserID, testUserIDStr)
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, testUserIDStr)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -152,7 +152,7 @@ func (s *ConsentHandlerSuite) TestHandleGetConsents_ErrorMapping() {
 		// Handler-level validation of query param
 		handler, _ := newTestHandler(t)
 		req := httptest.NewRequest(http.MethodGet, "/auth/consent?status=unknown", nil)
-		ctx := context.WithValue(req.Context(), middleware.ContextKeyUserID, "550e8400-e29b-41d4-a716-446655440000")
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, "550e8400-e29b-41d4-a716-446655440000")
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -234,7 +234,7 @@ func newRequestWithBody(method, endpoint string, body interface{}, userID string
 	}
 	req := httptest.NewRequest(method, endpoint, bytes.NewReader(bodyBytes))
 	if userID != "" {
-		ctx := context.WithValue(req.Context(), middleware.ContextKeyUserID, userID)
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, userID)
 		req = req.WithContext(ctx)
 	}
 	return req, nil

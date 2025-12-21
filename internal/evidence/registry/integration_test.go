@@ -12,18 +12,18 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/suite"
 
-	"credo/internal/audit"
+	auditstore "credo/pkg/platform/audit/store/memory"
 	"credo/internal/auth/service"
 	"credo/internal/evidence/registry/handler"
 	"credo/internal/evidence/registry/service/mocks"
 	"credo/internal/evidence/registry/store"
-	"credo/internal/platform/middleware"
+	authmw "credo/pkg/platform/middleware/auth"
 )
 
 type RegistryIntegrationSuite struct {
 	suite.Suite
 	logger          *slog.Logger
-	auditStore      *audit.InMemoryStore
+	auditStore      *auditstore.InMemoryStore
 	cacheStore      *store.InMemoryCache
 	citizenClient   *mocks.MockCitizenClient
 	sanctionsClient *mocks.MockSanctionsClient
@@ -38,7 +38,7 @@ func (s *RegistryIntegrationSuite) SetupTest() {
 	s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Setup audit store
-	s.auditStore = audit.NewInMemoryStore()
+	s.auditStore = auditstore.NewInMemoryStore()
 
 	// Setup cache store
 	s.cacheStore = store.NewInMemoryCache(5 * time.Minute)
@@ -52,16 +52,16 @@ func (s *RegistryIntegrationSuite) SetupTest() {
 	// )
 
 	// TODO: Initialize handler when complete
-	// s.handler = handler.New(s.service, s.logger, audit.NewPublisher(s.auditStore))
+	// s.handler = handler.New(s.service, s.logger, auditpublisher.NewPublisher(s.auditStore))
 
 	// Setup router with middleware
 	s.router = chi.NewRouter()
 	s.router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Inject test user context
-			ctx := context.WithValue(r.Context(), middleware.ContextKeyUserID, "test-user-123")
-			ctx = context.WithValue(ctx, middleware.ContextKeySessionID, "test-session-123")
-			ctx = context.WithValue(ctx, middleware.ContextKeyClientID, "test-client-123")
+			ctx := context.WithValue(r.Context(), authmw.ContextKeyUserID, "test-user-123")
+			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, "test-session-123")
+			ctx = context.WithValue(ctx, authmw.ContextKeyClientID, "test-client-123")
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})

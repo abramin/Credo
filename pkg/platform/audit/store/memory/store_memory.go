@@ -1,46 +1,47 @@
-package audit
+package memory
 
 import (
 	"context"
 	"sync"
 
 	id "credo/pkg/domain"
+	audit "credo/pkg/platform/audit"
 )
 
 type InMemoryStore struct {
 	mu     sync.RWMutex
-	events map[id.UserID][]Event
+	events map[id.UserID][]audit.Event
 }
 
 func (s *InMemoryStore) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = make(map[id.UserID][]Event)
+	s.events = make(map[id.UserID][]audit.Event)
 }
 
 func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{events: make(map[id.UserID][]Event)}
+	return &InMemoryStore{events: make(map[id.UserID][]audit.Event)}
 }
 
-func (s *InMemoryStore) Append(_ context.Context, event Event) error {
+func (s *InMemoryStore) Append(_ context.Context, event audit.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events[event.UserID] = append(s.events[event.UserID], event)
 	return nil
 }
 
-func (s *InMemoryStore) ListByUser(_ context.Context, userID id.UserID) ([]Event, error) {
+func (s *InMemoryStore) ListByUser(_ context.Context, userID id.UserID) ([]audit.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]Event{}, s.events[userID]...), nil
+	return append([]audit.Event{}, s.events[userID]...), nil
 }
 
 // ListAll returns all audit events across all users (admin-only operation)
-func (s *InMemoryStore) ListAll(_ context.Context) ([]Event, error) {
+func (s *InMemoryStore) ListAll(_ context.Context) ([]audit.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var allEvents []Event
+	var allEvents []audit.Event
 	for _, userEvents := range s.events {
 		allEvents = append(allEvents, userEvents...)
 	}
@@ -49,11 +50,11 @@ func (s *InMemoryStore) ListAll(_ context.Context) ([]Event, error) {
 }
 
 // ListRecent returns the most recent N events across all users (admin-only operation)
-func (s *InMemoryStore) ListRecent(_ context.Context, limit int) ([]Event, error) {
+func (s *InMemoryStore) ListRecent(_ context.Context, limit int) ([]audit.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var allEvents []Event
+	var allEvents []audit.Event
 	for _, userEvents := range s.events {
 		allEvents = append(allEvents, userEvents...)
 	}

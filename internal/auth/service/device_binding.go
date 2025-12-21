@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"credo/internal/auth/models"
-	"credo/internal/platform/middleware"
+	device "credo/pkg/platform/middleware/device"
 )
 
 func (s *Service) applyDeviceBinding(ctx context.Context, session *models.Session) {
@@ -13,7 +13,7 @@ func (s *Service) applyDeviceBinding(ctx context.Context, session *models.Sessio
 		return
 	}
 
-	cookieDeviceID := middleware.GetDeviceID(ctx)
+	cookieDeviceID := device.GetDeviceID(ctx)
 	if session.DeviceID == "" && cookieDeviceID != "" {
 		session.DeviceID = cookieDeviceID
 		if s.logger != nil {
@@ -40,7 +40,7 @@ func (s *Service) applyDeviceBinding(ctx context.Context, session *models.Sessio
 	}
 
 	// Fingerprint is now pre-computed by Device middleware
-	currentFingerprint := middleware.GetDeviceFingerprint(ctx)
+	currentFingerprint := device.GetDeviceFingerprint(ctx)
 	_, driftDetected := s.deviceService.CompareFingerprints(session.DeviceFingerprintHash, currentFingerprint)
 	if session.DeviceFingerprintHash == "" && currentFingerprint != "" {
 		session.DeviceFingerprintHash = currentFingerprint

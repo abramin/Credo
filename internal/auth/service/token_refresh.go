@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/models"
 	dErrors "credo/pkg/domain-errors"
 )

@@ -1,4 +1,4 @@
-package middleware
+package metadata
 
 import (
 	"context"
@@ -138,7 +138,7 @@ func TestGetClientIP(t *testing.T) {
 				req.Header.Set(key, value)
 			}
 
-			ip := getClientIP(req)
+			ip := ClientIPFromRequest(req)
 			assert.Equal(t, tt.expectedIP, ip)
 		})
 	}

@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/models"
 	jwttoken "credo/internal/jwt_token"
 	id "credo/pkg/domain"

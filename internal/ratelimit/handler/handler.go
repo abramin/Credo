@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"credo/internal/platform/middleware"
+	request "credo/pkg/platform/middleware/request"
 	"credo/internal/ratelimit/models"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
@@ -61,7 +61,7 @@ func (h *Handler) RegisterAdmin(r chi.Router) {
 // 5. Return AllowlistEntryResponse
 func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.AddAllowlistRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -74,7 +74,7 @@ func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: Implement - validate request, get admin user ID, call service
-	// adminUserID := middleware.GetUserID(ctx)
+	// adminUserID := auth.GetUserID(ctx)
 	// entry, err := h.service.AddToAllowlist(ctx, &req, adminUserID)
 	// if err != nil { ... }
 	// httputil.WriteJSON(w, http.StatusOK, &models.AllowlistEntryResponse{...})
@@ -90,7 +90,7 @@ func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 // TODO: Implement this handler
 func (h *Handler) HandleRemoveAllowlist(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.RemoveAllowlistRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -118,7 +118,7 @@ func (h *Handler) HandleRemoveAllowlist(w http.ResponseWriter, r *http.Request) 
 // TODO: Implement this handler
 func (h *Handler) HandleListAllowlist(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	// TODO: Implement
 	// entries, err := h.service.ListAllowlist(ctx)
@@ -138,7 +138,7 @@ func (h *Handler) HandleListAllowlist(w http.ResponseWriter, r *http.Request) {
 // TODO: Implement this handler
 func (h *Handler) HandleResetRateLimit(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.ResetRateLimitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

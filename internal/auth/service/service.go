@@ -12,12 +12,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/device"
 	"credo/internal/auth/models"
 	"credo/internal/auth/store/revocation"
 	sessionStore "credo/internal/auth/store/session"
-	"credo/internal/platform/middleware"
+	request "credo/pkg/platform/middleware/request"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/attrs"
@@ -263,7 +263,7 @@ func New(
 
 func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
 	// Add request_id from context if available
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
 	args := append(attributes, "event", event, "log_type", "audit")
@@ -292,7 +292,7 @@ func (s *Service) authFailure(ctx context.Context, reason string, isError bool, 
 
 func (s *Service) logAuthFailure(ctx context.Context, reason string, isError bool, attributes ...any) {
 	// Add request_id from context if available
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
 	args := append(attributes, "event", audit.EventAuthFailed, "reason", reason, "log_type", "standard")

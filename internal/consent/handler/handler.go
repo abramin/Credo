@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"credo/internal/consent/models"
-	"credo/internal/platform/middleware"
+	auth "credo/pkg/platform/middleware/auth"
+	request "credo/pkg/platform/middleware/request"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
@@ -52,8 +53,8 @@ func (h *Handler) HandleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	requestID := middleware.GetRequestID(ctx)
-	userIDStr := middleware.GetUserID(ctx)
+	requestID := request.GetRequestID(ctx)
+	userIDStr := auth.GetUserID(ctx)
 
 	if userIDStr == "" {
 		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
@@ -108,8 +109,8 @@ func (h *Handler) HandleGrantConsent(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	userIDStr := middleware.GetUserID(ctx)
+	requestID := request.GetRequestID(ctx)
+	userIDStr := auth.GetUserID(ctx)
 
 	if userIDStr == "" {
 		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
@@ -164,8 +165,8 @@ func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleRevokeAllConsents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	userIDStr := middleware.GetUserID(ctx)
+	requestID := request.GetRequestID(ctx)
+	userIDStr := auth.GetUserID(ctx)
 
 	if userIDStr == "" {
 		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
@@ -203,8 +204,8 @@ func (h *Handler) HandleRevokeAllConsents(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) HandleDeleteAllConsents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	userIDStr := middleware.GetUserID(ctx)
+	requestID := request.GetRequestID(ctx)
+	userIDStr := auth.GetUserID(ctx)
 
 	if userIDStr == "" {
 		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
@@ -240,8 +241,8 @@ func (h *Handler) HandleDeleteAllConsents(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) HandleGetConsents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	userIDStr := middleware.GetUserID(ctx)
+	requestID := request.GetRequestID(ctx)
+	userIDStr := auth.GetUserID(ctx)
 
 	if userIDStr == "" {
 		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",

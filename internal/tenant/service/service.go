@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
-	"credo/internal/platform/middleware"
+	"credo/pkg/platform/audit"
+	request "credo/pkg/platform/middleware/request"
 	"credo/internal/tenant/models"
 	"credo/internal/tenant/secrets"
 	id "credo/pkg/domain"
@@ -305,7 +305,7 @@ func (s *Service) ResolveClient(ctx context.Context, clientID string) (*models.C
 
 func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
 	// Add request_id from context if available
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
 	args := append(attributes, "event", event, "log_type", "audit")

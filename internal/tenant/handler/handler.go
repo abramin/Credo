@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"credo/internal/platform/middleware"
+	request "credo/pkg/platform/middleware/request"
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
@@ -53,7 +53,7 @@ func (h *Handler) Register(r chi.Router) {
 // HandleCreateTenant creates a tenant.
 func (h *Handler) HandleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req *models.CreateTenantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -85,7 +85,7 @@ func (h *Handler) HandleCreateTenant(w http.ResponseWriter, r *http.Request) {
 // TODO: When tenant admin auth is implemented, verify caller has access to this tenant.
 func (h *Handler) HandleGetTenant(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 	idStr := chi.URLParam(r, "id")
 	tenantID, err := id.ParseTenantID(idStr)
 	if err != nil {
@@ -106,7 +106,7 @@ func (h *Handler) HandleGetTenant(w http.ResponseWriter, r *http.Request) {
 // HandleCreateClient registers a new client under a tenant.
 func (h *Handler) HandleCreateClient(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.CreateClientRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -132,7 +132,7 @@ func (h *Handler) HandleCreateClient(w http.ResponseWriter, r *http.Request) {
 //  3. This enforces tenant isolation at the service layer (per PRD-026A §Tenant Boundary)
 func (h *Handler) HandleGetClient(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	idStr := chi.URLParam(r, "id")
 	clientID, err := id.ParseClientID(idStr)
@@ -161,7 +161,7 @@ func (h *Handler) HandleGetClient(w http.ResponseWriter, r *http.Request) {
 //  3. This enforces tenant isolation at the service layer (per PRD-026A §Tenant Boundary)
 func (h *Handler) HandleUpdateClient(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	idStr := chi.URLParam(r, "id")
 	clientID, err := id.ParseClientID(idStr)
