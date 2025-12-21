@@ -29,11 +29,7 @@ func FuzzParseUserID(f *testing.F) {
 
 		// Invariant 2: Either valid ID or error, never both
 		if err == nil {
-			// Valid ID must not be nil
-			if id.IsNil() {
-				t.Error("ParseUserID returned nil ID without error")
-			}
-			// Valid ID must round-trip
+			// Valid ID must round-trip (including nil UUIDs)
 			roundTrip, err2 := ParseUserID(id.String())
 			if err2 != nil {
 				t.Errorf("Valid ID failed round-trip: %v", err2)

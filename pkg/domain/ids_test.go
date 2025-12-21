@@ -12,7 +12,7 @@ import (
 )
 
 // TestParseUUID_Invariants validates the parsing invariant:
-// "IDs must be valid, non-empty, non-nil UUIDs"
+// "IDs must be valid, non-empty UUIDs (nil UUIDs are allowed for store lookup consistency)"
 //
 // Justification: This is a pure function enforcing a domain invariant
 // at trust boundaries. Per testing.md, unit tests are allowed for invariants.
@@ -29,10 +29,13 @@ func TestParseUUID_Invariants(t *testing.T) {
 		assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
 	})
 
-	t.Run("rejects nil UUID", func(t *testing.T) {
-		_, err := ParseUserID(uuid.Nil.String())
-		require.Error(t, err)
-		assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
+	t.Run("accepts nil UUID and IsNil returns true", func(t *testing.T) {
+		// Nil UUIDs are allowed at parse time; use IsNil() at service layer
+		// to check and return proper "not found" errors from store lookups.
+		// See tenant/models/requests.go for rationale.
+		id, err := ParseUserID(uuid.Nil.String())
+		require.NoError(t, err)
+		assert.True(t, id.IsNil(), "parsed nil UUID should return true for IsNil()")
 	})
 
 	t.Run("accepts valid UUID", func(t *testing.T) {
@@ -91,7 +94,7 @@ func TestParseID_SecurityInvariants(t *testing.T) {
 
 		// Edge cases
 		{"Empty string", "", true},
-		{"Nil UUID", uuid.Nil.String(), true},
+		{"Nil UUID", uuid.Nil.String(), false}, // Nil UUIDs allowed; use IsNil() at service layer
 		{"Whitespace only", "   ", true},
 		{"Uppercase valid UUID", "550E8400-E29B-41D4-A716-446655440000", false},
 		// Note: uuid.Parse trims whitespace, so " uuid " is accepted as valid
@@ -132,7 +135,7 @@ func TestTenantIsolation_CrossTenantAccessDenied(t *testing.T) {
 // Justification: Inconsistent validation across ID types could create security holes.
 func TestAllIDTypes_ConsistentBehavior(t *testing.T) {
 	validUUID := uuid.New().String()
-	invalidInputs := []string{"", "invalid", uuid.Nil.String()}
+	invalidInputs := []string{"", "invalid"}
 
 	// All types should accept valid UUID
 	t.Run("all accept valid UUID", func(t *testing.T) {
@@ -147,6 +150,27 @@ func TestAllIDTypes_ConsistentBehavior(t *testing.T) {
 		require.NoError(t, errClient)
 		require.NoError(t, errTenant)
 		require.NoError(t, errConsent)
+	})
+
+	// All types should accept nil UUID (use IsNil() at service layer)
+	t.Run("all accept nil UUID", func(t *testing.T) {
+		userID, errUser := ParseUserID(uuid.Nil.String())
+		sessionID, errSession := ParseSessionID(uuid.Nil.String())
+		clientID, errClient := ParseClientID(uuid.Nil.String())
+		tenantID, errTenant := ParseTenantID(uuid.Nil.String())
+		consentID, errConsent := ParseConsentID(uuid.Nil.String())
+
+		require.NoError(t, errUser)
+		require.NoError(t, errSession)
+		require.NoError(t, errClient)
+		require.NoError(t, errTenant)
+		require.NoError(t, errConsent)
+
+		assert.True(t, userID.IsNil())
+		assert.True(t, sessionID.IsNil())
+		assert.True(t, clientID.IsNil())
+		assert.True(t, tenantID.IsNil())
+		assert.True(t, consentID.IsNil())
 	})
 
 	// All types should reject invalid inputs identically

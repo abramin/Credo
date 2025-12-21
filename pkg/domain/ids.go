@@ -60,6 +60,9 @@ func (id TenantID) IsNil() bool  { return uuid.UUID(id) == uuid.Nil }
 func (id ConsentID) IsNil() bool { return uuid.UUID(id) == uuid.Nil }
 
 // parseUUID is the shared validation logic.
+// Note: Nil UUIDs are allowed here. Use IsNil() at the service layer for
+// business validation, which allows store lookups to return proper
+// "not found" errors for consistency. See tenant/models/requests.go for rationale.
 func parseUUID(s, label string) (uuid.UUID, error) {
 	if s == "" {
 		return uuid.Nil, dErrors.New(dErrors.CodeInvalidInput, label+" cannot be empty")
@@ -67,9 +70,6 @@ func parseUUID(s, label string) (uuid.UUID, error) {
 	id, err := uuid.Parse(s)
 	if err != nil {
 		return uuid.Nil, dErrors.New(dErrors.CodeInvalidInput, "invalid "+label+" format")
-	}
-	if id == uuid.Nil {
-		return uuid.Nil, dErrors.New(dErrors.CodeInvalidInput, label+" cannot be nil UUID")
 	}
 	return id, nil
 }
