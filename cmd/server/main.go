@@ -93,7 +93,7 @@ func main() {
 		infra.Log.Error("failed to initialize rate limit service", "error", err)
 		os.Exit(1)
 	}
-	rateLimitMiddleware := rateLimitMW.New(rateLimitService, infra.Log)
+	rateLimitMiddleware := rateLimitMW.New(rateLimitService, infra.Log, rateLimitMW.WithDisabled(infra.Cfg.DemoMode))
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()

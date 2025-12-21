@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	auth "credo/pkg/platform/middleware/auth"
-	metadata "credo/pkg/platform/middleware/metadata"
 	"credo/internal/ratelimit/models"
 	"credo/pkg/platform/httputil"
+	auth "credo/pkg/platform/middleware/auth"
+	metadata "credo/pkg/platform/middleware/metadata"
 	"credo/pkg/platform/privacy"
 )
 
@@ -23,20 +23,43 @@ type RateLimiter interface {
 }
 
 type Middleware struct {
-	limiter RateLimiter
-	logger  *slog.Logger
+	limiter  RateLimiter
+	logger   *slog.Logger
+	disabled bool
 }
 
-func New(limiter RateLimiter, logger *slog.Logger) *Middleware {
-	return &Middleware{
+// Option configures the rate limit middleware.
+type Option func(*Middleware)
+
+// WithDisabled disables rate limiting entirely (for testing/demo mode).
+func WithDisabled(disabled bool) Option {
+	return func(m *Middleware) {
+		m.disabled = disabled
+	}
+}
+
+func New(limiter RateLimiter, logger *slog.Logger, opts ...Option) *Middleware {
+	m := &Middleware{
 		limiter: limiter,
 		logger:  logger,
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	if m.disabled {
+		logger.Info("rate limiting disabled")
+	}
+	return m
 }
 
 func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.disabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx := r.Context()
 			ip := metadata.GetClientIP(ctx)
 
@@ -64,6 +87,11 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.disabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx := r.Context()
 			ip := metadata.GetClientIP(ctx)
 			userID := auth.GetUserID(ctx)
@@ -150,9 +178,7 @@ func (m *Middleware) GlobalThrottle() func(http.Handler) http.Handler {
 }
 
 // addRateLimitHeaders adds X-RateLimit-* headers to the response.
-//
-// TODO: Implement this helper
-// Headers:
+// // Headers:
 // - X-RateLimit-Limit: {limit}
 // - X-RateLimit-Remaining: {remaining}
 // - X-RateLimit-Reset: {unix timestamp}
@@ -167,8 +193,6 @@ func addRateLimitHeaders(w http.ResponseWriter, result *models.RateLimitResult) 
 
 func writeRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResult) {
 	w.Header().Set("Retry-After", strconv.Itoa(result.RetryAfter))
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusTooManyRequests)
 	httputil.WriteJSON(w, http.StatusTooManyRequests, &models.RateLimitExceededResponse{
 		Error:      "rate_limit_exceeded",
 		Message:    "Too many requests from this IP address. Please try again later.",
@@ -178,8 +202,6 @@ func writeRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResul
 
 func writeUserRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResult) {
 	w.Header().Set("Retry-After", strconv.Itoa(result.RetryAfter))
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusTooManyRequests)
 	httputil.WriteJSON(w, http.StatusTooManyRequests, &models.UserRateLimitExceededResponse{
 		Error:          "user_rate_limit_exceeded",
 		Message:        "You have exceeded your request quota for this operation.",
@@ -191,8 +213,6 @@ func writeUserRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitR
 
 func writeServiceOverloaded(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "60")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
 	httputil.WriteJSON(w, http.StatusServiceUnavailable, &models.ServiceOverloadedResponse{
 		Error:      "service_unavailable",
 		Message:    "Service is temporarily overloaded. Please try again later.",

@@ -67,6 +67,7 @@ services:
       - "8080:8080"
       - "8090:8090"  # Admin server port
     environment:
+      - CRENE_ENV=${CRENE_ENV:-local}
       - ADDR=:8080
       - REGULATED_MODE=true
       - LOG_LEVEL=info

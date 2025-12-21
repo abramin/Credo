@@ -141,7 +141,7 @@ func loadSecurityConfig(env string, demoMode bool) SecurityConfig {
 	adminToken := os.Getenv("ADMIN_API_TOKEN")
 	if adminToken == "" {
 		switch strings.ToLower(env) {
-		case "local", "dev", "development", "testing", "test":
+		case "local", "dev", "development", "testing", "test", "demo":
 			adminToken = "demo-admin-token"
 		}
 	}
