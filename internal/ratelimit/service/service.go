@@ -44,6 +44,24 @@ func WithConfig(cfg *Config) Option {
 	}
 }
 
+func WithAuthLockoutStore(store AuthLockoutStore) Option {
+	return func(s *Service) {
+		s.authLockout = store
+	}
+}
+
+func WithQuotaStore(store QuotaStore) Option {
+	return func(s *Service) {
+		s.quotas = store
+	}
+}
+
+func WithGlobalThrottleStore(store GlobalThrottleStore) Option {
+	return func(s *Service) {
+		s.globalThrottle = store
+	}
+}
+
 const keyPrefixUser = "user"
 const keyPrefixIP = "ip"
 
@@ -70,18 +88,6 @@ func New(
 	}
 
 	return svc, nil
-}
-
-func (s *Service) SetAuthLockoutStore(store AuthLockoutStore) {
-	s.authLockout = store
-}
-
-func (s *Service) SetQuotaStore(store QuotaStore) {
-	s.quotas = store
-}
-
-func (s *Service) SetGlobalThrottleStore(store GlobalThrottleStore) {
-	s.globalThrottle = store
 }
 
 func (s *Service) CheckIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error) {

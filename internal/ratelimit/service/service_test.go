@@ -10,8 +10,6 @@ import (
 	"credo/internal/ratelimit/models"
 )
 
-// TestConfig_Defaults tests default configuration.
-// Pure function test - validates config values match PRD-017 requirements.
 func TestConfig_Defaults(t *testing.T) {
 	cfg := DefaultConfig()
 
@@ -29,8 +27,6 @@ func TestConfig_Defaults(t *testing.T) {
 	assert.Equal(t, 10000, cfg.Global.GlobalPerSecond)
 }
 
-// TestService_GetProgressiveBackoff tests backoff calculation.
-// Pure function test - validates backoff values per PRD-017 FR-2b (250ms → 500ms → 1s).
 func TestService_GetProgressiveBackoff(t *testing.T) {
 	buckets := &noopBucketStore{}
 	allowlist := &noopAllowlistStore{}
@@ -65,8 +61,6 @@ func TestService_GetProgressiveBackoff(t *testing.T) {
 	})
 }
 
-// noopBucketStore is a minimal implementation for testing pure functions.
-// Not used for behavior testing - only to satisfy constructor requirements.
 type noopBucketStore struct{}
 
 func (n *noopBucketStore) Allow(_ context.Context, _ string, limit int, window time.Duration) (*models.RateLimitResult, error) {
@@ -85,7 +79,6 @@ func (n *noopBucketStore) GetCurrentCount(_ context.Context, _ string) (int, err
 	return 0, nil
 }
 
-// noopAllowlistStore is a minimal implementation for testing pure functions.
 type noopAllowlistStore struct{}
 
 func (n *noopAllowlistStore) Add(_ context.Context, _ *models.AllowlistEntry) error {
