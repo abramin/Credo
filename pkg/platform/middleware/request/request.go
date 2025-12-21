@@ -1,4 +1,4 @@
-package middleware
+package request
 
 import (
 	"context"
@@ -6,10 +6,11 @@ import (
 	"mime"
 	"net/http"
 	"runtime/debug"
-	"strings"
 	"time"
 
-	"credo/internal/platform/metrics"
+	"credo/pkg/platform/metrics"
+	"credo/pkg/platform/privacy"
+	metadata "credo/pkg/platform/middleware/metadata"
 
 	"github.com/google/uuid"
 )
@@ -75,13 +76,18 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			ctx := r.Context()
 			requestID := GetRequestID(ctx)
 
+			// Skip noisy health checks unless they fail.
+			if r.URL.Path == "/health" && wrapped.statusCode < http.StatusInternalServerError {
+				return
+			}
+
 			logger.InfoContext(ctx, "http request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", wrapped.statusCode,
 				"duration_ms", duration.Milliseconds(),
 				"request_id", requestID,
-				"remote_addr", r.RemoteAddr,
+				"remote_addr_prefix", privacy.AnonymizeIP(metadata.ClientIPFromRequest(r)),
 			)
 		})
 	}
@@ -133,109 +139,4 @@ func LatencyMiddleware(m *metrics.Metrics) func(http.Handler) http.Handler {
 			}
 		})
 	}
-}
-
-// Context keys for client metadata
-type contextKeyClientIP struct{}
-type contextKeyUserAgent struct{}
-type contextKeyDeviceID struct{}
-type contextKeyDeviceFingerprint struct{}
-
-// ClientMetadata extracts client IP address and User-Agent from the request
-// and adds them to the context for use by handlers and services.
-// This middleware should be applied early in the chain.
-func ClientMetadata(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := getClientIP(r)
-		userAgent := r.Header.Get("User-Agent")
-
-		ctx := r.Context()
-		ctx = context.WithValue(ctx, contextKeyClientIP{}, ip)
-		ctx = context.WithValue(ctx, contextKeyUserAgent{}, userAgent)
-
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// GetClientIP retrieves the client IP address from the context.
-func GetClientIP(ctx context.Context) string {
-	if ip, ok := ctx.Value(contextKeyClientIP{}).(string); ok {
-		return ip
-	}
-	return ""
-}
-
-// GetUserAgent retrieves the User-Agent from the context.
-func GetUserAgent(ctx context.Context) string {
-	if ua, ok := ctx.Value(contextKeyUserAgent{}).(string); ok {
-		return ua
-	}
-	return ""
-}
-
-// GetDeviceID retrieves the device identifier (cookie value) from the context.
-func GetDeviceID(ctx context.Context) string {
-	if deviceID, ok := ctx.Value(contextKeyDeviceID{}).(string); ok {
-		return deviceID
-	}
-	return ""
-}
-
-// WithClientMetadata injects client IP and User-Agent into a context.
-// Useful for service unit tests that don't run the full HTTP middleware chain.
-func WithClientMetadata(ctx context.Context, clientIP, userAgent string) context.Context {
-	ctx = context.WithValue(ctx, contextKeyClientIP{}, clientIP)
-	ctx = context.WithValue(ctx, contextKeyUserAgent{}, userAgent)
-	return ctx
-}
-
-// WithDeviceID injects a device identifier into a context.
-// Useful for service unit tests that don't run the full HTTP middleware chain.
-func WithDeviceID(ctx context.Context, deviceID string) context.Context {
-	return context.WithValue(ctx, contextKeyDeviceID{}, deviceID)
-}
-
-// GetDeviceFingerprint retrieves the pre-computed device fingerprint from the context.
-func GetDeviceFingerprint(ctx context.Context) string {
-	if fp, ok := ctx.Value(contextKeyDeviceFingerprint{}).(string); ok {
-		return fp
-	}
-	return ""
-}
-
-// WithDeviceFingerprint injects a device fingerprint into a context.
-// Useful for service unit tests that don't run the full HTTP middleware chain.
-func WithDeviceFingerprint(ctx context.Context, fingerprint string) context.Context {
-	return context.WithValue(ctx, contextKeyDeviceFingerprint{}, fingerprint)
-}
-
-// getClientIP extracts the real client IP from the request, handling proxies and load balancers.
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first (standard for proxied requests)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs (client, proxy1, proxy2, ...)
-		// Take the first IP which is the original client
-		if idx := strings.Index(xff, ","); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
-		}
-		return strings.TrimSpace(xff)
-	}
-
-	// Check X-Real-IP header (used by nginx and other proxies)
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-
-	// Fall back to RemoteAddr (direct connection)
-	// RemoteAddr is in format "ip:port", so we need to strip the port
-	if addr := r.RemoteAddr; addr != "" {
-		// For IPv6, format is [::1]:port
-		// For IPv4, format is 127.0.0.1:port
-		if idx := strings.LastIndex(addr, ":"); idx != -1 {
-			return addr[:idx]
-		}
-		return addr
-	}
-
-	return "unknown"
 }

@@ -10,10 +10,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"credo/internal/auth/models"
-	"credo/internal/platform/middleware"
-	"credo/internal/transport/httputil"
+	auth "credo/pkg/platform/middleware/auth"
+	request "credo/pkg/platform/middleware/request"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/httputil"
 )
 
 // Service defines the interface for authentication operations.
@@ -77,7 +78,7 @@ func (h *Handler) RegisterAdmin(r chi.Router) {
 // Output: { "code": "authz_...", "redirect_uri": "https://..." }
 func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.AuthorizationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -127,7 +128,7 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 // HandleToken exchanges authorization code for tokens
 func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	// Device ID is now extracted by Device middleware - no manual extraction needed
 
@@ -163,8 +164,8 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 // HandleUserInfo returns authenticated user information
 func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	sessionIDStr := middleware.GetSessionID(ctx)
+	requestID := request.GetRequestID(ctx)
+	sessionIDStr := auth.GetSessionID(ctx)
 
 	res, err := h.auth.UserInfo(ctx, sessionIDStr)
 	if err != nil {
@@ -189,9 +190,9 @@ func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 // Lists all active sessions for the authenticated user.
 func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	userIDStr := middleware.GetUserID(ctx)
-	sessionIDStr := middleware.GetSessionID(ctx)
+	requestID := request.GetRequestID(ctx)
+	userIDStr := auth.GetUserID(ctx)
+	sessionIDStr := auth.GetSessionID(ctx)
 
 	userID, err := id.ParseUserID(userIDStr)
 	if err != nil {
@@ -230,8 +231,8 @@ func (h *Handler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
 // HandleRevokeSession implements DELETE /auth/sessions/{session_id} per PRD-016 FR-5.
 func (h *Handler) HandleRevokeSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
-	userIDStr := middleware.GetUserID(ctx)
+	requestID := request.GetRequestID(ctx)
+	userIDStr := auth.GetUserID(ctx)
 
 	userID, err := id.ParseUserID(userIDStr)
 	if err != nil {
@@ -273,7 +274,7 @@ func (h *Handler) HandleRevokeSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 	userIDParam := chi.URLParam(r, "user_id")
 	userID, err := id.ParseUserID(userIDParam)
 	if err != nil {
@@ -318,7 +319,7 @@ func isHTTPS(r *http.Request) bool {
 // Output: { "revoked": true, "message": "Token revoked successfully" }
 func (h *Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.RevokeTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

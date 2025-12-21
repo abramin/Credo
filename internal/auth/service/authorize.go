@@ -2,23 +2,21 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/device"
+	"credo/internal/auth/email"
 	"credo/internal/auth/models"
-	"credo/internal/platform/middleware"
-	"credo/internal/sentinel"
+	devicemw "credo/pkg/platform/middleware/device"
+	metadata "credo/pkg/platform/middleware/metadata"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/email"
 )
 
 func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error) {
@@ -28,14 +26,8 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 
 	req.Normalize()
 	if err := req.Validate(); err != nil {
-		code := dErrors.CodeValidation
-		if errors.Is(err, sentinel.ErrBadRequest) {
-			code = dErrors.CodeBadRequest
-		}
-		// Extract just the context message without the sentinel
-		msg := strings.TrimSuffix(err.Error(), ": "+sentinel.ErrInvalidInput.Error())
-		msg = strings.TrimSuffix(msg, ": "+sentinel.ErrBadRequest.Error())
-		return nil, dErrors.New(code, msg)
+		// Validate now returns domain-errors directly
+		return nil, err
 	}
 
 	parsedURI, err := url.Parse(req.RedirectURI)
@@ -49,11 +41,11 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	now := time.Now()
 	scopes := req.Scopes
 
-	userAgent := middleware.GetUserAgent(ctx)
+	userAgent := metadata.GetUserAgent(ctx)
 	deviceDisplayName := device.ParseUserAgent(userAgent)
 
 	// Always generate device ID for session tracking; DeviceBindingEnabled controls enforcement only
-	deviceID := middleware.GetDeviceID(ctx)
+	deviceID := devicemw.GetDeviceID(ctx)
 	deviceIDToSet := ""
 	if deviceID == "" {
 		deviceID = s.deviceService.GenerateDeviceID()
@@ -61,7 +53,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	}
 
 	// Fingerprint is now pre-computed by Device middleware
-	deviceFingerprint := middleware.GetDeviceFingerprint(ctx)
+	deviceFingerprint := devicemw.GetDeviceFingerprint(ctx)
 
 	var user *models.User
 	var authCode *models.AuthorizationCodeRecord
@@ -95,7 +87,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to find or create user")
 		}
-		if user.Status != models.UserStatusActive {
+		if !user.IsActive() {
 			return dErrors.New(dErrors.CodeForbidden, "user is inactive")
 		}
 		userWasCreated = (user.ID == newUser.ID)

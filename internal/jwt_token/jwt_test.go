@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"credo/internal/sentinel"
+	dErrors "credo/pkg/domain-errors"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -49,7 +49,7 @@ func Test_ValidateToken_ExpiredToken(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = jwtService.ValidateToken(token)
-	require.ErrorContains(t, err, "token has expired")
+	require.ErrorContains(t, err, "token expired")
 }
 
 func Test_ValidateToken_ValidTokent(t *testing.T) {
@@ -105,7 +105,7 @@ func Test_ValidateToken_RejectsAlgorithmConfusion(t *testing.T) {
 
 			_, err = jwtService.ValidateToken(tokenString)
 			require.Error(t, err)
-			assert.ErrorIs(t, err, sentinel.ErrInvalidInput)
+			assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
 		})
 	}
 }

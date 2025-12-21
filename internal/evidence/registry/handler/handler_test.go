@@ -14,7 +14,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"credo/internal/evidence/registry/handler/mocks"
-	"credo/internal/platform/middleware"
+	authmw "credo/pkg/platform/middleware/auth"
 )
 
 //go:generate mockgen -source=handler.go -destination=mocks/handler_mock.go -package=mocks
@@ -47,7 +47,7 @@ func (s *HandlerSuite) TestHandleRegistryCitizen() {
 	s.T().Run("returns citizen record successfully", func(t *testing.T) {
 		// TODO: Implement test
 		// - Create request with valid national_id
-		// - Mock user context (middleware.ContextKeyUserID)
+		// - Mock user context (authmw.ContextKeyUserID)
 		// - Mock consent check to succeed
 		// - Mock service.Citizen() to return valid record
 		// - Assert 200 OK response
@@ -202,6 +202,6 @@ func makeRequest(method, path string, body interface{}) *http.Request {
 }
 
 func addUserContext(req *http.Request, userID string) *http.Request {
-	ctx := context.WithValue(req.Context(), middleware.ContextKeyUserID, userID)
+	ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, userID)
 	return req.WithContext(ctx)
 }

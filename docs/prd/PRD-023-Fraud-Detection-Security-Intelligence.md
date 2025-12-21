@@ -877,6 +877,257 @@ func RiskScoringMiddleware(engine RiskEngine) func(http.Handler) http.Handler {
 }
 ```
 
+### TR-6: SQL Query Patterns for Fraud Analytics
+
+**Objective:** Demonstrate intermediate-to-advanced SQL capabilities for fraud detection and security intelligence.
+
+**Query Patterns Required:**
+
+- **Window Functions for Velocity Detection:** Use sliding windows to detect request bursts:
+  ```sql
+  SELECT user_id, session_id, timestamp,
+         COUNT(*) OVER (
+           PARTITION BY user_id
+           ORDER BY timestamp
+           RANGE BETWEEN INTERVAL '10 minutes' PRECEDING AND CURRENT ROW
+         ) AS requests_last_10min,
+         LAG(timestamp) OVER (PARTITION BY user_id ORDER BY timestamp) AS prev_request,
+         timestamp - LAG(timestamp) OVER (PARTITION BY user_id ORDER BY timestamp) AS time_gap
+  FROM risk_scores
+  WHERE timestamp > NOW() - INTERVAL '1 hour'
+  HAVING COUNT(*) OVER (...) > 50;  -- Velocity threshold
+  ```
+
+- **Self-Join for Impossible Travel Detection:**
+  ```sql
+  SELECT t1.user_id, t1.id AS trip1_id, t2.id AS trip2_id,
+         t1.to_location->>'city' AS from_city,
+         t2.to_location->>'city' AS to_city,
+         ST_Distance(
+           ST_Point(t1.to_location->>'lon', t1.to_location->>'lat'),
+           ST_Point(t2.to_location->>'lon', t2.to_location->>'lat')
+         ) / EXTRACT(EPOCH FROM (t2.timestamp - t1.timestamp)) * 3.6 AS velocity_kmh
+  FROM travel_events t1
+  JOIN travel_events t2
+    ON t1.user_id = t2.user_id
+    AND t2.timestamp > t1.timestamp
+    AND t2.timestamp < t1.timestamp + INTERVAL '4 hours'
+  WHERE velocity_kmh > 800;  -- Impossible velocity threshold
+  ```
+
+- **CTE for Multi-Hop Account Graph (Mule Pattern):**
+  ```sql
+  WITH RECURSIVE device_network AS (
+    -- Base: Start with suspicious device
+    SELECT device_hash, user_id, 1 AS hop
+    FROM device_fingerprints df
+    JOIN sessions s ON df.hash = s.device_hash
+    WHERE df.hash = :suspicious_device
+
+    UNION ALL
+
+    -- Recursive: Find connected devices through shared users
+    SELECT s2.device_hash, s2.user_id, dn.hop + 1
+    FROM device_network dn
+    JOIN sessions s1 ON dn.user_id = s1.user_id
+    JOIN sessions s2 ON s1.device_hash = s2.device_hash
+    WHERE dn.hop < 3  -- Max 3 hops
+  )
+  SELECT device_hash, COUNT(DISTINCT user_id) AS user_count
+  FROM device_network
+  GROUP BY device_hash
+  HAVING COUNT(DISTINCT user_id) > 5;  -- Mule threshold
+  ```
+
+- **Aggregate Functions for Risk Score Distribution:**
+  ```sql
+  SELECT
+    DATE_TRUNC('hour', timestamp) AS hour,
+    COUNT(*) AS total_requests,
+    AVG(score) AS avg_score,
+    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY score) AS p95_score,
+    SUM(CASE WHEN score >= 75 THEN 1 ELSE 0 END) AS high_risk_count,
+    COUNT(*) FILTER (WHERE factors @> '[{"name": "impossible_travel"}]') AS travel_anomalies
+  FROM risk_scores
+  WHERE timestamp > NOW() - INTERVAL '24 hours'
+  GROUP BY DATE_TRUNC('hour', timestamp)
+  HAVING SUM(CASE WHEN score >= 75 THEN 1 ELSE 0 END) > 10;
+  ```
+
+- **Semi-Join for IP Reputation Check:**
+  ```sql
+  -- Find risky requests from known bad IPs
+  SELECT rs.*
+  FROM risk_scores rs
+  WHERE EXISTS (
+    SELECT 1 FROM ip_reputation ir
+    WHERE ir.ip = rs.ip
+      AND ir.reputation = 'malicious'
+      AND ir.last_seen > NOW() - INTERVAL '7 days'
+  );
+
+  -- Anti-join: Find unscored sessions (gaps in coverage)
+  SELECT s.id, s.user_id, s.created_at
+  FROM sessions s
+  WHERE NOT EXISTS (
+    SELECT 1 FROM risk_scores rs
+    WHERE rs.session_id = s.id
+  )
+  AND s.created_at > NOW() - INTERVAL '1 hour';
+  ```
+
+- **Materialized View for Hot Risk Signals:**
+  ```sql
+  CREATE MATERIALIZED VIEW hourly_risk_summary AS
+  SELECT
+    DATE_TRUNC('hour', timestamp) AS hour,
+    user_id,
+    COUNT(*) AS request_count,
+    AVG(score) AS avg_score,
+    MAX(score) AS max_score,
+    array_agg(DISTINCT factors->>'name') AS triggered_detectors
+  FROM risk_scores, jsonb_array_elements(factors) AS factors
+  WHERE timestamp > NOW() - INTERVAL '24 hours'
+  GROUP BY DATE_TRUNC('hour', timestamp), user_id
+  WITH DATA;
+
+  CREATE INDEX ON hourly_risk_summary (hour, max_score DESC);
+  REFRESH MATERIALIZED VIEW CONCURRENTLY hourly_risk_summary;
+  ```
+
+**Database Design:**
+
+- **Partitioning:** `risk_scores` partitioned by week for efficient pruning; use `pg_partman` for automation
+- **JSONB Indexes:** GIN index on `factors` for detector-based queries
+- **Probabilistic Data Structures:**
+  - Count-Min Sketch for IP velocity estimates (false positive rate < 1%)
+  - Bloom filter for nonce replay detection (10M items, 0.1% FP)
+- **Star Schema for Analytics:** Dimension tables for `users`, `devices`, `locations`; fact table for `risk_scores`
+
+---
+
+**SQL Indexing Enhancements (from "Use The Index, Luke"):**
+
+**Anti-Join for Orphaned Token Detection (Fraud Signal):**
+
+```sql
+-- WHY THIS MATTERS: Orphaned tokens (tokens without valid sessions) may indicate
+-- session hijacking or credential theft. Anti-join efficiently finds these anomalies.
+
+-- Anti-join: Find tokens without valid sessions
+SELECT t.id, t.user_id, t.created_at
+FROM refresh_tokens t
+WHERE NOT EXISTS (
+    SELECT 1 FROM sessions s
+    WHERE s.id = t.session_id
+      AND s.status = 'active'
+);
+-- Orphaned tokens are a strong fraud signal
+
+-- Index to support anti-join:
+CREATE INDEX idx_tokens_session ON refresh_tokens (session_id);
+CREATE INDEX idx_sessions_active ON sessions (id) WHERE status = 'active';
+
+-- EXPLAIN should show:
+-- "Nested Loop Anti Join" with "Index Scan" on both tables
+-- NOT: "Hash Anti Join" with sequential scans
+```
+
+**Window Function for Token Refresh Velocity (Fraud Indicator):**
+
+```sql
+-- WHY THIS MATTERS: Abnormal token refresh rate indicates credential abuse.
+-- Normal users refresh tokens occasionally; attackers refresh rapidly.
+
+SELECT user_id, token_id, refreshed_at,
+       COUNT(*) OVER (
+         PARTITION BY user_id
+         ORDER BY refreshed_at
+         RANGE BETWEEN INTERVAL '5 minutes' PRECEDING AND CURRENT ROW
+       ) AS refreshes_last_5min,
+       COUNT(*) OVER (
+         PARTITION BY user_id
+         ORDER BY refreshed_at
+         RANGE BETWEEN INTERVAL '1 hour' PRECEDING AND CURRENT ROW
+       ) AS refreshes_last_hour
+FROM token_refresh_log
+WHERE refreshes_last_5min > 10;  -- Velocity threshold
+
+-- Index for token velocity queries:
+CREATE INDEX idx_token_refresh_user_time ON token_refresh_log (user_id, refreshed_at);
+
+-- High velocity (>10 refreshes in 5 min) → high fraud probability
+-- Combined with IP change → very high fraud probability
+```
+
+**NULL Handling for Revocation Timestamps:**
+
+```sql
+-- WHY THIS MATTERS: revoked_at IS NULL indicates active tokens.
+-- Standard B-Tree indexes don't efficiently handle NULL IS NULL queries.
+-- Use partial indexes for active/revoked token filtering.
+
+-- Partial index for active (unrevoked) tokens:
+CREATE INDEX idx_tokens_active ON refresh_tokens (user_id, token_hash)
+  WHERE revoked_at IS NULL;
+
+-- Query for active tokens (uses partial index):
+SELECT * FROM refresh_tokens
+WHERE user_id = :uid AND revoked_at IS NULL;
+
+-- Partial index for revoked tokens (fraud investigation):
+CREATE INDEX idx_tokens_revoked ON refresh_tokens (user_id, revoked_at)
+  WHERE revoked_at IS NOT NULL;
+
+-- Query for recently revoked tokens:
+SELECT * FROM refresh_tokens
+WHERE user_id = :uid
+  AND revoked_at IS NOT NULL
+  AND revoked_at > NOW() - INTERVAL '7 days';
+
+-- EXPLAIN should show: "Index Scan" on partial index
+-- Index size: Active index much smaller than full index
+```
+
+**Hash Join for IP Reputation Lookup:**
+
+```sql
+-- WHY THIS MATTERS: IP reputation checks compare risk_scores against ip_reputation.
+-- Hash Join is efficient when ip_reputation table fits in memory.
+
+-- Enable hash join for reputation lookup:
+EXPLAIN ANALYZE
+SELECT rs.*, ir.reputation, ir.threat_type
+FROM risk_scores rs
+JOIN ip_reputation ir ON rs.ip = ir.ip
+WHERE rs.timestamp > NOW() - INTERVAL '1 hour'
+  AND ir.reputation = 'malicious';
+
+-- PostgreSQL chooses Hash Join when:
+-- 1. Inner table (ip_reputation) fits in work_mem
+-- 2. No usable index on join column
+-- 3. Large result expected
+
+-- For small ip_reputation with index, Nested Loop is fine:
+CREATE INDEX idx_ip_reputation ON ip_reputation (ip) WHERE reputation = 'malicious';
+-- This enables Nested Loop with index scan on reputation check
+```
+
+---
+
+**Acceptance Criteria (SQL):**
+- [ ] Velocity detection uses window functions with sliding ranges
+- [ ] Impossible travel detection uses self-joins with distance calculations
+- [ ] Account graphing uses recursive CTEs with hop limits
+- [ ] Risk distribution uses aggregates with PERCENTILE_CONT
+- [ ] IP reputation uses semi-joins (EXISTS) for efficient filtering
+- [ ] Materialized views pre-aggregate hot signals with scheduled refresh
+- [ ] All queries validated with `EXPLAIN ANALYZE` showing <50ms execution
+- [ ] **NEW:** Orphaned token detection uses anti-join with appropriate indexes
+- [ ] **NEW:** Token refresh velocity uses window functions with RANGE clause
+- [ ] **NEW:** Active/revoked tokens use partial indexes for NULL handling
+- [ ] **NEW:** IP reputation lookup uses appropriate join strategy (Hash/Nested Loop)
+
 ---
 
 ## 5. Observability Requirements
@@ -1113,16 +1364,11 @@ fraud_risk_scoring_duration_seconds
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                                 |
-| ------- | ---------- | ------------ | ----------------------------------------------------------------------- |
-| 1.0     | 2025-12-12 | Product Team | Initial skeletal PRD                                                    |
-| 2.0     | 2025-12-12 | Engineering  | Comprehensive expansion with rule-based fraud detection (9 features)   |
-|         |            |              | - Continuous session risk scoring                                       |
-|         |            |              | - Impossible travel with ISP/ASN awareness                              |
-|         |            |              | - Bot detection (good/bad lists, tarpitting, WebAuthn)                  |
-|         |            |              | - Payload anomaly detection (entropy, replay, headers, clock skew)      |
-|         |            |              | - Device consistency checks (no full fingerprinting)                    |
-|         |            |              | - Simple account graphing (shared IP/device detection)                  |
-|         |            |              | - Privacy guardrails (retention, regional routing, consent)             |
-|         |            |              | Updated dependencies to remove PRD-007B (ML-based, separate concern)    |
-| 2.1     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (Count-Min/Bloom velocity checks, materialized views with EXPLAIN) |
+| Version | Date       | Author       | Changes                                                                                                           |
+| ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| 2.3     | 2025-12-21 | Engineering  | Enhanced TR-6: Added anti-joins for orphaned tokens, token velocity, NULL handling, hash joins                    |
+| 2.2     | 2025-12-21 | Engineering  | Added TR-6: SQL Query Patterns (window functions, self-joins, recursive CTEs, aggregates, semi/anti-joins, star schema) |
+| 2.1     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (Count-Min/Bloom velocity checks, materialized views with EXPLAIN)                    |
+| 2.0     | 2025-12-12 | Engineering  | Comprehensive expansion with rule-based fraud detection (9 features): continuous risk scoring, impossible travel, |
+|         |            |              | bot detection, payload anomaly, device consistency, account graphing, privacy guardrails                         |
+| 1.0     | 2025-12-12 | Product Team | Initial skeletal PRD                                                                                              |

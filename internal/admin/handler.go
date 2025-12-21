@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"credo/internal/platform/middleware"
-	"credo/internal/transport/httputil"
+	request "credo/pkg/platform/middleware/request"
+	"credo/pkg/platform/httputil"
 )
 
 // Handler handles admin monitoring and stats endpoints
@@ -36,7 +36,7 @@ func (h *Handler) Register(r chi.Router) {
 // HandleGetStats returns overall system statistics
 func (h *Handler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	stats, err := h.service.GetStats(ctx)
 	if err != nil {
@@ -59,7 +59,7 @@ func (h *Handler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 // HandleGetAllUsers returns all users with session information
 func (h *Handler) HandleGetAllUsers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	users, err := h.service.GetAllUsers(ctx)
 	if err != nil {
@@ -77,16 +77,13 @@ func (h *Handler) HandleGetAllUsers(w http.ResponseWriter, r *http.Request) {
 		"count", len(users),
 	)
 
-	httputil.WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"users": users,
-		"total": len(users),
-	})
+	httputil.WriteJSON(w, http.StatusOK, toUsersListResponse(users))
 }
 
 // HandleGetRecentAuditEvents returns recent audit events
 func (h *Handler) HandleGetRecentAuditEvents(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	// Parse limit from query parameter, default to 50
 	limit := 50
@@ -116,4 +113,29 @@ func (h *Handler) HandleGetRecentAuditEvents(w http.ResponseWriter, r *http.Requ
 		"events": events,
 		"total":  len(events),
 	})
+}
+
+// Response mapping functions - convert domain objects to HTTP DTOs
+
+func toUsersListResponse(users []*UserInfo) *UsersListResponse {
+	responses := make([]*UserInfoResponse, len(users))
+	for i, u := range users {
+		responses[i] = toUserInfoResponse(u)
+	}
+	return &UsersListResponse{
+		Users: responses,
+		Total: len(responses),
+	}
+}
+
+func toUserInfoResponse(u *UserInfo) *UserInfoResponse {
+	return &UserInfoResponse{
+		ID:           u.ID.String(),
+		Email:        u.Email,
+		FirstName:    u.FirstName,
+		LastName:     u.LastName,
+		SessionCount: u.SessionCount,
+		LastActive:   u.LastActive,
+		Verified:     u.Verified,
+	}
 }

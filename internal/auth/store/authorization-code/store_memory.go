@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"credo/internal/auth/models"
-	"credo/internal/sentinel"
+	"credo/pkg/platform/sentinel"
 )
 
 // ErrNotFound is returned when a requested record is not found in the store.
@@ -71,7 +71,7 @@ func (s *InMemoryAuthorizationCodeStore) ConsumeAuthCode(_ context.Context, code
 		return nil, fmt.Errorf("authorization code not found: %w", ErrNotFound)
 	}
 	if record.RedirectURI != redirectURI {
-		return record, fmt.Errorf("redirect_uri mismatch: %w", sentinel.ErrInvalidInput)
+		return record, fmt.Errorf("redirect_uri mismatch: %w", sentinel.ErrInvalidState)
 	}
 	if now.After(record.ExpiresAt) {
 		return record, fmt.Errorf("authorization code expired: %w", ErrAuthCodeExpired)

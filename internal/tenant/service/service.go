@@ -9,15 +9,15 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
-	"credo/internal/platform/metrics"
-	"credo/internal/platform/middleware"
-	"credo/internal/sentinel"
+	"credo/pkg/platform/audit"
+	request "credo/pkg/platform/middleware/request"
 	"credo/internal/tenant/models"
-	"credo/pkg/attrs"
+	"credo/internal/tenant/secrets"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/secrets"
+	"credo/pkg/platform/attrs"
+	"credo/pkg/platform/metrics"
+	"credo/pkg/platform/sentinel"
 )
 
 type TenantStore interface {
@@ -74,7 +74,6 @@ func WithMetrics(m *metrics.Metrics) Option {
 	}
 }
 
-// New constructs a Service.
 func New(tenants TenantStore, clients ClientStore, users UserCounter, opts ...Option) *Service {
 	s := &Service{tenants: tenants, clients: clients, userCounter: users}
 	for _, opt := range opts {
@@ -145,7 +144,12 @@ func (s *Service) CreateClient(ctx context.Context, req *models.CreateClientRequ
 		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid client request")
 	}
 
-	if _, err := s.tenants.FindByID(ctx, req.TenantID); err != nil {
+	tenantID, err := id.ParseTenantID(req.TenantID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if _, err := s.tenants.FindByID(ctx, tenantID); err != nil {
 		return nil, "", wrapTenantErr(err, "failed to load tenant")
 	}
 
@@ -156,7 +160,7 @@ func (s *Service) CreateClient(ctx context.Context, req *models.CreateClientRequ
 
 	client, err := models.NewClient(
 		id.ClientID(uuid.New()),
-		req.TenantID,
+		tenantID,
 		req.Name,
 		uuid.NewString(),
 		secretHash,
@@ -306,7 +310,7 @@ func (s *Service) ResolveClient(ctx context.Context, clientID string) (*models.C
 
 func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
 	// Add request_id from context if available
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
 	args := append(attributes, "event", event, "log_type", "audit")

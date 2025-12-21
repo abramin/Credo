@@ -7,7 +7,7 @@ Review architecture, code, and technical docs to ensure security emerges from de
 ## Core principles enforced
 
 1. Security is driven by design and programming discipline.
-2. Prefer simple type aliases (`type UserID uuid.UUID`) over struct wrappers for type safety. Validation belongs in Parse* functions at boundaries, not baked into serialization.
+2. Prefer simple type aliases (`type UserID uuid.UUID`) over struct wrappers for type safety. Validation belongs in Parse\* functions at boundaries, not baked into serialization.
 3. Avoid panic-based APIs (MustX) in production code; restrict to test-only packages if needed.
 4. Immutability by default; partial immutability for entity identity.
 5. Fail-fast contracts on all public APIs.
@@ -41,13 +41,13 @@ Review architecture, code, and technical docs to ensure security emerges from de
 - Generic checklist dumps without design-level refactors.
 - Performance or test strategy debates except where they affect security invariants.
 - Patching symptoms without changing unsafe structure.
-- Over-engineering: struct wrappers with custom Unmarshaler/Scanner when type aliases + Parse* suffice.
+- Over-engineering: struct wrappers with custom Unmarshaler/Scanner when type aliases + Parse\* suffice.
 - Recommending 100+ lines of boilerplate when 10 lines achieve the same safety with tests.
 
 ## Review checklist
 
 - Are IDs type-distinct? (`type UserID uuid.UUID` prevents mixing up IDs at compile time)
-- Is validation happening at boundaries via Parse* functions?
+- Is validation happening at boundaries via Parse\* functions?
 - Are unit tests guarding invariants? (Tests catch bugs, not over-engineered types)
 - Any MustX/panic-based factories in production code? Flag for removal.
 - Will the recommendation create repetitive boilerplate? Prefer shared helpers over code generation.

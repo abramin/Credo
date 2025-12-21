@@ -12,17 +12,17 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	"credo/internal/auth/device"
 	"credo/internal/auth/models"
 	"credo/internal/auth/store/revocation"
 	sessionStore "credo/internal/auth/store/session"
-	"credo/internal/platform/metrics"
-	"credo/internal/platform/middleware"
-	"credo/internal/sentinel"
-	"credo/pkg/attrs"
+	request "credo/pkg/platform/middleware/request"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/attrs"
+	"credo/pkg/platform/metrics"
+	"credo/pkg/platform/sentinel"
 )
 
 type Service struct {
@@ -263,7 +263,7 @@ func New(
 
 func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
 	// Add request_id from context if available
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
 	args := append(attributes, "event", event, "log_type", "audit")
@@ -292,7 +292,7 @@ func (s *Service) authFailure(ctx context.Context, reason string, isError bool, 
 
 func (s *Service) logAuthFailure(ctx context.Context, reason string, isError bool, attributes ...any) {
 	// Add request_id from context if available
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
 	args := append(attributes, "event", audit.EventAuthFailed, "reason", reason, "log_type", "standard")
@@ -347,14 +347,13 @@ type tokenErrorMapping struct {
 
 // tokenErrorMappings defines error translations in priority order.
 // First match wins; more specific errors should come first.
+// Note: Domain-errors from validation are passed through directly (see handleTokenError).
 var tokenErrorMappings = []tokenErrorMapping{
 	{sentinel.ErrNotFound, dErrors.CodeInvalidGrant, "invalid authorization code", "invalid refresh token", "not_found"},
 	{sentinel.ErrExpired, dErrors.CodeInvalidGrant, "authorization code expired", "refresh token expired", "expired"},
 	{sentinel.ErrAlreadyUsed, dErrors.CodeInvalidGrant, "authorization code already used", "invalid refresh token", "already_used"},
 	{sessionStore.ErrSessionRevoked, dErrors.CodeInvalidGrant, "session has been revoked", "session has been revoked", "session_revoked"},
 	{sentinel.ErrInvalidState, dErrors.CodeInvalidGrant, "session not active", "session not active", "invalid_state"},
-	{sentinel.ErrInvalidInput, dErrors.CodeInvalidGrant, "", "", "invalid_input"},
-	{sentinel.ErrBadRequest, dErrors.CodeBadRequest, "", "", "bad_request"},
 }
 
 // handleTokenError translates dependency errors into domain errors.

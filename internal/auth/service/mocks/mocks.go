@@ -11,7 +11,7 @@ package mocks
 
 import (
 	context "context"
-	audit "credo/internal/audit"
+	audit "credo/pkg/platform/audit"
 	models "credo/internal/auth/models"
 	jwttoken "credo/internal/jwt_token"
 	models0 "credo/internal/tenant/models"

@@ -1,8 +1,10 @@
-package middleware
+package admin
 
 import (
 	"log/slog"
 	"net/http"
+
+	request "credo/pkg/platform/middleware/request"
 )
 
 func RequireAdminToken(expectedToken string, logger *slog.Logger) func(http.Handler) http.Handler {
@@ -11,7 +13,7 @@ func RequireAdminToken(expectedToken string, logger *slog.Logger) func(http.Hand
 			token := r.Header.Get("X-Admin-Token")
 			if token != expectedToken {
 				ctx := r.Context()
-				requestID := GetRequestID(ctx)
+				requestID := request.GetRequestID(ctx)
 				logger.WarnContext(ctx, "admin token mismatch",
 					"request_id", requestID,
 				)

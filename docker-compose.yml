@@ -65,8 +65,9 @@ services:
     container_name: credo-backend
     ports:
       - "8080:8080"
-      - "8090:8090"  # Admin server port
+      - "8090:8090" # Admin server port
     environment:
+      - CREDO_ENV=${CREDO_ENV:-local}
       - ADDR=:8080
       - REGULATED_MODE=true
       - LOG_LEVEL=info

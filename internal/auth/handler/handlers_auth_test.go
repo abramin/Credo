@@ -21,7 +21,7 @@ import (
 
 	"credo/internal/auth/handler/mocks"
 	"credo/internal/auth/models"
-	"credo/internal/platform/middleware"
+	authmw "credo/pkg/platform/middleware/auth"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 )
@@ -271,7 +271,7 @@ func (s *AuthHandlerSuite) doUserInfoRequest(t *testing.T, router *chi.Mux, sess
 	// Inject session ID into context (simulating what the auth middleware would do)
 	if sessionID != "" {
 		ctx := httpReq.Context()
-		ctx = context.WithValue(ctx, middleware.ContextKeySessionID, sessionID)
+		ctx = context.WithValue(ctx, authmw.ContextKeySessionID, sessionID)
 		httpReq = httpReq.WithContext(ctx)
 	}
 
@@ -298,10 +298,10 @@ func (s *AuthHandlerSuite) doListSessionsRequest(t *testing.T, router *chi.Mux, 
 
 	ctx := httpReq.Context()
 	if userID != "" {
-		ctx = context.WithValue(ctx, middleware.ContextKeyUserID, userID)
+		ctx = context.WithValue(ctx, authmw.ContextKeyUserID, userID)
 	}
 	if sessionID != "" {
-		ctx = context.WithValue(ctx, middleware.ContextKeySessionID, sessionID)
+		ctx = context.WithValue(ctx, authmw.ContextKeySessionID, sessionID)
 	}
 	httpReq = httpReq.WithContext(ctx)
 
@@ -328,7 +328,7 @@ func (s *AuthHandlerSuite) doRevokeSessionRequest(t *testing.T, router *chi.Mux,
 
 	ctx := httpReq.Context()
 	if userID != "" {
-		ctx = context.WithValue(ctx, middleware.ContextKeyUserID, userID)
+		ctx = context.WithValue(ctx, authmw.ContextKeyUserID, userID)
 	}
 	httpReq = httpReq.WithContext(ctx)
 
