@@ -11,6 +11,7 @@ import (
 	"credo/pkg/platform/metrics"
 	metadata "credo/pkg/platform/middleware/metadata"
 	"credo/pkg/platform/privacy"
+	metadata "credo/pkg/platform/middleware/metadata"
 
 	"github.com/google/uuid"
 )
