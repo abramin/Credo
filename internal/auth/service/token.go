@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"errors"
-	"strings"
 
 	"credo/internal/auth/models"
-	"credo/internal/sentinel"
 	tenant "credo/internal/tenant/models"
 	dErrors "credo/pkg/domain-errors"
 )
@@ -18,14 +15,8 @@ func (s *Service) Token(ctx context.Context, req *models.TokenRequest) (*models.
 
 	req.Normalize()
 	if err := req.Validate(); err != nil {
-		code := dErrors.CodeValidation
-		if errors.Is(err, sentinel.ErrBadRequest) {
-			code = dErrors.CodeBadRequest
-		}
-		// Extract just the context message without the sentinel
-		msg := strings.TrimSuffix(err.Error(), ": "+sentinel.ErrInvalidInput.Error())
-		msg = strings.TrimSuffix(msg, ": "+sentinel.ErrBadRequest.Error())
-		return nil, dErrors.New(code, msg)
+		// Validate now returns domain-errors directly
+		return nil, err
 	}
 
 	switch req.GrantType {

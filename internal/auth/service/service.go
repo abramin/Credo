@@ -347,14 +347,13 @@ type tokenErrorMapping struct {
 
 // tokenErrorMappings defines error translations in priority order.
 // First match wins; more specific errors should come first.
+// Note: Domain-errors from validation are passed through directly (see handleTokenError).
 var tokenErrorMappings = []tokenErrorMapping{
 	{sentinel.ErrNotFound, dErrors.CodeInvalidGrant, "invalid authorization code", "invalid refresh token", "not_found"},
 	{sentinel.ErrExpired, dErrors.CodeInvalidGrant, "authorization code expired", "refresh token expired", "expired"},
 	{sentinel.ErrAlreadyUsed, dErrors.CodeInvalidGrant, "authorization code already used", "invalid refresh token", "already_used"},
 	{sessionStore.ErrSessionRevoked, dErrors.CodeInvalidGrant, "session has been revoked", "session has been revoked", "session_revoked"},
 	{sentinel.ErrInvalidState, dErrors.CodeInvalidGrant, "session not active", "session not active", "invalid_state"},
-	{sentinel.ErrInvalidInput, dErrors.CodeInvalidGrant, "", "", "invalid_input"},
-	{sentinel.ErrBadRequest, dErrors.CodeBadRequest, "", "", "bad_request"},
 }
 
 // handleTokenError translates dependency errors into domain errors.

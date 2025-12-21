@@ -74,7 +74,6 @@ func WithMetrics(m *metrics.Metrics) Option {
 	}
 }
 
-// New constructs a Service.
 func New(tenants TenantStore, clients ClientStore, users UserCounter, opts ...Option) *Service {
 	s := &Service{tenants: tenants, clients: clients, userCounter: users}
 	for _, opt := range opts {

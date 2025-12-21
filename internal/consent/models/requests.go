@@ -1,9 +1,7 @@
 package models
 
 import (
-	"fmt"
-
-	"credo/internal/sentinel"
+	dErrors "credo/pkg/domain-errors"
 )
 
 // GrantRequest specifies which purposes to grant consent for.
@@ -23,14 +21,14 @@ func (r *GrantRequest) Normalize() {
 // Validate checks that the request is well-formed.
 func (r *GrantRequest) Validate() error {
 	if r == nil {
-		return fmt.Errorf("request is required: %w", sentinel.ErrBadRequest)
+		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 	if len(r.Purposes) == 0 {
-		return fmt.Errorf("purposes are required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "purposes are required")
 	}
 	for _, p := range r.Purposes {
 		if !p.IsValid() {
-			return fmt.Errorf("invalid purpose %q: %w", p, sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+string(p))
 		}
 	}
 	return nil
@@ -53,14 +51,14 @@ func (r *RevokeRequest) Normalize() {
 // Validate checks that the request is well-formed.
 func (r *RevokeRequest) Validate() error {
 	if r == nil {
-		return fmt.Errorf("request is required: %w", sentinel.ErrBadRequest)
+		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 	if len(r.Purposes) == 0 {
-		return fmt.Errorf("purposes are required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "purposes are required")
 	}
 	for _, p := range r.Purposes {
 		if !p.IsValid() {
-			return fmt.Errorf("invalid purpose %q: %w", p, sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+string(p))
 		}
 	}
 	return nil

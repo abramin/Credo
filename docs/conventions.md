@@ -145,6 +145,70 @@ Every unit test should answer:
 
 ---
 
+## Error handling
+
+Credo uses two error packages with clear boundaries:
+
+### Sentinel errors (`internal/sentinel`)
+
+**Purpose:** Infrastructure facts returned by stores (persistence layer only).
+
+**Errors:**
+- `ErrNotFound` – entity does not exist in store
+- `ErrExpired` – token/session/code has expired
+- `ErrAlreadyUsed` – resource (auth code, refresh token) already consumed
+- `ErrInvalidState` – entity in wrong state for requested operation
+- `ErrUnavailable` – service or resource temporarily unavailable
+
+**Usage:**
+```go
+// In stores
+return nil, fmt.Errorf("session not found: %w", sentinel.ErrNotFound)
+
+// In services (check and translate)
+if errors.Is(err, sentinel.ErrNotFound) {
+    return dErrors.New(dErrors.CodeNotFound, "session not found")
+}
+```
+
+### Domain errors (`pkg/domain-errors`)
+
+**Purpose:** Business-meaningful errors for services, models, and handlers.
+
+**Usage:**
+- Validation in models returns domain-errors directly
+- Services translate sentinel errors to domain-errors at their boundary
+- Handlers receive domain-errors and map to HTTP responses
+
+```go
+// In models (validation)
+return dErrors.New(dErrors.CodeValidation, "email is required")
+
+// In services (translation)
+if errors.Is(err, sentinel.ErrExpired) {
+    return dErrors.New(dErrors.CodeInvalidGrant, "token expired")
+}
+
+// Domain errors pass through unchanged
+var de *dErrors.Error
+if errors.As(err, &de) {
+    return err
+}
+```
+
+### The boundary rule
+
+| Layer | Error Package | Examples |
+|-------|---------------|----------|
+| Stores (persistence layer) | `sentinel` | `ErrNotFound`, `ErrExpired` |
+| Models, services, handlers, JWT | `domain-errors` | `CodeValidation`, `CodeInvalidGrant` |
+
+**Key principle:** Sentinel errors represent infrastructure facts from stores. Domain-errors represent business meaning. Services translate sentinel errors at the boundary.
+
+**Note:** Domain packages that perform validation or business logic (like `jwt_token`, `secrets`) use domain-errors directly. Only pure persistence stores use sentinel.
+
+---
+
 ## Mocks and interfaces
 
 - Interfaces live next to their consumers.

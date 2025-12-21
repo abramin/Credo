@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"credo/internal/sentinel"
+	dErrors "credo/pkg/domain-errors"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -72,7 +72,7 @@ func (s *JWTService) ExtractTenantFromIssuer(issuer string) (string, error) {
 	if issuer == s.issuerBaseURL {
 		return "", nil
 	}
-	return "", fmt.Errorf("invalid issuer format: %w", sentinel.ErrInvalidInput)
+	return "", dErrors.New(dErrors.CodeInvalidInput, "invalid issuer format")
 }
 
 func (s *JWTService) GenerateAccessTokenWithJTI(
@@ -95,7 +95,7 @@ func (s *JWTService) GenerateAccessTokenWithJTI(
 	}
 	claims, ok := parsed.Claims.(*AccessTokenClaims)
 	if !ok {
-		return "", "", fmt.Errorf("invalid token claims: %w", sentinel.ErrInvalidInput)
+		return "", "", dErrors.New(dErrors.CodeInvalidInput, "invalid token claims")
 	}
 	return newToken, claims.ID, nil
 }
@@ -139,14 +139,14 @@ func (s *JWTService) GenerateAccessToken(
 
 func (s *JWTService) ParseTokenSkipClaimsValidation(tokenString string) (*AccessTokenClaims, error) {
 	if tokenString == "" {
-		return nil, fmt.Errorf("empty token: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "empty token")
 	}
 
 	claims := new(AccessTokenClaims)
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, fmt.Errorf("unexpected signing algorithm: %w", sentinel.ErrInvalidInput)
+			return nil, dErrors.New(dErrors.CodeInvalidInput, "unexpected signing algorithm")
 		}
 		return s.signingKey, nil
 	},
@@ -154,13 +154,13 @@ func (s *JWTService) ParseTokenSkipClaimsValidation(tokenString string) (*Access
 	)
 	if err != nil {
 		if errors.Is(err, jwt.ErrSignatureInvalid) {
-			return nil, fmt.Errorf("invalid jwt signature: %w", sentinel.ErrInvalidInput)
+			return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid jwt signature")
 		}
-		return nil, fmt.Errorf("jwt parse failed: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "jwt parse failed")
 	}
 
 	if !token.Valid {
-		return nil, fmt.Errorf("invalid jwt signature: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid jwt signature")
 	}
 
 	return claims, nil
@@ -208,18 +208,18 @@ func (s *JWTService) ValidateToken(tokenString string) (*AccessTokenClaims, erro
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return nil, fmt.Errorf("token has expired: %w", sentinel.ErrExpired)
+			return nil, dErrors.New(dErrors.CodeInvalidGrant, "token expired")
 		}
-		return nil, fmt.Errorf("invalid token: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token")
 	}
 
 	if !parsed.Valid {
-		return nil, fmt.Errorf("invalid token: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token")
 	}
 
 	claims, ok := parsed.Claims.(*AccessTokenClaims)
 	if !ok {
-		return nil, fmt.Errorf("invalid token claims: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token claims")
 	}
 
 	return claims, nil
@@ -235,18 +235,18 @@ func (s *JWTService) ValidateIDToken(tokenString string) (*IDTokenClaims, error)
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return nil, fmt.Errorf("token has expired: %w", sentinel.ErrExpired)
+			return nil, dErrors.New(dErrors.CodeInvalidGrant, "token expired")
 		}
-		return nil, fmt.Errorf("invalid token: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token")
 	}
 
 	if !parsed.Valid {
-		return nil, fmt.Errorf("invalid token: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token")
 	}
 
 	claims, ok := parsed.Claims.(*IDTokenClaims)
 	if !ok {
-		return nil, fmt.Errorf("invalid token claims: %w", sentinel.ErrInvalidInput)
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token claims")
 	}
 
 	return claims, nil
