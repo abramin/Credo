@@ -877,6 +877,142 @@ func RiskScoringMiddleware(engine RiskEngine) func(http.Handler) http.Handler {
 }
 ```
 
+### TR-6: SQL Query Patterns for Fraud Analytics
+
+**Objective:** Demonstrate intermediate-to-advanced SQL capabilities for fraud detection and security intelligence.
+
+**Query Patterns Required:**
+
+- **Window Functions for Velocity Detection:** Use sliding windows to detect request bursts:
+  ```sql
+  SELECT user_id, session_id, timestamp,
+         COUNT(*) OVER (
+           PARTITION BY user_id
+           ORDER BY timestamp
+           RANGE BETWEEN INTERVAL '10 minutes' PRECEDING AND CURRENT ROW
+         ) AS requests_last_10min,
+         LAG(timestamp) OVER (PARTITION BY user_id ORDER BY timestamp) AS prev_request,
+         timestamp - LAG(timestamp) OVER (PARTITION BY user_id ORDER BY timestamp) AS time_gap
+  FROM risk_scores
+  WHERE timestamp > NOW() - INTERVAL '1 hour'
+  HAVING COUNT(*) OVER (...) > 50;  -- Velocity threshold
+  ```
+
+- **Self-Join for Impossible Travel Detection:**
+  ```sql
+  SELECT t1.user_id, t1.id AS trip1_id, t2.id AS trip2_id,
+         t1.to_location->>'city' AS from_city,
+         t2.to_location->>'city' AS to_city,
+         ST_Distance(
+           ST_Point(t1.to_location->>'lon', t1.to_location->>'lat'),
+           ST_Point(t2.to_location->>'lon', t2.to_location->>'lat')
+         ) / EXTRACT(EPOCH FROM (t2.timestamp - t1.timestamp)) * 3.6 AS velocity_kmh
+  FROM travel_events t1
+  JOIN travel_events t2
+    ON t1.user_id = t2.user_id
+    AND t2.timestamp > t1.timestamp
+    AND t2.timestamp < t1.timestamp + INTERVAL '4 hours'
+  WHERE velocity_kmh > 800;  -- Impossible velocity threshold
+  ```
+
+- **CTE for Multi-Hop Account Graph (Mule Pattern):**
+  ```sql
+  WITH RECURSIVE device_network AS (
+    -- Base: Start with suspicious device
+    SELECT device_hash, user_id, 1 AS hop
+    FROM device_fingerprints df
+    JOIN sessions s ON df.hash = s.device_hash
+    WHERE df.hash = :suspicious_device
+
+    UNION ALL
+
+    -- Recursive: Find connected devices through shared users
+    SELECT s2.device_hash, s2.user_id, dn.hop + 1
+    FROM device_network dn
+    JOIN sessions s1 ON dn.user_id = s1.user_id
+    JOIN sessions s2 ON s1.device_hash = s2.device_hash
+    WHERE dn.hop < 3  -- Max 3 hops
+  )
+  SELECT device_hash, COUNT(DISTINCT user_id) AS user_count
+  FROM device_network
+  GROUP BY device_hash
+  HAVING COUNT(DISTINCT user_id) > 5;  -- Mule threshold
+  ```
+
+- **Aggregate Functions for Risk Score Distribution:**
+  ```sql
+  SELECT
+    DATE_TRUNC('hour', timestamp) AS hour,
+    COUNT(*) AS total_requests,
+    AVG(score) AS avg_score,
+    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY score) AS p95_score,
+    SUM(CASE WHEN score >= 75 THEN 1 ELSE 0 END) AS high_risk_count,
+    COUNT(*) FILTER (WHERE factors @> '[{"name": "impossible_travel"}]') AS travel_anomalies
+  FROM risk_scores
+  WHERE timestamp > NOW() - INTERVAL '24 hours'
+  GROUP BY DATE_TRUNC('hour', timestamp)
+  HAVING SUM(CASE WHEN score >= 75 THEN 1 ELSE 0 END) > 10;
+  ```
+
+- **Semi-Join for IP Reputation Check:**
+  ```sql
+  -- Find risky requests from known bad IPs
+  SELECT rs.*
+  FROM risk_scores rs
+  WHERE EXISTS (
+    SELECT 1 FROM ip_reputation ir
+    WHERE ir.ip = rs.ip
+      AND ir.reputation = 'malicious'
+      AND ir.last_seen > NOW() - INTERVAL '7 days'
+  );
+
+  -- Anti-join: Find unscored sessions (gaps in coverage)
+  SELECT s.id, s.user_id, s.created_at
+  FROM sessions s
+  WHERE NOT EXISTS (
+    SELECT 1 FROM risk_scores rs
+    WHERE rs.session_id = s.id
+  )
+  AND s.created_at > NOW() - INTERVAL '1 hour';
+  ```
+
+- **Materialized View for Hot Risk Signals:**
+  ```sql
+  CREATE MATERIALIZED VIEW hourly_risk_summary AS
+  SELECT
+    DATE_TRUNC('hour', timestamp) AS hour,
+    user_id,
+    COUNT(*) AS request_count,
+    AVG(score) AS avg_score,
+    MAX(score) AS max_score,
+    array_agg(DISTINCT factors->>'name') AS triggered_detectors
+  FROM risk_scores, jsonb_array_elements(factors) AS factors
+  WHERE timestamp > NOW() - INTERVAL '24 hours'
+  GROUP BY DATE_TRUNC('hour', timestamp), user_id
+  WITH DATA;
+
+  CREATE INDEX ON hourly_risk_summary (hour, max_score DESC);
+  REFRESH MATERIALIZED VIEW CONCURRENTLY hourly_risk_summary;
+  ```
+
+**Database Design:**
+
+- **Partitioning:** `risk_scores` partitioned by week for efficient pruning; use `pg_partman` for automation
+- **JSONB Indexes:** GIN index on `factors` for detector-based queries
+- **Probabilistic Data Structures:**
+  - Count-Min Sketch for IP velocity estimates (false positive rate < 1%)
+  - Bloom filter for nonce replay detection (10M items, 0.1% FP)
+- **Star Schema for Analytics:** Dimension tables for `users`, `devices`, `locations`; fact table for `risk_scores`
+
+**Acceptance Criteria (SQL):**
+- [ ] Velocity detection uses window functions with sliding ranges
+- [ ] Impossible travel detection uses self-joins with distance calculations
+- [ ] Account graphing uses recursive CTEs with hop limits
+- [ ] Risk distribution uses aggregates with PERCENTILE_CONT
+- [ ] IP reputation uses semi-joins (EXISTS) for efficient filtering
+- [ ] Materialized views pre-aggregate hot signals with scheduled refresh
+- [ ] All queries validated with `EXPLAIN ANALYZE` showing <50ms execution
+
 ---
 
 ## 5. Observability Requirements
@@ -1113,16 +1249,10 @@ fraud_risk_scoring_duration_seconds
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                                 |
-| ------- | ---------- | ------------ | ----------------------------------------------------------------------- |
-| 1.0     | 2025-12-12 | Product Team | Initial skeletal PRD                                                    |
-| 2.0     | 2025-12-12 | Engineering  | Comprehensive expansion with rule-based fraud detection (9 features)   |
-|         |            |              | - Continuous session risk scoring                                       |
-|         |            |              | - Impossible travel with ISP/ASN awareness                              |
-|         |            |              | - Bot detection (good/bad lists, tarpitting, WebAuthn)                  |
-|         |            |              | - Payload anomaly detection (entropy, replay, headers, clock skew)      |
-|         |            |              | - Device consistency checks (no full fingerprinting)                    |
-|         |            |              | - Simple account graphing (shared IP/device detection)                  |
-|         |            |              | - Privacy guardrails (retention, regional routing, consent)             |
-|         |            |              | Updated dependencies to remove PRD-007B (ML-based, separate concern)    |
-| 2.1     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (Count-Min/Bloom velocity checks, materialized views with EXPLAIN) |
+| Version | Date       | Author       | Changes                                                                                                           |
+| ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| 2.2     | 2025-12-21 | Engineering  | Added TR-6: SQL Query Patterns (window functions, self-joins, recursive CTEs, aggregates, semi/anti-joins, star schema) |
+| 2.1     | 2025-12-18 | Security Eng | Added DSA/SQL requirements (Count-Min/Bloom velocity checks, materialized views with EXPLAIN)                    |
+| 2.0     | 2025-12-12 | Engineering  | Comprehensive expansion with rule-based fraud detection (9 features): continuous risk scoring, impossible travel, |
+|         |            |              | bot detection, payload anomaly, device consistency, account graphing, privacy guardrails                         |
+| 1.0     | 2025-12-12 | Product Team | Initial skeletal PRD                                                                                              |

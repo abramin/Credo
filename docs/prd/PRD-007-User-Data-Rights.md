@@ -215,6 +215,126 @@ func (h *Handler) handleDataDeletion(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### TR-4: SQL Query Patterns for Data Rights
+
+**Objective:** Demonstrate SQL capabilities for GDPR data export and deletion operations.
+
+**Query Patterns Required:**
+
+- **UNION ALL for Comprehensive Data Export:** Aggregate user data from multiple tables:
+  ```sql
+  -- Export all user data in single query with source tracking
+  SELECT 'profile' AS source, id, email, first_name, last_name, NULL AS purpose, created_at
+  FROM users WHERE id = :user_id
+  UNION ALL
+  SELECT 'session' AS source, id, NULL, NULL, NULL, NULL, created_at
+  FROM sessions WHERE user_id = :user_id
+  UNION ALL
+  SELECT 'consent' AS source, id, NULL, NULL, NULL, purpose, granted_at
+  FROM consent_records WHERE user_id = :user_id
+  UNION ALL
+  SELECT 'credential' AS source, id, NULL, NULL, NULL, type, issued_at
+  FROM verifiable_credentials WHERE user_id = :user_id
+  ORDER BY created_at;
+  ```
+
+- **CTE for Cascade Deletion Verification:**
+  ```sql
+  WITH deletion_manifest AS (
+    SELECT 'users' AS table_name, COUNT(*) AS row_count
+    FROM users WHERE id = :user_id
+    UNION ALL
+    SELECT 'sessions', COUNT(*)
+    FROM sessions WHERE user_id = :user_id
+    UNION ALL
+    SELECT 'consent_records', COUNT(*)
+    FROM consent_records WHERE user_id = :user_id
+    UNION ALL
+    SELECT 'verifiable_credentials', COUNT(*)
+    FROM verifiable_credentials WHERE user_id = :user_id
+    UNION ALL
+    SELECT 'registry_cache', COUNT(*)
+    FROM registry_cache WHERE user_id = :user_id
+  )
+  SELECT table_name, row_count
+  FROM deletion_manifest
+  WHERE row_count > 0;
+  ```
+
+- **Transactional Cascade Delete with Foreign Key Awareness:**
+  ```sql
+  BEGIN;
+  -- Delete in correct order respecting foreign key constraints
+  DELETE FROM registry_cache WHERE user_id = :user_id;
+  DELETE FROM verifiable_credentials WHERE user_id = :user_id;
+  DELETE FROM consent_records WHERE user_id = :user_id;
+  DELETE FROM sessions WHERE user_id = :user_id;
+  DELETE FROM users WHERE id = :user_id;
+  COMMIT;
+  ```
+
+- **Pseudonymization with Window Function for Audit Logs:**
+  ```sql
+  -- Pseudonymize while preserving event ordering
+  UPDATE audit_events
+  SET user_id = :pseudonym,
+      pseudonymized_at = NOW()
+  WHERE user_id = :original_user_id
+    AND id IN (
+      SELECT id FROM audit_events
+      WHERE user_id = :original_user_id
+      ORDER BY timestamp
+    );
+  ```
+
+- **Anti-Join to Find Orphaned Records:**
+  ```sql
+  -- Find consent records without valid users (data integrity check)
+  SELECT c.id, c.user_id, c.purpose
+  FROM consent_records c
+  LEFT JOIN users u ON c.user_id = u.id
+  WHERE u.id IS NULL;
+
+  -- Alternative using NOT EXISTS (anti-join pattern)
+  SELECT c.id, c.user_id, c.purpose
+  FROM consent_records c
+  WHERE NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.id = c.user_id
+  );
+  ```
+
+- **Aggregate Export Statistics:**
+  ```sql
+  SELECT
+    COUNT(*) FILTER (WHERE source = 'session') AS session_count,
+    COUNT(*) FILTER (WHERE source = 'consent') AS consent_count,
+    COUNT(*) FILTER (WHERE source = 'credential') AS credential_count,
+    MIN(created_at) AS earliest_record,
+    MAX(created_at) AS latest_record
+  FROM (
+    SELECT 'session' AS source, created_at FROM sessions WHERE user_id = :user_id
+    UNION ALL
+    SELECT 'consent', granted_at FROM consent_records WHERE user_id = :user_id
+    UNION ALL
+    SELECT 'credential', issued_at FROM verifiable_credentials WHERE user_id = :user_id
+  ) combined;
+  ```
+
+**Database Design:**
+
+- **Foreign Key Constraints:** All user-related tables reference `users(id)` with `ON DELETE CASCADE` or `ON DELETE RESTRICT` based on audit requirements
+- **Partial Indexes:** `CREATE INDEX idx_active_consents ON consent_records (user_id) WHERE revoked_at IS NULL;`
+- **Soft Delete Consideration:** For recovery window, use `deleted_at` timestamp instead of hard delete
+- **Referential Integrity Check:** Constraint triggers to verify cascade completion
+
+**Acceptance Criteria (SQL):**
+- [ ] Data export uses UNION ALL to aggregate from all user tables
+- [ ] Deletion manifest uses CTE to count affected rows before deletion
+- [ ] Cascade deletes respect foreign key order or use ON DELETE CASCADE
+- [ ] Audit pseudonymization preserves event ordering with window functions
+- [ ] Orphan detection uses anti-join patterns (LEFT JOIN WHERE NULL or NOT EXISTS)
+- [ ] Export statistics use aggregate functions with FILTER clause
+
 ---
 
 ## 6. Implementation Steps
@@ -376,7 +496,8 @@ curl http://localhost:8080/auth/userinfo -H "Authorization: Bearer $TOKEN"
 
 ## Revision History
 
-| Version | Date       | Author       | Changes     |
-| ------- | ---------- | ------------ | ----------- |
-| 1.0     | 2025-12-03 | Product Team | Initial PRD |
+| Version | Date       | Author       | Changes                                                                                        |
+| ------- | ---------- | ------------ | ---------------------------------------------------------------------------------------------- |
+| 1.2     | 2025-12-21 | Engineering  | Added TR-4: SQL Query Patterns (UNION ALL, CTEs, cascade deletes, anti-joins, FK constraints) |
 | 1.1     | 2025-12-13 | Engineering  | Specify concurrent data-export fan-out, add service-layer orchestration TR, handler stays thin |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                    |

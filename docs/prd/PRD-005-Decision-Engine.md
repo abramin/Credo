@@ -364,6 +364,86 @@ func (h *Handler) handleDecisionEvaluate(w http.ResponseWriter, r *http.Request)
 - Inputs must be value objects (purpose enum, tenant/user IDs, evidence structs stripped of PII). Reject unvalidated maps in service boundaries.
 - Rule persistence uses normalized tables with versioning and immutability constraints; published rules are append-only with `CHECK` constraints for bounds and `EXPLAIN`-verified indexes for lookups.
 
+### TR-7: SQL Query Patterns & Database Design
+
+**Objective:** Demonstrate intermediate-to-advanced SQL capabilities when implementing decision persistence and analytics.
+
+**Query Patterns Required:**
+
+- **CTEs for Rule Chain Resolution:** Use Common Table Expressions to recursively resolve rule dependencies:
+  ```sql
+  WITH RECURSIVE rule_chain AS (
+    SELECT id, parent_id, rule_name, 1 AS depth
+    FROM decision_rules WHERE id = :root_rule_id
+    UNION ALL
+    SELECT r.id, r.parent_id, r.rule_name, rc.depth + 1
+    FROM decision_rules r
+    JOIN rule_chain rc ON r.parent_id = rc.id
+    WHERE rc.depth < 10
+  )
+  SELECT * FROM rule_chain ORDER BY depth;
+  ```
+
+- **Window Functions for Decision Analytics:** Use `RANK()`, `LAG()`, `LEAD()` for decision history analysis:
+  ```sql
+  SELECT user_id, purpose, status,
+         LAG(status) OVER (PARTITION BY user_id, purpose ORDER BY evaluated_at) AS prev_status,
+         RANK() OVER (PARTITION BY purpose ORDER BY evaluated_at DESC) AS recency_rank,
+         COUNT(*) OVER (PARTITION BY user_id, purpose) AS total_decisions
+  FROM decision_history
+  WHERE evaluated_at > NOW() - INTERVAL '30 days';
+  ```
+
+- **CASE Statements for Status Categorization:**
+  ```sql
+  SELECT purpose,
+         COUNT(*) AS total,
+         SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) AS passed,
+         SUM(CASE WHEN status = 'fail' THEN 1 ELSE 0 END) AS failed,
+         SUM(CASE WHEN status = 'pass_with_conditions' THEN 1 ELSE 0 END) AS conditional
+  FROM decision_history
+  GROUP BY purpose
+  HAVING COUNT(*) > 10;
+  ```
+
+- **Correlated Subqueries for Evidence Freshness:**
+  ```sql
+  SELECT d.id, d.user_id, d.evaluated_at,
+         (SELECT MAX(e.fetched_at) FROM evidence_cache e
+          WHERE e.user_id = d.user_id AND e.evidence_type = 'citizen') AS last_citizen_check
+  FROM decision_history d
+  WHERE d.status = 'fail';
+  ```
+
+- **Self-Joins for Decision Comparison:**
+  ```sql
+  SELECT curr.id, curr.user_id, curr.status AS current_status, prev.status AS previous_status
+  FROM decision_history curr
+  LEFT JOIN decision_history prev
+    ON curr.user_id = prev.user_id
+    AND curr.purpose = prev.purpose
+    AND prev.evaluated_at = (
+      SELECT MAX(evaluated_at) FROM decision_history
+      WHERE user_id = curr.user_id AND purpose = curr.purpose AND evaluated_at < curr.evaluated_at
+    )
+  WHERE curr.status != COALESCE(prev.status, curr.status);
+  ```
+
+**Database Design:**
+
+- **Normalized Rule Tables (3NF):** Separate `decision_rules`, `rule_conditions`, `rule_actions` tables with foreign key constraints
+- **Covering Indexes:** Composite indexes on `(user_id, purpose, evaluated_at)` verified via `EXPLAIN ANALYZE`
+- **Partitioning:** Decision history partitioned by month using range partitioning for efficient time-based queries
+- **Foreign Key Constraints:** `ON DELETE RESTRICT` for rule references to prevent orphaned conditions
+
+**Acceptance Criteria (SQL):**
+- [ ] Rule chain resolution uses recursive CTE with depth limit
+- [ ] Decision analytics queries use window functions for trend analysis
+- [ ] Status aggregation uses CASE with GROUP BY/HAVING
+- [ ] Evidence freshness checks use correlated subqueries
+- [ ] Decision comparison uses self-joins
+- [ ] All queries validated with `EXPLAIN ANALYZE` showing index usage
+
 ---
 
 ## 6. Implementation Steps
@@ -461,10 +541,11 @@ curl -X POST http://localhost:8080/decision/evaluate \
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                                         |
-| ------- | ---------- | ------------ | ------------------------------------------------------------------------------- |
-| 1.4     | 2025-12-18 | Security Eng | Added DSA/SQL requirements for rule DAGs and normalized, immutable rule storage |
-| 1.3     | 2025-12-18 | Security Eng | Added secure-by-design evaluation (DAG, default-deny, signed policy bundles)    |
-| 1.2     | 2025-12-16 | Engineering  | Add concurrent evidence-gathering requirements and acceptance criteria          |
-| 1.1     | 2025-12-12 | Engineering  | Add TR-5 CQRS & Read-Optimized Projections                                      |
-| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                     |
+| Version | Date       | Author       | Changes                                                                                    |
+| ------- | ---------- | ------------ | ------------------------------------------------------------------------------------------ |
+| 1.5     | 2025-12-21 | Engineering  | Added TR-7: SQL Query Patterns (CTEs, window functions, CASE, subqueries, self-joins, 3NF) |
+| 1.4     | 2025-12-18 | Security Eng | Added DSA/SQL requirements for rule DAGs and normalized, immutable rule storage            |
+| 1.3     | 2025-12-18 | Security Eng | Added secure-by-design evaluation (DAG, default-deny, signed policy bundles)               |
+| 1.2     | 2025-12-16 | Engineering  | Add concurrent evidence-gathering requirements and acceptance criteria                     |
+| 1.1     | 2025-12-12 | Engineering  | Add TR-5 CQRS & Read-Optimized Projections                                                 |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                |

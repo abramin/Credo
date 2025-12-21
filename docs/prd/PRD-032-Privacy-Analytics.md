@@ -268,6 +268,155 @@ having:
     value: 100
 ```
 
+### TR-5: SQL Query Patterns & Database Design
+
+**Objective:** Demonstrate intermediate-to-advanced SQL capabilities for privacy-preserving analytics.
+
+**Query Patterns Required:**
+
+- **Aggregate Functions with Differential Privacy:**
+  ```sql
+  SELECT
+    country,
+    COUNT(*) + (random() * 2 - 1) * :noise_scale AS noisy_count,
+    AVG(age) + (random() * 2 - 1) * :noise_scale AS noisy_avg_age,
+    SUM(CASE WHEN verified = true THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) AS verification_rate
+  FROM users
+  WHERE created_at >= :start_date
+    AND tenant_id = :tenant_id
+  GROUP BY country
+  HAVING COUNT(*) >= :min_group_size;  -- Suppress small groups
+  ```
+
+- **Window Functions for Privacy Budget Tracking:**
+  ```sql
+  SELECT analyst_id, query_id, epsilon_used, timestamp,
+         SUM(epsilon_used) OVER (
+           PARTITION BY analyst_id
+           ORDER BY timestamp
+           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+         ) AS cumulative_epsilon,
+         :total_budget - SUM(epsilon_used) OVER (
+           PARTITION BY analyst_id
+           ORDER BY timestamp
+         ) AS remaining_budget
+  FROM analytics_queries
+  WHERE tenant_id = :tenant_id
+    AND timestamp >= :budget_reset_date;
+  ```
+
+- **CTE for User Touchpoint Tracking:**
+  ```sql
+  WITH query_fields AS (
+    SELECT q.query_id, q.timestamp,
+           jsonb_array_elements_text(q.query_definition->'metrics') AS metric,
+           jsonb_array_elements_text(q.query_definition->'filters'->>'fields') AS filter_field
+    FROM analytics_queries q
+    WHERE q.timestamp > NOW() - INTERVAL '90 days'
+  ),
+  user_touchpoints AS (
+    SELECT :user_id AS user_id, qf.query_id, qf.timestamp,
+           array_agg(DISTINCT qf.metric) AS metrics_used,
+           array_agg(DISTINCT qf.filter_field) AS filters_used
+    FROM query_fields qf
+    GROUP BY qf.query_id, qf.timestamp
+  )
+  SELECT * FROM user_touchpoints ORDER BY timestamp DESC;
+  ```
+
+- **Star Schema for Analytics (OLAP Pattern):**
+  ```sql
+  -- Dimension tables
+  CREATE TABLE dim_users (
+    user_key SERIAL PRIMARY KEY,
+    user_id UUID UNIQUE,
+    country TEXT,
+    age_band TEXT,  -- '18-24', '25-34', etc. (no exact age)
+    verification_status TEXT,
+    created_date DATE
+  );
+
+  CREATE TABLE dim_time (
+    time_key SERIAL PRIMARY KEY,
+    full_date DATE UNIQUE,
+    year INT, quarter INT, month INT, week INT, day_of_week INT
+  );
+
+  -- Fact table (aggregated, no PII)
+  CREATE TABLE fact_analytics (
+    id SERIAL PRIMARY KEY,
+    time_key INT REFERENCES dim_time(time_key),
+    country TEXT,
+    age_band TEXT,
+    user_count INT,
+    verified_count INT,
+    consent_count INT
+  );
+
+  -- OLAP query using star schema
+  SELECT dt.year, dt.quarter, du.country, du.age_band,
+         SUM(fa.user_count) AS total_users,
+         SUM(fa.verified_count)::float / NULLIF(SUM(fa.user_count), 0) AS verification_rate
+  FROM fact_analytics fa
+  JOIN dim_time dt ON fa.time_key = dt.time_key
+  JOIN dim_users du ON fa.country = du.country AND fa.age_band = du.age_band
+  GROUP BY ROLLUP(dt.year, dt.quarter, du.country, du.age_band);
+  ```
+
+- **Materialized View for Pre-Aggregated Summaries:**
+  ```sql
+  CREATE MATERIALIZED VIEW privacy_safe_demographics AS
+  SELECT
+    DATE_TRUNC('month', created_at) AS cohort_month,
+    country,
+    CASE
+      WHEN age < 25 THEN '18-24'
+      WHEN age < 35 THEN '25-34'
+      WHEN age < 45 THEN '35-44'
+      ELSE '45+'
+    END AS age_band,
+    COUNT(*) AS user_count,
+    COUNT(*) FILTER (WHERE verified = true) AS verified_count
+  FROM users
+  GROUP BY cohort_month, country, age_band
+  HAVING COUNT(*) >= 50  -- k-anonymity threshold
+  WITH DATA;
+
+  CREATE INDEX ON privacy_safe_demographics (cohort_month, country);
+  REFRESH MATERIALIZED VIEW CONCURRENTLY privacy_safe_demographics;
+  ```
+
+- **DISTINCT and HyperLogLog for Cardinality:**
+  ```sql
+  -- Exact distinct count (expensive)
+  SELECT country, COUNT(DISTINCT user_id) AS exact_unique_users
+  FROM consent_records
+  GROUP BY country;
+
+  -- Approximate using HyperLogLog (privacy-friendly, faster)
+  SELECT country,
+         hll_cardinality(hll_add_agg(hll_hash_text(user_id::text))) AS approx_unique_users
+  FROM consent_records
+  GROUP BY country;
+  ```
+
+**Database Design:**
+
+- **Star Schema:** Dimension tables (`dim_users`, `dim_time`, `dim_location`) with fact table (`fact_analytics`)
+- **No PII in Fact Tables:** Only aggregated counts, rates, and bucketed demographics
+- **K-Anonymity Enforcement:** `HAVING COUNT(*) >= :k` on all GROUP BY queries
+- **Partitioning:** Fact tables partitioned by month for efficient time-range queries
+- **Materialized Views:** Pre-aggregate demographics with scheduled refresh (hourly/daily)
+
+**Acceptance Criteria (SQL):**
+- [ ] Aggregate queries add Laplace noise for differential privacy
+- [ ] Privacy budget tracking uses window functions (cumulative sum)
+- [ ] User touchpoint queries use CTEs with JSONB extraction
+- [ ] Star schema separates dimensions from facts (OLAP pattern)
+- [ ] Materialized views enforce k-anonymity (min group size)
+- [ ] HyperLogLog used for approximate distinct counts
+- [ ] All queries suppress groups below k-anonymity threshold
+
 ---
 
 ## 5. Acceptance Criteria
@@ -299,6 +448,7 @@ having:
 
 ## Revision History
 
-| Version | Date       | Author      | Changes       |
-| ------- | ---------- | ----------- | ------------- |
-| 1.0     | 2025-12-17 | Engineering | Initial draft |
+| Version | Date       | Author      | Changes                                                                                      |
+| ------- | ---------- | ----------- | -------------------------------------------------------------------------------------------- |
+| 1.1     | 2025-12-21 | Engineering | Added TR-5: SQL Query Patterns (aggregates, window functions, CTEs, star schema, OLAP, HLL) |
+| 1.0     | 2025-12-17 | Engineering | Initial draft                                                                                |
