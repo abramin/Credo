@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"credo/internal/auth/email"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/email"
 )
 
 // AuthorizationRequest represents an OAuth authorization request from a client.

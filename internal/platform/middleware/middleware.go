@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"credo/internal/platform/metrics"
-	"credo/internal/platform/privacy"
+	"credo/pkg/platform/metrics"
+	"credo/pkg/platform/privacy"
 
 	"github.com/google/uuid"
 )

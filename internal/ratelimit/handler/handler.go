@@ -10,8 +10,8 @@ import (
 
 	"credo/internal/platform/middleware"
 	"credo/internal/ratelimit/models"
-	"credo/internal/transport/httputil"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/httputil"
 )
 
 // Service defines the interface for rate limiting operations.

@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"credo/internal/consent/models"
-	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
-	"credo/internal/transport/httputil"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	s "credo/pkg/string"
+	"credo/pkg/platform/httputil"
+	"credo/pkg/platform/metrics"
 )
 
 // Service defines the interface for consent operations.
@@ -83,7 +82,7 @@ func (h *Handler) HandleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
 		return
 	}
-	s.Sanitize(&grantReq)
+	sanitize(&grantReq)
 	grantReq.Normalize()
 	if err := grantReq.Validate(); err != nil {
 		h.logger.WarnContext(ctx, "invalid grant consent request",
@@ -139,7 +138,7 @@ func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
 		return
 	}
-	s.Sanitize(&revokeReq)
+	sanitize(&revokeReq)
 	revokeReq.Normalize()
 	if err := revokeReq.Validate(); err != nil {
 		h.logger.WarnContext(ctx, "invalid revoke consent request",

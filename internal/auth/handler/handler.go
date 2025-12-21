@@ -11,9 +11,9 @@ import (
 
 	"credo/internal/auth/models"
 	"credo/internal/platform/middleware"
-	"credo/internal/transport/httputil"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/httputil"
 )
 
 // Service defines the interface for authentication operations.

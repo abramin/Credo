@@ -10,14 +10,14 @@ import (
 	"github.com/google/uuid"
 
 	"credo/internal/audit"
-	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
-	"credo/internal/sentinel"
 	"credo/internal/tenant/models"
-	"credo/pkg/attrs"
+	"credo/internal/tenant/secrets"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/secrets"
+	"credo/pkg/platform/attrs"
+	"credo/pkg/platform/metrics"
+	"credo/pkg/platform/sentinel"
 )
 
 type TenantStore interface {

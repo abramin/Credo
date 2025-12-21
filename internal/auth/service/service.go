@@ -17,12 +17,12 @@ import (
 	"credo/internal/auth/models"
 	"credo/internal/auth/store/revocation"
 	sessionStore "credo/internal/auth/store/session"
-	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
-	"credo/internal/sentinel"
-	"credo/pkg/attrs"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/attrs"
+	"credo/pkg/platform/metrics"
+	"credo/pkg/platform/sentinel"
 )
 
 type Service struct {

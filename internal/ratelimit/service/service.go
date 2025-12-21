@@ -8,9 +8,9 @@ import (
 
 	"credo/internal/audit"
 	"credo/internal/platform/middleware"
-	"credo/internal/platform/privacy"
 	"credo/internal/ratelimit/models"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/privacy"
 )
 
 type Service struct {

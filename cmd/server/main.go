@@ -27,7 +27,6 @@ import (
 	"credo/internal/platform/config"
 	"credo/internal/platform/httpserver"
 	"credo/internal/platform/logger"
-	"credo/internal/platform/metrics"
 	"credo/internal/platform/middleware"
 	rateLimitMW "credo/internal/ratelimit/middleware"
 	rateLimitModels "credo/internal/ratelimit/models"
@@ -39,6 +38,7 @@ import (
 	tenantService "credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
+	"credo/pkg/platform/metrics"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

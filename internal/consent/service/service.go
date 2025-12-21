@@ -13,9 +13,9 @@ import (
 	"credo/internal/audit"
 	"credo/internal/consent/models"
 	"credo/internal/consent/store"
-	"credo/internal/platform/metrics"
 	id "credo/pkg/domain"
 	pkgerrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/metrics"
 )
 
 // shardedConsentTx provides fine-grained locking using sharded mutexes.

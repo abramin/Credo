@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"credo/internal/platform/middleware"
-	"credo/internal/transport/httputil"
+	"credo/pkg/platform/httputil"
 )
 
 // Handler handles admin monitoring and stats endpoints

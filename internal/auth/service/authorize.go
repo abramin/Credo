@@ -11,11 +11,11 @@ import (
 
 	"credo/internal/audit"
 	"credo/internal/auth/device"
+	"credo/internal/auth/email"
 	"credo/internal/auth/models"
 	"credo/internal/platform/middleware"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/email"
 )
 
 func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error) {

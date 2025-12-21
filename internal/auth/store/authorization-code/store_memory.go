@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"credo/internal/auth/models"
-	"credo/internal/sentinel"
+	"credo/pkg/platform/sentinel"
 )
 
 // ErrNotFound is returned when a requested record is not found in the store.

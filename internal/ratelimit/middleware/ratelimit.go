@@ -8,9 +8,9 @@ import (
 	"time"
 
 	platformMW "credo/internal/platform/middleware"
-	"credo/internal/platform/privacy"
 	"credo/internal/ratelimit/models"
-	"credo/internal/transport/httputil"
+	"credo/pkg/platform/httputil"
+	"credo/pkg/platform/privacy"
 )
 
 type RateLimiter interface {
