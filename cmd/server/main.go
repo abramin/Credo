@@ -13,6 +13,7 @@ import (
 	authAdapters "credo/internal/auth/adapters"
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
+	authmetrics "credo/internal/auth/metrics"
 	authService "credo/internal/auth/service"
 	authCodeStore "credo/internal/auth/store/authorization-code"
 	refreshTokenStore "credo/internal/auth/store/refresh-token"
@@ -21,6 +22,7 @@ import (
 	userStore "credo/internal/auth/store/user"
 	cleanupWorker "credo/internal/auth/workers/cleanup"
 	consentHandler "credo/internal/consent/handler"
+	consentmetrics "credo/internal/consent/metrics"
 	consentService "credo/internal/consent/service"
 	consentStore "credo/internal/consent/store"
 	jwttoken "credo/internal/jwt_token"
@@ -35,12 +37,12 @@ import (
 	rwbucketStore "credo/internal/ratelimit/store/bucket"
 	"credo/internal/seeder"
 	tenantHandler "credo/internal/tenant/handler"
+	tenantmetrics "credo/internal/tenant/metrics"
 	tenantService "credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
 	auditpublisher "credo/pkg/platform/audit/publisher"
 	auditstore "credo/pkg/platform/audit/store/memory"
-	"credo/pkg/platform/metrics"
 	adminmw "credo/pkg/platform/middleware/admin"
 	auth "credo/pkg/platform/middleware/auth"
 	devicemw "credo/pkg/platform/middleware/device"
@@ -53,12 +55,15 @@ import (
 )
 
 type infraBundle struct {
-	Cfg           *config.Server
-	Log           *slog.Logger
-	Metrics       *metrics.Metrics
-	JWTService    *jwttoken.JWTService
-	JWTValidator  *jwttoken.JWTServiceAdapter
-	DeviceService *device.Service
+	Cfg            *config.Server
+	Log            *slog.Logger
+	AuthMetrics    *authmetrics.Metrics
+	ConsentMetrics *consentmetrics.Metrics
+	TenantMetrics  *tenantmetrics.Metrics
+	RequestMetrics *request.Metrics
+	JWTService     *jwttoken.JWTService
+	JWTValidator   *jwttoken.JWTServiceAdapter
+	DeviceService  *device.Service
 }
 
 type authModule struct {
@@ -174,17 +179,23 @@ func buildInfra() (*infraBundle, error) {
 		)
 	}
 
-	m := metrics.New()
+	authMetrics := authmetrics.New()
+	consentMetrics := consentmetrics.New()
+	tenantMetrics := tenantmetrics.New()
+	requestMetrics := request.NewMetrics()
 	jwtService, jwtValidator := initializeJWTService(&cfg)
 	deviceSvc := device.NewService(cfg.Auth.DeviceBindingEnabled)
 
 	return &infraBundle{
-		Cfg:           &cfg,
-		Log:           log,
-		Metrics:       m,
-		JWTService:    jwtService,
-		JWTValidator:  jwtValidator,
-		DeviceService: deviceSvc,
+		Cfg:            &cfg,
+		Log:            log,
+		AuthMetrics:    authMetrics,
+		ConsentMetrics: consentMetrics,
+		TenantMetrics:  tenantMetrics,
+		RequestMetrics: requestMetrics,
+		JWTService:     jwtService,
+		JWTValidator:   jwtValidator,
+		DeviceService:  deviceSvc,
 	}, nil
 }
 
@@ -218,7 +229,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		codes,
 		refreshTokens,
 		authCfg,
-		authService.WithMetrics(infra.Metrics),
+		authService.WithMetrics(infra.AuthMetrics),
 		authService.WithLogger(infra.Log),
 		authService.WithJWTService(infra.JWTService),
 		authService.WithTRL(trl),
@@ -264,18 +275,24 @@ func buildConsentModule(infra *infraBundle) *consentModule {
 		infra.Log,
 		consentService.WithConsentTTL(infra.Cfg.Consent.ConsentTTL),
 		consentService.WithGrantWindow(infra.Cfg.Consent.ConsentGrantWindow),
+		consentService.WithMetrics(infra.ConsentMetrics),
 	)
 
 	return &consentModule{
 		Service: consentSvc,
-		Handler: consentHandler.New(consentSvc, infra.Log, infra.Metrics),
+		Handler: consentHandler.New(consentSvc, infra.Log, infra.ConsentMetrics),
 	}
 }
 
 func buildTenantModule(infra *infraBundle) *tenantModule {
 	tenants := tenantstore.NewInMemory()
 	clients := clientstore.NewInMemory()
-	service := tenantService.New(tenants, clients, nil)
+	service := tenantService.New(
+		tenants,
+		clients,
+		nil,
+		tenantService.WithMetrics(infra.TenantMetrics),
+	)
 
 	return &tenantModule{
 		Service: service,
@@ -324,7 +341,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 	r.Use(request.Logger(infra.Log))
 	r.Use(request.Timeout(30 * time.Second)) // TODO: make configurable
 	r.Use(request.ContentTypeJSON)
-	r.Use(request.LatencyMiddleware(infra.Metrics))
+	r.Use(request.LatencyMiddleware(infra.RequestMetrics))
 
 	// Add Prometheus metrics endpoint (no auth required)
 	r.Handle("/metrics", promhttp.Handler())

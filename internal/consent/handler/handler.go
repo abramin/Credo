@@ -8,13 +8,17 @@ import (
 	"net/http"
 	"time"
 
+	consentmetrics "credo/internal/consent/metrics"
 	"credo/internal/consent/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
+<<<<<<< HEAD
 	"credo/pkg/platform/metrics"
 	auth "credo/pkg/platform/middleware/auth"
 	request "credo/pkg/platform/middleware/request"
+=======
+>>>>>>> 68f9aee (udpate metrics references)
 )
 
 // Service defines the interface for consent operations.
@@ -31,11 +35,11 @@ type Service interface {
 type Handler struct {
 	logger  *slog.Logger
 	consent Service
-	metrics *metrics.Metrics
+	metrics *consentmetrics.Metrics
 }
 
 // New creates a new consent Handler.
-func New(consent Service, logger *slog.Logger, metrics *metrics.Metrics) *Handler {
+func New(consent Service, logger *slog.Logger, metrics *consentmetrics.Metrics) *Handler {
 	return &Handler{
 		logger:  logger,
 		consent: consent,

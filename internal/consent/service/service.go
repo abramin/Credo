@@ -11,12 +11,12 @@ import (
 	"github.com/google/uuid"
 
 	"credo/internal/consent/models"
+	consentmetrics "credo/internal/consent/metrics"
 	"credo/internal/consent/store"
 	id "credo/pkg/domain"
 	pkgerrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	auditpublisher "credo/pkg/platform/audit/publisher"
-	"credo/pkg/platform/metrics"
 	requesttime "credo/pkg/platform/middleware/requesttime"
 )
 
@@ -109,7 +109,7 @@ type Service struct {
 	store                  Store
 	tx                     ConsentStoreTx
 	auditor                *auditpublisher.Publisher
-	metrics                *metrics.Metrics
+	metrics                *consentmetrics.Metrics
 	logger                 *slog.Logger
 	consentTTL             time.Duration
 	grantIdempotencyWindow time.Duration
@@ -145,7 +145,7 @@ func WithTx(tx ConsentStoreTx) Option {
 }
 
 // WithMetrics sets the metrics instance for the service
-func WithMetrics(m *metrics.Metrics) Option {
+func WithMetrics(m *consentmetrics.Metrics) Option {
 	return func(s *Service) {
 		s.metrics = m
 	}

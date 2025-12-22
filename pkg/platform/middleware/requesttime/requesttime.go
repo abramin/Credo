@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// contextKeyRequestTime is a private key type for storing request time in context.
 type contextKeyRequestTime struct{}
 
 // Middleware captures the current time at the start of the request

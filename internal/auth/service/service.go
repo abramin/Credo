@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"credo/internal/auth/device"
+	"credo/internal/auth/metrics"
 	"credo/internal/auth/models"
 	"credo/internal/auth/store/revocation"
 	sessionStore "credo/internal/auth/store/session"
@@ -22,7 +23,10 @@ import (
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/attrs"
 	"credo/pkg/platform/audit"
+<<<<<<< HEAD
 	"credo/pkg/platform/metrics"
+=======
+>>>>>>> 68f9aee (udpate metrics references)
 	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/sentinel"
 )
@@ -335,12 +339,14 @@ func (s *Service) logAudit(ctx context.Context, event string, attributes ...any)
 	}
 	userIDStr := attrs.ExtractString(attributes, "user_id")
 	userID, _ := id.ParseUserID(userIDStr) // Best-effort for audit - ignore parse errors
-	// TODO: log errors from audit publisher?
-	_ = s.auditPublisher.Emit(ctx, audit.Event{
+	err := s.auditPublisher.Emit(ctx, audit.Event{
 		UserID:  userID,
 		Subject: userIDStr,
 		Action:  event,
 	})
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to emit audit event", "error", err)
+	}
 }
 
 func (s *Service) authFailure(ctx context.Context, reason string, isError bool, attributes ...any) {
