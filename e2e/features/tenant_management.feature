@@ -1,4 +1,4 @@
-Feature: Tenant & Client Management Admin API (PRD-026A)
+Feature: Tenant & Client Management Admin API
     As a platform administrator
     I want to manage tenants and clients via admin API
     So that OAuth applications can be onboarded and configured
@@ -7,7 +7,7 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
     Given the ID Gateway is running
 
     # ============================================================
-    # TENANT CRUD (PRD-026A FR-1, FR-2)
+    # TENANT CRUD
     # ============================================================
 
     @admin @tenant @crud
@@ -18,7 +18,7 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
     And I save the tenant ID from the response
 
     @admin @tenant @crud
-  Scenario: Create tenant with duplicate name fails (PRD-026A FR-1)
+  Scenario: Create tenant with duplicate name fails
     When I create a tenant with name "Duplicate Tenant Test"
     Then the response status should be 201
     And I save the tenant ID from the response
@@ -28,7 +28,7 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
     And the response field "error" should equal "conflict"
 
     @admin @tenant @crud
-  Scenario: Get tenant details (PRD-026A FR-2)
+  Scenario: Get tenant details
     When I create a tenant with name "Get Tenant Test"
     Then the response status should be 201
     And I save the tenant ID from the response
@@ -50,11 +50,11 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
     And the response field "error" should equal "unauthorized"
 
     # ============================================================
-    # CLIENT CRUD (PRD-026A FR-3, FR-4)
+    # CLIENT CRUD
     # ============================================================
 
     @admin @client @crud
-  Scenario: Create client under tenant (PRD-026A FR-3)
+  Scenario: Create client under tenant
     When I create a tenant with name "Client Test Tenant"
     Then the response status should be 201
     And I save the tenant ID from the response
@@ -66,7 +66,7 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
     And I save the client ID from the response
 
     @admin @client @crud
-  Scenario: Get client details (PRD-026A FR-4)
+  Scenario: Get client details
     When I create a tenant with name "Get Client Tenant"
     Then the response status should be 201
     And I save the tenant ID from the response
@@ -82,7 +82,7 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
     And the response field "client_secret" should equal ""
 
     @admin @client @crud
-  Scenario: Update client (PRD-026A FR-4)
+  Scenario: Update client
     When I create a tenant with name "Update Client Tenant"
     Then the response status should be 201
     And I save the tenant ID from the response
@@ -96,7 +96,7 @@ Feature: Tenant & Client Management Admin API (PRD-026A)
     And the response field "name" should equal "Updated Name"
 
     @admin @client @security
-  Scenario: Client secret rotation (PRD-026A FR-4)
+  Scenario: Client secret rotation
     When I create a tenant with name "Secret Rotation Tenant"
     Then the response status should be 201
     And I save the tenant ID from the response

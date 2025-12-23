@@ -6,7 +6,7 @@ Feature: OAuth2 Authorization Code Flow - Normal Path
   Background:
     Given the ID Gateway is running
 
-    @normal @oauth2
+    @normal
   Scenario: Complete OAuth2 authorization code flow
     When I initiate authorization with email "test@example.com" and scopes "openid,profile"
     Then the response status should be 200
