@@ -2,15 +2,12 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
 	"credo/internal/ratelimit/models"
-	id "credo/pkg/domain"
-	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
 	"credo/pkg/platform/middleware/auth"
 	request "credo/pkg/platform/middleware/request"
@@ -23,18 +20,9 @@ type Service interface {
 	ResetRateLimit(ctx context.Context, req *models.ResetRateLimitRequest) error
 }
 
-// QuotaService defines the quota operations interface (PRD-017 FR-5)
-type QuotaService interface {
-	Check(ctx context.Context, apiKeyID id.APIKeyID) (*models.APIKeyQuota, error)
-	Reset(ctx context.Context, apiKeyID id.APIKeyID) error
-	List(ctx context.Context) ([]*models.APIKeyQuota, error)
-	UpdateTier(ctx context.Context, apiKeyID id.APIKeyID, tier models.QuotaTier) error
-}
-
 type Handler struct {
-	service      Service
-	quotaService QuotaService
-	logger       *slog.Logger
+	service Service
+	logger  *slog.Logger
 }
 
 func New(service Service, logger *slog.Logger) *Handler {
@@ -44,51 +32,11 @@ func New(service Service, logger *slog.Logger) *Handler {
 	}
 }
 
-// WithQuotaService adds the quota service to the handler (PRD-017 FR-5)
-func (h *Handler) WithQuotaService(qs QuotaService) *Handler {
-	h.quotaService = qs
-	return h
-}
-
 func (h *Handler) RegisterAdmin(r chi.Router) {
 	r.Post("/admin/rate-limit/allowlist", h.HandleAddAllowlist)
 	r.Delete("/admin/rate-limit/allowlist", h.HandleRemoveAllowlist)
 	r.Get("/admin/rate-limit/allowlist", h.HandleListAllowlist)
 	r.Post("/admin/rate-limit/reset", h.HandleResetRateLimit)
-
-	// PRD-017 FR-5: Partner API Quota endpoints
-	r.Get("/admin/rate-limit/quota/{api_key}", h.HandleGetQuota)
-	r.Post("/admin/rate-limit/quota/{api_key}/reset", h.HandleResetQuota)
-	r.Get("/admin/rate-limit/quotas", h.HandleListQuotas)
-	r.Put("/admin/rate-limit/quota/{api_key}/tier", h.HandleUpdateQuotaTier)
-}
-
-// requireQuotaService checks that the quota service is configured.
-// Returns false if not configured (error response already written).
-func (h *Handler) requireQuotaService(w http.ResponseWriter) bool {
-	if h.quotaService == nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeInternal, "quota service not configured"))
-		return false
-	}
-	return true
-}
-
-// requireAPIKeyFromPath parses api_key from URL path parameter.
-// Returns the raw string (for logging) and parsed ID.
-// Returns false if parsing fails (error response already written).
-func (h *Handler) requireAPIKeyFromPath(r *http.Request, w http.ResponseWriter, requestID string) (string, id.APIKeyID, bool) {
-	ctx := r.Context()
-	apiKeyStr := chi.URLParam(r, "api_key")
-	apiKeyID, err := id.ParseAPIKeyID(apiKeyStr)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid api_key format",
-			"api_key", apiKeyStr,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid api_key format"))
-		return "", "", false
-	}
-	return apiKeyStr, apiKeyID, true
 }
 
 // HandleAddAllowlist implements POST /admin/rate-limit/allowlist.
@@ -206,174 +154,4 @@ func (h *Handler) HandleResetRateLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// =============================================================================
-// PRD-017 FR-5: Partner API Quota Handlers
-// =============================================================================
-
-// HandleGetQuota implements GET /admin/rate-limit/quota/:api_key
-// Returns the quota usage for a specific API key.
-func (h *Handler) HandleGetQuota(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	requestID := request.GetRequestID(ctx)
-
-	if !h.requireQuotaService(w) {
-		return
-	}
-
-	apiKeyStr, apiKeyID, ok := h.requireAPIKeyFromPath(r, w, requestID)
-	if !ok {
-		return
-	}
-
-	quota, err := h.quotaService.Check(ctx, apiKeyID)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "failed to get quota",
-			"error", err,
-			"api_key", apiKeyStr,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, err)
-		return
-	}
-
-	remaining := quota.MonthlyLimit - quota.CurrentUsage
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	response := models.QuotaUsageResponse{
-		APIKeyID:  apiKeyStr,
-		Tier:      string(quota.Tier),
-		Usage:     quota.CurrentUsage,
-		Limit:     quota.MonthlyLimit,
-		Remaining: remaining,
-		ResetAt:   quota.PeriodEnd,
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, response)
-}
-
-// HandleResetQuota implements POST /admin/rate-limit/quota/:api_key/reset
-// Resets the quota usage for a specific API key.
-func (h *Handler) HandleResetQuota(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	requestID := request.GetRequestID(ctx)
-
-	if !h.requireQuotaService(w) {
-		return
-	}
-
-	apiKeyStr, apiKeyID, ok := h.requireAPIKeyFromPath(r, w, requestID)
-	if !ok {
-		return
-	}
-
-	// Parse optional reason from body (don't require body)
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	var req models.ResetQuotaRequest
-	_ = json.NewDecoder(r.Body).Decode(&req) // Ignore errors - reason is optional
-
-	if err := h.quotaService.Reset(ctx, apiKeyID); err != nil {
-		h.logger.ErrorContext(ctx, "failed to reset quota",
-			"error", err,
-			"api_key", apiKeyStr,
-			"reason", req.Reason,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, err)
-		return
-	}
-
-	h.logger.InfoContext(ctx, "quota reset",
-		"api_key", apiKeyStr,
-		"reason", req.Reason,
-		"request_id", requestID,
-	)
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "reset"})
-}
-
-// HandleListQuotas implements GET /admin/rate-limit/quotas
-// Returns all quota records.
-func (h *Handler) HandleListQuotas(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	requestID := request.GetRequestID(ctx)
-
-	if !h.requireQuotaService(w) {
-		return
-	}
-
-	quotas, err := h.quotaService.List(ctx)
-	if err != nil {
-		h.logger.ErrorContext(ctx, "failed to list quotas",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, err)
-		return
-	}
-
-	// Convert to response format
-	responses := make([]models.QuotaUsageResponse, 0, len(quotas))
-	for _, q := range quotas {
-		remaining := q.MonthlyLimit - q.CurrentUsage
-		if remaining < 0 {
-			remaining = 0
-		}
-		responses = append(responses, models.QuotaUsageResponse{
-			APIKeyID:  q.APIKeyID.String(),
-			Tier:      string(q.Tier),
-			Usage:     q.CurrentUsage,
-			Limit:     q.MonthlyLimit,
-			Remaining: remaining,
-			ResetAt:   q.PeriodEnd,
-		})
-	}
-
-	httputil.WriteJSON(w, http.StatusOK, responses)
-}
-
-// HandleUpdateQuotaTier implements PUT /admin/rate-limit/quota/:api_key/tier
-// Updates the quota tier for a specific API key.
-func (h *Handler) HandleUpdateQuotaTier(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	requestID := request.GetRequestID(ctx)
-
-	if !h.requireQuotaService(w) {
-		return
-	}
-
-	apiKeyStr, apiKeyID, ok := h.requireAPIKeyFromPath(r, w, requestID)
-	if !ok {
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-
-	req, ok := httputil.DecodeAndPrepare[models.UpdateQuotaTierRequest](w, r, h.logger, ctx, requestID)
-	if !ok {
-		return
-	}
-
-	tier := models.QuotaTier(req.Tier) // Already normalized by DecodeAndPrepare
-	if err := h.quotaService.UpdateTier(ctx, apiKeyID, tier); err != nil {
-		h.logger.ErrorContext(ctx, "failed to update tier",
-			"error", err,
-			"api_key", apiKeyStr,
-			"tier", tier,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, err)
-		return
-	}
-
-	h.logger.InfoContext(ctx, "tier updated",
-		"api_key", apiKeyStr,
-		"tier", tier,
-		"request_id", requestID,
-	)
-
-	httputil.WriteJSON(w, http.StatusOK, map[string]string{"status": "updated", "tier": string(tier)})
 }

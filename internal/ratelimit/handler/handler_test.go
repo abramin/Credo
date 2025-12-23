@@ -1,6 +1,7 @@
 package handler
 
-//go:generate mockgen -source=handler.go -destination=mocks/handler_mock.go -package=mocks Service,QuotaService
+//go:generate mockgen -source=handler.go -destination=mocks/handler_mock.go -package=mocks Service
+//go:generate mockgen -source=quota.go -destination=mocks/quota_mock.go -package=mocks QuotaService
 
 import (
 	"bytes"
@@ -43,10 +44,13 @@ func (s *HandlerSuite) SetupTest() {
 	s.mockService = mocks.NewMockService(s.ctrl)
 	s.mockQuotaService = mocks.NewMockQuotaService(s.ctrl)
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	h := New(s.mockService, logger).WithQuotaService(s.mockQuotaService)
+
+	h := New(s.mockService, logger)
+	qh := NewQuotaHandler(s.mockQuotaService, logger)
 
 	r := chi.NewRouter()
 	h.RegisterAdmin(r)
+	qh.RegisterAdmin(r)
 	s.router = r
 }
 

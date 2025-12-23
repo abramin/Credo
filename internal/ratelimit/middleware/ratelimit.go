@@ -5,12 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"sync"
 
-	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
-	"credo/internal/ratelimit/service/requestlimit"
-	"credo/internal/ratelimit/store/bucket"
 	"credo/pkg/platform/httputil"
 	auth "credo/pkg/platform/middleware/auth"
 	metadata "credo/pkg/platform/middleware/metadata"
@@ -37,127 +33,6 @@ type Middleware struct {
 	ipBreaker       *CircuitBreaker
 	combinedBreaker *CircuitBreaker
 	fallback        RateLimiter
-}
-
-// Circuit breaker state (PRD-017 FR-7):
-// - Track consecutive limiter errors.
-// - Open circuit after N failures; during open, use in-memory fallback.
-// - When open, set X-RateLimit-Status: degraded so callers know they’re in fallback mode.
-// - Close circuit after M consecutive successful primary checks.
-type CircuitBreaker struct {
-	mu               sync.Mutex
-	state            circuitState
-	failureCount     int
-	successCount     int
-	failureThreshold int
-	successThreshold int
-}
-
-type circuitState int
-
-const (
-	circuitClosed circuitState = iota
-	circuitOpen
-)
-
-func newCircuitBreaker() *CircuitBreaker {
-	return &CircuitBreaker{
-		state:            circuitClosed,
-		failureThreshold: 5,
-		successThreshold: 3,
-	}
-}
-
-func (c *CircuitBreaker) IsOpen() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.state == circuitOpen
-}
-
-func (c *CircuitBreaker) RecordFailure() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.failureCount++
-	c.successCount = 0
-	if c.state == circuitOpen {
-		return true
-	}
-	if c.failureCount >= c.failureThreshold {
-		c.state = circuitOpen
-		return true
-	}
-	return false
-}
-
-func (c *CircuitBreaker) RecordSuccess() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.state == circuitOpen {
-		c.successCount++
-		if c.successCount >= c.successThreshold {
-			c.state = circuitClosed
-			c.failureCount = 0
-			c.successCount = 0
-			return true
-		}
-		return false
-	}
-	c.failureCount = 0
-	return true
-}
-
-type fallbackLimiter struct {
-	requests *requestlimit.Service
-}
-
-func NewFallbackLimiter(cfg *config.Config, allowlistStore requestlimit.AllowlistStore, logger *slog.Logger) RateLimiter {
-	if cfg == nil || allowlistStore == nil {
-		if logger != nil {
-			logger.Error("fallback limiter requires config and allowlist store")
-		}
-		return nil
-	}
-	requests, err := requestlimit.New(
-		bucket.New(),
-		allowlistStore,
-		requestlimit.WithLogger(logger),
-		requestlimit.WithConfig(cfg),
-	)
-	if err != nil {
-		if logger != nil {
-			logger.Error("failed to initialize fallback rate limiter", "error", err)
-		}
-		return nil
-	}
-	return &fallbackLimiter{requests: requests}
-}
-
-func (f *fallbackLimiter) CheckIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	return f.requests.CheckIP(ctx, ip, class)
-}
-
-func (f *fallbackLimiter) CheckUserRateLimit(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	return f.requests.CheckUser(ctx, userID, class)
-}
-
-func (f *fallbackLimiter) CheckBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	return f.requests.CheckBoth(ctx, ip, userID, class)
-}
-
-func (f *fallbackLimiter) CheckAuthRateLimit(ctx context.Context, identifier, ip string) (*models.AuthRateLimitResult, error) {
-	result, err := f.requests.CheckIP(ctx, ip, models.ClassAuth)
-	if err != nil {
-		return nil, err
-	}
-	return &models.AuthRateLimitResult{
-		RateLimitResult: *result,
-		RequiresCaptcha: false,
-		FailureCount:    0,
-	}, nil
-}
-
-func (f *fallbackLimiter) CheckGlobalThrottle(ctx context.Context) (bool, error) {
-	return true, nil
 }
 
 type Option func(*Middleware)
@@ -502,26 +377,6 @@ func (m *Middleware) checkBothLimits(ctx context.Context, ip, userID string, cla
 	}
 
 	return result, false, nil
-}
-
-type fallbackClientLimiter struct {
-	buckets *bucket.InMemoryBucketStore
-	limit   config.Limit
-}
-
-func NewFallbackClientLimiter(cfg *config.ClientLimitConfig) ClientRateLimiter {
-	if cfg == nil {
-		return nil
-	}
-	limit := cfg.PublicLimit
-	return &fallbackClientLimiter{
-		buckets: bucket.New(),
-		limit:   limit,
-	}
-}
-
-func (f *fallbackClientLimiter) Check(ctx context.Context, clientID, endpoint string) (*models.RateLimitResult, error) {
-	return f.buckets.Allow(ctx, models.NewClientRateLimitKey(clientID, endpoint), f.limit.RequestsPerWindow, f.limit.Window)
 }
 
 func (m *ClientMiddleware) checkClientLimit(ctx context.Context, clientID, endpoint string) (*models.RateLimitResult, bool, error) {
