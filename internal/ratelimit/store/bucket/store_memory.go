@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"credo/internal/ratelimit/models"
+	requesttime "credo/pkg/platform/middleware/requesttime"
 )
 
 const (
-	defaultShardCount   = 32
-	defaultMaxBuckets   = 100000 // Max buckets per shard before LRU eviction
-	circularBufferSize  = 256    // Fixed size for circular buffer (covers most limits)
+	defaultShardCount  = 32
+	defaultMaxBuckets  = 100000 // Max buckets per shard before LRU eviction
+	circularBufferSize = 256    // Fixed size for circular buffer (covers most limits)
 )
 
 // circularWindow is a fixed-size circular buffer for sliding window rate limiting.
@@ -52,7 +53,7 @@ func (cw *circularWindow) tryConsume(cost, limit int, now time.Time) (allowed bo
 	}
 
 	// Record new timestamps
-	for i := 0; i < cost; i++ {
+	for range cost {
 		cw.timestamps[cw.head] = nowNano
 		cw.head = (cw.head + 1) % circularBufferSize
 		if cw.count < circularBufferSize {
@@ -85,10 +86,10 @@ type lruEntry struct {
 
 // shard is a partition of the bucket store with its own lock and LRU list.
 type shard struct {
-	mu       sync.RWMutex
-	buckets  map[string]*list.Element
-	lruList  *list.List
-	maxSize  int
+	mu      sync.RWMutex
+	buckets map[string]*list.Element
+	lruList *list.List
+	maxSize int
 }
 
 func newShard(maxSize int) *shard {
@@ -215,14 +216,15 @@ func (s *InMemoryBucketStore) AllowN(ctx context.Context, key string, cost, limi
 		sh.set(key, bucket)
 	}
 
-	allowed, remaining, resetAt := bucket.tryConsume(cost, limit, time.Now())
+	now := requesttime.Now(ctx)
+	allowed, remaining, resetAt := bucket.tryConsume(cost, limit, now)
 
 	return &models.RateLimitResult{
 		Allowed:    allowed,
 		Limit:      limit,
 		Remaining:  remaining,
 		ResetAt:    resetAt,
-		RetryAfter: retryAfterSeconds(allowed, resetAt),
+		RetryAfter: retryAfterSeconds(allowed, resetAt, now),
 	}, nil
 }
 
@@ -247,7 +249,7 @@ func (s *InMemoryBucketStore) GetCurrentCount(ctx context.Context, key string) (
 		return 0, nil
 	}
 
-	return elem.Value.(*lruEntry).bucket.currentCount(time.Now()), nil
+	return elem.Value.(*lruEntry).bucket.currentCount(requesttime.Now(ctx)), nil
 }
 
 // Stats returns store statistics for monitoring.
@@ -262,11 +264,11 @@ func (s *InMemoryBucketStore) Stats() (totalBuckets int, bucketsPerShard []int) 
 	return
 }
 
-func retryAfterSeconds(allowed bool, resetAt time.Time) int {
+func retryAfterSeconds(allowed bool, resetAt, now time.Time) int {
 	if allowed {
 		return 0
 	}
-	seconds := int(time.Until(resetAt).Seconds())
+	seconds := int(resetAt.Sub(now).Seconds())
 	if seconds < 0 {
 		return 0
 	}

@@ -58,6 +58,7 @@ func (t AllowlistEntryType) String() string {
 
 type RateLimitResult struct {
 	Allowed    bool      `json:"allowed"`
+	Bypassed   bool      `json:"bypassed,omitempty"`    // true when allowlist matched, skipping bucket checks
 	Limit      int       `json:"limit"`
 	Remaining  int       `json:"remaining"`
 	ResetAt    time.Time `json:"reset_at"`
@@ -148,11 +149,18 @@ func NewAllowlistEntry(entryType AllowlistEntryType, identifier, reason string, 
 	}, nil
 }
 
+// IsExpired checks if the entry has expired using the current wall-clock time.
+// Prefer IsExpiredAt for testability and clock consistency.
 func (e *AllowlistEntry) IsExpired() bool {
+	return e.IsExpiredAt(time.Now())
+}
+
+// IsExpiredAt checks if the entry has expired at the given time.
+func (e *AllowlistEntry) IsExpiredAt(now time.Time) bool {
 	if e.ExpiresAt == nil {
 		return false
 	}
-	return time.Now().After(*e.ExpiresAt)
+	return now.After(*e.ExpiresAt)
 }
 
 func NewAuthLockout(identifier string, now time.Time) (*AuthLockout, error) {
@@ -169,11 +177,18 @@ func NewAuthLockout(identifier string, now time.Time) (*AuthLockout, error) {
 	}, nil
 }
 
+// IsLocked checks if the lockout is active using the current wall-clock time.
+// Prefer IsLockedAt for testability and clock consistency.
 func (l *AuthLockout) IsLocked() bool {
+	return l.IsLockedAt(time.Now())
+}
+
+// IsLockedAt checks if the lockout is active at the given time.
+func (l *AuthLockout) IsLockedAt(now time.Time) bool {
 	if l.LockedUntil == nil {
 		return false
 	}
-	return time.Now().Before(*l.LockedUntil)
+	return now.Before(*l.LockedUntil)
 }
 
 // RecordFailure increments failure counters and updates timestamp.

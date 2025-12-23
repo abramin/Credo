@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"credo/internal/ratelimit/config"
+	"credo/internal/ratelimit/metrics"
 	"credo/internal/ratelimit/models"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	request "credo/pkg/platform/middleware/request"
+	requesttime "credo/pkg/platform/middleware/requesttime"
 	"credo/pkg/platform/privacy"
 )
 
@@ -34,6 +36,7 @@ type Service struct {
 	auditPublisher AuditPublisher
 	logger         *slog.Logger
 	config         *config.Config
+	metrics        *metrics.Metrics
 }
 
 type Option func(*Service)
@@ -53,6 +56,12 @@ func WithAuditPublisher(publisher AuditPublisher) Option {
 func WithConfig(cfg *config.Config) Option {
 	return func(s *Service) {
 		s.config = cfg
+	}
+}
+
+func WithMetrics(m *metrics.Metrics) Option {
+	return func(s *Service) {
+		s.metrics = m
 	}
 }
 
@@ -94,7 +103,7 @@ func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointC
 			Allowed:    false,
 			Limit:      0,
 			Remaining:  0,
-			ResetAt:    time.Now(),
+			ResetAt:    requesttime.Now(ctx),
 			RetryAfter: 60, // Retry in 60 seconds
 		}, nil
 	}
@@ -114,7 +123,7 @@ func (s *Service) CheckUser(ctx context.Context, userID string, class models.End
 			Allowed:    false,
 			Limit:      0,
 			Remaining:  0,
-			ResetAt:    time.Now(),
+			ResetAt:    requesttime.Now(ctx),
 			RetryAfter: 60, // Retry in 60 seconds
 		}, nil
 	}
@@ -130,16 +139,29 @@ func (s *Service) checkRateLimit(
 	window time.Duration,
 	logIdentifier string,
 ) (*models.RateLimitResult, error) {
+	now := requesttime.Now(ctx)
+
 	a, err := s.allowlist.IsAllowlisted(ctx, identifier)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to check allowlist")
 	}
 	if a {
+		// Record allowlist bypass metrics and audit
+		bypassType := string(keyPrefix)
+		if s.metrics != nil {
+			s.metrics.RecordAllowlistBypass(bypassType)
+		}
+		s.logAudit(ctx, "allowlist_bypass",
+			"identifier", logIdentifier,
+			"endpoint_class", class,
+			"bypass_type", bypassType,
+		)
 		return &models.RateLimitResult{
 			Allowed:    true,
+			Bypassed:   true,
 			Limit:      requestsPerWindow,
 			Remaining:  requestsPerWindow,
-			ResetAt:    time.Now().Add(window),
+			ResetAt:    now.Add(window),
 			RetryAfter: 0,
 		}, nil
 	}
@@ -163,6 +185,8 @@ func (s *Service) checkRateLimit(
 }
 
 func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
+	now := requesttime.Now(ctx)
+
 	// Check IP limit first
 	ipRequestsPerWindow, ipWindow, ipOk := s.config.GetIPLimit(class)
 	if !ipOk {
@@ -176,7 +200,7 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 			Allowed:    false,
 			Limit:      0,
 			Remaining:  0,
-			ResetAt:    time.Now(),
+			ResetAt:    now,
 			RetryAfter: 60,
 		}, nil
 	}
@@ -202,7 +226,7 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 			Allowed:    false,
 			Limit:      0,
 			Remaining:  0,
-			ResetAt:    time.Now(),
+			ResetAt:    now,
 			RetryAfter: 60,
 		}, nil
 	}

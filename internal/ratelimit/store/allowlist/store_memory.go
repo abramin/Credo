@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"credo/internal/ratelimit/models"
+	requesttime "credo/pkg/platform/middleware/requesttime"
 )
 
 type InMemoryAllowlistStore struct {
@@ -44,9 +45,10 @@ func (s *InMemoryAllowlistStore) IsAllowlisted(ctx context.Context, identifier s
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	now := requesttime.Now(ctx)
 	for _, entryType := range []models.AllowlistEntryType{models.AllowlistTypeIP, models.AllowlistTypeUserID} {
 		key := buildKey(entryType, identifier)
-		if entry, exists := s.entries[key]; exists && !isExpired(entry) {
+		if entry, exists := s.entries[key]; exists && !entry.IsExpiredAt(now) {
 			return true, nil
 		}
 	}
@@ -58,9 +60,10 @@ func (s *InMemoryAllowlistStore) IsAllowlisted(ctx context.Context, identifier s
 func (s *InMemoryAllowlistStore) List(ctx context.Context) ([]*models.AllowlistEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	now := requesttime.Now(ctx)
 	activeEntries := make([]*models.AllowlistEntry, 0)
 	for _, entry := range s.entries {
-		if !isExpired(entry) {
+		if !entry.IsExpiredAt(now) {
 			activeEntries = append(activeEntries, entry)
 		}
 	}
@@ -85,8 +88,10 @@ func (s *InMemoryAllowlistStore) StartCleanup(ctx context.Context, interval time
 func (s *InMemoryAllowlistStore) removeExpired() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Background cleanup uses wall-clock time since there's no request context
+	now := time.Now()
 	for key, entry := range s.entries {
-		if isExpired(entry) {
+		if entry.IsExpiredAt(now) {
 			delete(s.entries, key)
 		}
 	}
@@ -94,11 +99,4 @@ func (s *InMemoryAllowlistStore) removeExpired() {
 
 func buildKey(entryType models.AllowlistEntryType, identifier string) string {
 	return string(entryType) + ":" + identifier
-}
-
-func isExpired(entry *models.AllowlistEntry) bool {
-	if entry.ExpiresAt == nil {
-		return false
-	}
-	return time.Now().After(*entry.ExpiresAt)
 }

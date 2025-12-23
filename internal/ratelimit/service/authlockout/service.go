@@ -11,6 +11,8 @@ import (
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	request "credo/pkg/platform/middleware/request"
+	requesttime "credo/pkg/platform/middleware/requesttime"
+	"credo/pkg/platform/privacy"
 )
 
 
@@ -85,14 +87,17 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 		record = &models.AuthLockout{}
 	}
 
-	now := time.Now()
+	now := requesttime.Now(ctx)
 
 	// Check if currently hard-locked (FR-2b: "hard lock for 15 minutes")
-	if record.IsLocked() {
-		retryAfter := int(time.Until(*record.LockedUntil).Seconds())
+	if record.IsLockedAt(now) {
+		retryAfter := int(record.LockedUntil.Sub(now).Seconds())
+		if retryAfter < 0 {
+			retryAfter = 0
+		}
 		s.logAudit(ctx, "auth_lockout_triggered",
 			"identifier", identifier,
-			"ip", ip,
+			"ip", privacy.AnonymizeIP(ip),
 			"locked_until", record.LockedUntil,
 		)
 		return &models.AuthRateLimitResult{
@@ -110,11 +115,15 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	if record.IsAttemptLimitReached(s.config.AttemptsPerWindow) {
 		// Block - too many attempts in window
 		resetAt := s.config.ResetTime(record.LastFailureAt)
+		retryAfter := int(resetAt.Sub(now).Seconds())
+		if retryAfter < 0 {
+			retryAfter = 0
+		}
 		return &models.AuthRateLimitResult{
 			RateLimitResult: models.RateLimitResult{
 				Allowed:    false,
 				ResetAt:    resetAt,
-				RetryAfter: int(time.Until(resetAt).Seconds()),
+				RetryAfter: retryAfter,
 			},
 			RequiresCaptcha: record.RequiresCaptcha,
 			FailureCount:    record.FailureCount,
@@ -150,7 +159,7 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 	}
 
 	needsUpdate := false
-	now := time.Now()
+	now := requesttime.Now(ctx)
 
 	// Check if hard lock threshold reached
 	if current.ShouldHardLock(s.config.HardLockThreshold) {
@@ -158,7 +167,7 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 		needsUpdate = true
 		s.logAudit(ctx, "auth_lockout_triggered",
 			"identifier", identifier,
-			"ip", ip,
+			"ip", privacy.AnonymizeIP(ip),
 			"locked_until", current.LockedUntil,
 		)
 	}
@@ -187,7 +196,7 @@ func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 
 	s.logAudit(ctx, "auth_lockout_cleared",
 		"identifier", identifier,
-		"ip", ip,
+		"ip", privacy.AnonymizeIP(ip),
 	)
 
 	return nil

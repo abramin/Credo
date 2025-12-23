@@ -78,12 +78,12 @@ func (s *InMemoryAuthLockoutStore) Clear(_ context.Context, identifier string) e
 	return nil
 }
 
-func (s *InMemoryAuthLockoutStore) IsLocked(_ context.Context, identifier string) (bool, *time.Time, error) {
+func (s *InMemoryAuthLockoutStore) IsLocked(ctx context.Context, identifier string) (bool, *time.Time, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if record, exists := s.records[identifier]; exists {
-		if record.IsLocked() {
+		if record.IsLockedAt(requesttime.Now(ctx)) {
 			return true, record.LockedUntil, nil
 		}
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	requesttime "credo/pkg/platform/middleware/requesttime"
 )
 
 // InMemoryGlobalThrottleStore implements global rate limiting with atomic counters.
@@ -54,8 +56,8 @@ func New(opts ...Option) *InMemoryGlobalThrottleStore {
 // IncrementGlobal increments the global counter and checks if the request is blocked.
 // Returns blocked=true if either per-second or per-hour limit is exceeded.
 // Uses atomic operations for lock-free concurrency.
-func (s *InMemoryGlobalThrottleStore) IncrementGlobal(_ context.Context) (count int, blocked bool, err error) {
-	now := time.Now()
+func (s *InMemoryGlobalThrottleStore) IncrementGlobal(ctx context.Context) (count int, blocked bool, err error) {
+	now := requesttime.Now(ctx)
 	currentSecond := now.Unix()
 	currentHour := now.Truncate(time.Hour).Unix()
 
@@ -98,8 +100,8 @@ func (s *InMemoryGlobalThrottleStore) IncrementGlobal(_ context.Context) (count 
 }
 
 // GetGlobalCount returns the current count in the per-second window.
-func (s *InMemoryGlobalThrottleStore) GetGlobalCount(_ context.Context) (count int, err error) {
-	now := time.Now()
+func (s *InMemoryGlobalThrottleStore) GetGlobalCount(ctx context.Context) (count int, err error) {
+	now := requesttime.Now(ctx)
 	currentSecond := now.Unix()
 
 	// If we're in a new second, the effective count is 0
