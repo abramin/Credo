@@ -1,5 +1,14 @@
 package cleanup
 
+// Justification: These tests verify time-based invariants that cannot be expressed
+// in Gherkin without unreasonably long test execution. They test:
+// - Window failure count resets after 15 minutes (ResetFailureCount)
+// - Daily failure count resets after 24 hours (ResetDailyFailures)
+// - Error propagation from store layer
+//
+// E2E tests cover the user-visible lockout behavior; these tests verify
+// the cleanup worker correctly resets internal state after time windows expire.
+
 import (
 	"context"
 	"testing"

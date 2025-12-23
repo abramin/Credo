@@ -6,7 +6,7 @@ import (
 	"log/slog"
 
 	"credo/internal/ratelimit/models"
-	dErrors "credo/pkg/domain-errors"
+	id "credo/pkg/domain"
 	"credo/pkg/platform/audit"
 	request "credo/pkg/platform/middleware/request"
 )
@@ -71,42 +71,84 @@ func New(
 	return svc, nil
 }
 
-// AddToAllowlist adds an IP or user to the rate limit allowlist.
-func (s *Service) AddToAllowlist(ctx context.Context, req *models.AddAllowlistRequest, adminUserID string) (*models.AllowlistEntry, error) {
-	// TODO: Implement
-	// 1. Validate request
-	// 2. Create AllowlistEntry domain object
-	// 3. Save to allowlist store
-	// 4. Emit audit event "rate_limit_allowlist_added"
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+func (s *Service) AddToAllowlist(ctx context.Context, req *models.AddAllowlistRequest, adminUserID id.UserID) (*models.AllowlistEntry, error) {
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid add allowlist request: %w", err)
+	}
+
+	entry := &models.AllowlistEntry{
+		Type:       req.Type,
+		Identifier: req.Identifier,
+		Reason:     req.Reason,
+		ExpiresAt:  req.ExpiresAt,
+		CreatedBy:  adminUserID,
+	}
+
+	if err := s.allowlist.Add(ctx, entry); err != nil {
+		return nil, fmt.Errorf("failed to add to allowlist: %w", err)
+	}
+
+	s.logAudit(ctx, "rate_limit_allowlist_added",
+		"identifier", entry.Identifier,
+		"type", entry.Type,
+		"expires_at", entry.ExpiresAt,
+		"admin_user_id", adminUserID,
+	)
+	return entry, nil
 }
 
-// RemoveFromAllowlist removes an IP or user from the allowlist.
 func (s *Service) RemoveFromAllowlist(ctx context.Context, req *models.RemoveAllowlistRequest) error {
-	// TODO: Implement
-	// 1. Validate request
-	// 2. Remove from allowlist store
-	// 3. Emit audit event "rate_limit_allowlist_removed"
-	return dErrors.New(dErrors.CodeInternal, "not implemented")
+	if err := req.Validate(); err != nil {
+		return fmt.Errorf("invalid remove allowlist request: %w", err)
+	}
+
+	if err := s.allowlist.Remove(ctx, req.Type, req.Identifier); err != nil {
+		return fmt.Errorf("failed to remove from allowlist: %w", err)
+	}
+
+	s.logAudit(ctx, "rate_limit_allowlist_removed",
+		"identifier", req.Identifier,
+		"type", req.Type,
+	)
+	return nil
 }
 
-// ListAllowlist returns all active allowlist entries.
 func (s *Service) ListAllowlist(ctx context.Context) ([]*models.AllowlistEntry, error) {
-	// TODO: Implement
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	entries, err := s.allowlist.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list allowlist entries: %w", err)
+	}
+	return entries, nil
 }
 
-// ResetRateLimit resets the rate limit counter for an identifier.
 func (s *Service) ResetRateLimit(ctx context.Context, req *models.ResetRateLimitRequest) error {
-	// TODO: Implement
-	// 1. Validate request
-	// 2. Build key(s) to reset
-	// 3. Call buckets.Reset() for each key
-	// 4. Emit audit event "rate_limit_reset"
-	return dErrors.New(dErrors.CodeInternal, "not implemented")
+	if err := req.Validate(); err != nil {
+		return fmt.Errorf("invalid reset rate limit request: %w", err)
+	}
+	keys := []string{}
+	switch req.Type {
+	case models.AllowlistTypeIP:
+		keys = append(keys, fmt.Sprintf("rl:ip:%s", req.Identifier))
+	case models.AllowlistTypeUserID:
+		keys = append(keys, fmt.Sprintf("rl:user:%s", req.Identifier))
+	default:
+		return fmt.Errorf("unknown identifier type: %s", req.Type)
+	}
+
+	for _, key := range keys {
+		if err := s.buckets.Reset(ctx, key); err != nil {
+			return fmt.Errorf("failed to reset rate limit for key %s: %w", key, err)
+		}
+	}
+
+	s.logAudit(ctx, "rate_limit_reset",
+		"identifier", req.Identifier,
+		"type", req.Type,
+		"class", req.Class,
+	)
+	return nil
 }
 
-// logAudit emits an audit event for rate limiting operations.
 func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
 	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attrs = append(attrs, "request_id", requestID)

@@ -22,19 +22,28 @@ type RateLimiter interface {
 	CheckGlobalThrottle(ctx context.Context) (bool, error)
 }
 
-type Middleware struct {
-	limiter  RateLimiter
-	logger   *slog.Logger
-	disabled bool
+type ClientRateLimiter interface {
+	Check(ctx context.Context, clientID, endpoint string) (*models.RateLimitResult, error)
 }
 
-// Option configures the rate limit middleware.
+type Middleware struct {
+	limiter    RateLimiter
+	logger     *slog.Logger
+	disabled   bool
+	supportURL string // URL for user support (included in auth lockout response)
+}
+
 type Option func(*Middleware)
 
-// WithDisabled disables rate limiting entirely (for testing/demo mode).
 func WithDisabled(disabled bool) Option {
 	return func(m *Middleware) {
 		m.disabled = disabled
+	}
+}
+
+func WithSupportURL(url string) Option {
+	return func(m *Middleware) {
+		m.supportURL = url
 	}
 }
 
@@ -83,7 +92,6 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 	}
 }
 
-// RateLimitAuthenticated returns middleware that enforces both IP and user rate limits.
 func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,73 +123,34 @@ func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(htt
 	}
 }
 
-// RateLimitAuth returns middleware for authentication endpoints with lockout.
-//
-// TODO: Implement this middleware
-// This is applied to /auth/authorize, /auth/token, /auth/password-reset, /mfa/*
-// 1. Extract client IP from context
-// 2. Extract identifier (email/username) from request body if applicable
-// 3. Call limiter.CheckAuthRateLimit
-// 4. Apply progressive backoff delay if configured
-// 5. If locked out, return 429 with lockout info
-// 6. Else call next handler
-func (m *Middleware) RateLimitAuth() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			ip := metadata.GetClientIP(ctx)
-
-			// TODO: Implement auth rate limit with lockout
-			// Note: May need to peek at request body to get email/username
-			// result, err := m.limiter.CheckAuthRateLimit(ctx, "", ip)
-			// if err != nil { ... }
-			//
-			// addRateLimitHeaders(w, result)
-			//
-			// if !result.Allowed {
-			//     writeAuthLockout(w, result)
-			//     return
-			// }
-
-			_ = ip
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // GlobalThrottle returns middleware for global DDoS protection.
-//
-// TODO: Implement this middleware
-// 1. Call limiter.CheckGlobalThrottle
-// 2. If throttled, return 503 Service Unavailable
-// 3. Else call next handler
 func (m *Middleware) GlobalThrottle() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.disabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx := r.Context()
 
-			// TODO: Implement global throttle
-			// allowed, err := m.limiter.CheckGlobalThrottle(ctx)
-			// if err != nil { ... log and allow through ... }
-			//
-			// if !allowed {
-			//     writeServiceOverloaded(w)
-			//     return
-			// }
+			allowed, err := m.limiter.CheckGlobalThrottle(ctx)
+			if err != nil {
+				m.logger.Error("failed to check global throttle", "error", err)
+				next.ServeHTTP(w, r)
+				return
+			}
 
-			_ = ctx
+			if !allowed {
+				writeServiceOverloaded(w)
+				return
+			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-// addRateLimitHeaders adds X-RateLimit-* headers to the response.
-// // Headers:
-// - X-RateLimit-Limit: {limit}
-// - X-RateLimit-Remaining: {remaining}
-// - X-RateLimit-Reset: {unix timestamp}
 func addRateLimitHeaders(w http.ResponseWriter, result *models.RateLimitResult) {
 	if result == nil {
 		return
@@ -218,6 +187,77 @@ func writeServiceOverloaded(w http.ResponseWriter) {
 		Message:    "Service is temporarily overloaded. Please try again later.",
 		RetryAfter: 60,
 	})
+}
+
+func writeClientRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResult) {
+	w.Header().Set("Retry-After", strconv.Itoa(result.RetryAfter))
+	httputil.WriteJSON(w, http.StatusTooManyRequests, &models.ClientRateLimitExceededResponse{
+		Error:      "client_rate_limit_exceeded",
+		Message:    "OAuth client has exceeded its request quota. Please retry later.",
+		RetryAfter: result.RetryAfter,
+	})
+}
+
+type ClientMiddleware struct {
+	limiter  ClientRateLimiter
+	logger   *slog.Logger
+	disabled bool
+}
+
+// NewClientMiddleware creates a new client rate limit middleware.
+func NewClientMiddleware(limiter ClientRateLimiter, logger *slog.Logger, disabled bool) *ClientMiddleware {
+	return &ClientMiddleware{
+		limiter:  limiter,
+		logger:   logger,
+		disabled: disabled,
+	}
+}
+
+// RateLimitClient returns middleware that enforces per-client rate limits on OAuth endpoints.
+// It extracts client_id from query parameters (for authorize) or request body (for token).
+func (m *ClientMiddleware) RateLimitClient() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.disabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ctx := r.Context()
+
+			// Extract client_id from query params (authorize) or form data (token)
+			clientID := r.URL.Query().Get("client_id")
+			if clientID == "" {
+				// Try form data for POST requests
+				if r.Method == http.MethodPost {
+					clientID = r.FormValue("client_id")
+				}
+			}
+
+			if clientID == "" {
+				// No client_id, skip client rate limiting
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			endpoint := r.URL.Path
+			result, err := m.limiter.Check(ctx, clientID, endpoint)
+			if err != nil {
+				m.logger.Error("failed to check client rate limit", "error", err)
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			addRateLimitHeaders(w, result)
+
+			if !result.Allowed {
+				writeClientRateLimitExceeded(w, result)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // Ensure unused imports are referenced

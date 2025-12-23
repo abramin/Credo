@@ -14,119 +14,33 @@ import (
 	id "credo/pkg/domain"
 )
 
+// NOTE: Basic Add/Remove tests for IP entries are covered by E2E FR-4 scenarios.
+// Only user_id paths and edge cases not covered by E2E are tested here.
 func TestInMemoryAllowlistStore_Add(t *testing.T) {
 	store := New()
 	ctx := context.Background()
 
-	testCases := []struct {
-		name  string
-		entry *models.AllowlistEntry
-	}{
-		{
-			name:  "add IP entry",
-			entry: newAllowlistEntry(t, models.AllowlistTypeIP, "192.168.1.100"),
-		},
-		{
-			name:  "add user_id entry",
-			entry: newAllowlistEntry(t, models.AllowlistTypeUserID, uuid.NewString()),
-		},
-		{
-			name: "add entry with expiration",
-			entry: newAllowlistEntry(
-				t,
-				models.AllowlistTypeUserID,
-				uuid.NewString(),
-				withExpiry(time.Now().Add(time.Hour)),
-			),
-		},
-	}
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			err := store.Add(ctx, tc.entry)
-			require.NoError(t, err)
-		})
-	}
+	// user_id path not covered by E2E (E2E only tests IP allowlisting)
+	t.Run("add user_id entry", func(t *testing.T) {
+		entry := newAllowlistEntry(t, models.AllowlistTypeUserID, uuid.NewString())
+		err := store.Add(ctx, entry)
+		require.NoError(t, err)
+	})
 }
 
 func TestInMemoryAllowlistStore_Remove(t *testing.T) {
 	store := New()
 	ctx := context.Background()
-	entry := newAllowlistEntry(t, models.AllowlistTypeIP, "transient-ip")
 
-	t.Run("remove existing entry", func(t *testing.T) {
-		err := store.Add(ctx, entry)
-		require.NoError(t, err)
-		err = store.Remove(ctx, entry.Type, entry.Identifier)
-		require.NoError(t, err)
-
-		// Verify it's removed
-		allowed, err := store.IsAllowlisted(ctx, entry.Identifier)
-		require.NoError(t, err)
-		assert.False(t, allowed)
-	})
-
-	t.Run("remove non-existent entry", func(t *testing.T) {
+	// Idempotency edge case: remove non-existent entry should succeed (not covered by E2E)
+	t.Run("remove non-existent entry is idempotent", func(t *testing.T) {
 		err := store.Remove(ctx, models.AllowlistTypeIP, "non-existent-ip")
 		require.NoError(t, err)
 	})
 }
 
-func TestInMemoryAllowlistStore_IsAllowlisted(t *testing.T) {
-	ctx := context.Background()
-	activeEntry := newAllowlistEntry(t, models.AllowlistTypeIP, "transient-ip")
-	expiredEntry := newAllowlistEntry(t, models.AllowlistTypeIP, "expired-ip", withExpiry(time.Now().Add(-1*time.Hour)))
-
-	testCases := []struct {
-		name       string
-		identifier string
-		setup      func(t *testing.T, store *InMemoryAllowlistStore)
-		expected   bool
-	}{
-		{
-			name:       "non-existent identifier returns false",
-			identifier: "unknown-ip",
-			setup: func(t *testing.T, store *InMemoryAllowlistStore) {
-				t.Helper()
-			},
-			expected: false,
-		},
-		{
-			name:       "existing IP entry returns true",
-			identifier: activeEntry.Identifier,
-			setup: func(t *testing.T, store *InMemoryAllowlistStore) {
-				t.Helper()
-				err := store.Add(ctx, activeEntry)
-				require.NoError(t, err)
-			},
-			expected: true,
-		},
-		{
-			name:       "expired entry returns false",
-			identifier: expiredEntry.Identifier,
-			setup: func(t *testing.T, store *InMemoryAllowlistStore) {
-				t.Helper()
-				err := store.Add(ctx, expiredEntry)
-				require.NoError(t, err)
-			},
-			expected: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			store := New()
-			if tc.setup != nil {
-				tc.setup(t, store)
-			}
-			allowed, err := store.IsAllowlisted(ctx, tc.identifier)
-			require.NoError(t, err)
-			assert.Equal(t, tc.expected, allowed)
-		})
-	}
-}
+// NOTE: IsAllowlisted tests (non-existent, existing, expired) are covered by
+// E2E FR-4 scenarios: "Allowlisted IP bypasses limits", "Allowlist entry expires"
 
 func TestInMemoryAllowlistStore_List(t *testing.T) {
 	ctx := context.Background()

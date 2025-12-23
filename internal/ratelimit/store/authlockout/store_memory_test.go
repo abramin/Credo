@@ -53,45 +53,8 @@ func (s *InMemoryAuthLockoutStoreSuite) TestGet() {
 	})
 }
 
-func (s *InMemoryAuthLockoutStoreSuite) TestRecordFailure() {
-	s.Run("first failure creates record with counters initialized to 1", func() {
-		fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-		ctx := requesttime.WithTime(context.Background(), fixedTime)
-		identifier := "new-user"
-
-		record, err := s.store.RecordFailure(ctx, identifier)
-		s.NoError(err)
-		s.NotNil(record)
-
-		s.Equal(identifier, record.Identifier)
-		s.Equal(1, record.FailureCount)
-		s.Equal(1, record.DailyFailures)
-		s.Equal(fixedTime, record.LastFailureAt)
-		s.Nil(record.LockedUntil)
-		s.False(record.RequiresCaptcha)
-	})
-
-	s.Run("subsequent failures increment counters", func() {
-		firstTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
-		secondTime := time.Date(2024, 6, 15, 12, 1, 0, 0, time.UTC)
-		identifier := "repeat-offender"
-
-		// First failure
-		ctx1 := requesttime.WithTime(context.Background(), firstTime)
-		record1, err := s.store.RecordFailure(ctx1, identifier)
-		s.NoError(err)
-		s.Equal(1, record1.FailureCount)
-		s.Equal(firstTime, record1.LastFailureAt)
-
-		// Second failure - different time
-		ctx2 := requesttime.WithTime(context.Background(), secondTime)
-		record2, err := s.store.RecordFailure(ctx2, identifier)
-		s.NoError(err)
-		s.Equal(2, record2.FailureCount)
-		s.Equal(2, record2.DailyFailures)
-		s.Equal(secondTime, record2.LastFailureAt)
-	})
-}
+// NOTE: RecordFailure tests (first creates record, subsequent increments) are covered
+// by E2E FR-2b scenarios: "Auth lockout after failed attempts", "5 attempts/15 min"
 
 func (s *InMemoryAuthLockoutStoreSuite) TestClear() {
 	ctx := context.Background()
@@ -123,32 +86,10 @@ func (s *InMemoryAuthLockoutStoreSuite) TestClear() {
 func (s *InMemoryAuthLockoutStoreSuite) TestIsLocked() {
 	ctx := context.Background()
 
-	s.Run("unlocked when no record exists", func() {
-		locked, lockedUntil, err := s.store.IsLocked(ctx, "unknown")
-		s.NoError(err)
-		assert.False(s.T(), locked)
-		assert.Nil(s.T(), lockedUntil)
-	})
+	// NOTE: "unlocked when no record exists" and "locked when future" are covered by
+	// E2E FR-2b scenarios: first attempts succeed, lockout returns 429
 
-	s.Run("locked when LockedUntil is in the future", func() {
-		identifier := "locked-user"
-		futureTime := time.Now().Add(10 * time.Minute)
-
-		// Create and update record with lock
-		_, err := s.store.RecordFailure(ctx, identifier)
-		s.NoError(err)
-
-		record, _ := s.store.Get(ctx, identifier)
-		record.LockedUntil = &futureTime
-		err = s.store.Update(ctx, record)
-		s.NoError(err)
-
-		locked, lockedUntil, err := s.store.IsLocked(ctx, identifier)
-		s.NoError(err)
-		s.True(locked)
-		s.Equal(futureTime, *lockedUntil)
-	})
-
+	// Lock expiry edge case: not explicitly tested in E2E
 	s.Run("unlocked when LockedUntil is in the past", func() {
 		identifier := "expired-lock-user"
 		pastTime := time.Now().Add(-10 * time.Minute)
@@ -211,12 +152,10 @@ func (s *InMemoryAuthLockoutStoreSuite) TestResetFailureCount() {
 	_, err = s.store.RecordFailure(ctxRecent, identifier2)
 	s.NoError(err)
 
-	// Reset failure counts
 	resetCount, err := s.store.ResetFailureCount(ctx)
 	s.NoError(err)
 	s.Equal(1, resetCount, "should reset 1 record's failure count")
 
-	// Verify counts
 	record1, _ := s.store.Get(ctx, identifier1)
 	s.Equal(0, record1.FailureCount, "old failure user's count should be reset")
 
@@ -238,12 +177,10 @@ func (s *InMemoryAuthLockoutStoreSuite) TestResetDailyFailures() {
 	_, err = s.store.RecordFailure(ctx, identifier2)
 	s.NoError(err)
 
-	// Reset daily failures
 	resetCount, err := s.store.ResetDailyFailures(ctx)
 	s.NoError(err)
 	s.Equal(1, resetCount, "should reset daily failures for 1 records")
 
-	// Verify daily failures
 	record1, _ := s.store.Get(ctx, identifier1)
 	s.Equal(0, record1.DailyFailures, "user one daily failures should be reset")
 

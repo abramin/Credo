@@ -145,7 +145,6 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	}, nil
 }
 
-// RecordFailure records a failed authentication attempt.
 func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*models.AuthLockout, error) {
 	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, identifier, ip)
 	current, err := s.store.RecordFailure(ctx, key)
@@ -180,7 +179,6 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 	return current, nil
 }
 
-// Clear clears auth failure state after successful login.
 func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, identifier, ip)
 	err := s.store.Clear(ctx, key)

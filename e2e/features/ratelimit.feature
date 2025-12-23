@@ -243,3 +243,42 @@ Feature: Rate Limiting & Abuse Prevention
     Given rate limits are configured via environment variables
     Then the auth endpoint limit should match RATELIMIT_AUTH_LIMIT
     And the read endpoint limit should match RATELIMIT_READ_LIMIT
+
+  # ============================================================
+  # FR-2c: Per-Client Rate Limiting (OAuth client_id)
+  # ============================================================
+
+  @ratelimit @client @oauth @prd-017 @simulation
+  Scenario: Confidential client gets higher rate limit (100 req/min)
+    Given OAuth client "confidential-client" is registered as type "confidential"
+    When I make 100 requests to "/auth/token" as client "confidential-client" within 1 minute
+    Then all 100 requests should succeed
+    When I make the 101st request
+    Then the response status should be 429
+    And the response field "error" should equal "client_rate_limit_exceeded"
+
+  @ratelimit @client @oauth @prd-017 @simulation
+  Scenario: Public client gets lower rate limit (30 req/min)
+    Given OAuth client "public-spa" is registered as type "public"
+    When I make 30 requests to "/auth/token" as client "public-spa" within 1 minute
+    Then all 30 requests should succeed
+    When I make the 31st request
+    Then the response status should be 429
+    And the response field "error" should equal "client_rate_limit_exceeded"
+
+  # ============================================================
+  # FR-7: Rate Limiter Failure Mode (Circuit Breaker)
+  # ============================================================
+
+  @ratelimit @failover @prd-017 @simulation
+  Scenario: In-memory fallback activates when Redis unavailable
+    Given Redis rate limiter is unavailable
+    When I make a request to "/auth/authorize"
+    Then the request should proceed with fallback rate limiting
+    And the response should contain header "X-RateLimit-Status" with value "degraded"
+
+  @ratelimit @failover @prd-017 @simulation
+  Scenario: Circuit breaker opens after threshold failures
+    Given Redis has failed 5 consecutive times
+    Then the circuit breaker should be open
+    And requests should use in-memory fallback

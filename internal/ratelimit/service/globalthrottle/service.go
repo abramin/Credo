@@ -65,15 +65,14 @@ func New(store Store, opts ...Option) (*Service, error) {
 	return svc, nil
 }
 
-// Check checks if the global throttle is triggered.
-// Returns true if the request should be blocked.
+// Check returns whether the request is allowed (true = allow, false = block).
+// It increments the global counter and checks against the configured limit.
 func (s *Service) Check(ctx context.Context) (bool, error) {
 	count, blocked, err := s.store.IncrementGlobal(ctx)
 	if err != nil {
 		return false, dErrors.Wrap(err, dErrors.CodeInternal, "failed to increment global throttle")
 	}
 
-	// Log if we are blocking due to global throttle
 	if blocked {
 		s.logAudit(ctx, "global_throttle_triggered",
 			"current_count", count,
@@ -81,10 +80,10 @@ func (s *Service) Check(ctx context.Context) (bool, error) {
 		)
 	}
 
-	return blocked, nil
+	// Return allowed semantics: !blocked means allowed
+	return !blocked, nil
 }
 
-// GetCount returns the current global request count.
 func (s *Service) GetCount(ctx context.Context) (int, error) {
 	count, err := s.store.GetGlobalCount(ctx)
 	if err != nil {
