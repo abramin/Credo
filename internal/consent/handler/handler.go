@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -79,21 +78,8 @@ func (h *Handler) HandleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var grantReq models.GrantRequest
-	if err := json.NewDecoder(r.Body).Decode(&grantReq); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode grant consent request",
-			"request_id", requestID,
-			"error", err,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
-		return
-	}
-	if err := prepareRequest(&grantReq); err != nil {
-		h.logger.WarnContext(ctx, "invalid grant consent request",
-			"request_id", requestID,
-			"error", err,
-		)
-		httputil.WriteError(w, mapValidationError(err))
+	grantReq, ok := httputil.DecodeAndPrepare[models.GrantRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
@@ -119,21 +105,8 @@ func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var revokeReq models.RevokeRequest
-	if err := json.NewDecoder(r.Body).Decode(&revokeReq); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode revoke consent request",
-			"request_id", requestID,
-			"error", err,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
-		return
-	}
-	if err := prepareRequest(&revokeReq); err != nil {
-		h.logger.WarnContext(ctx, "invalid revoke consent request",
-			"request_id", requestID,
-			"error", err,
-		)
-		httputil.WriteError(w, mapValidationError(err))
+	revokeReq, ok := httputil.DecodeAndPrepare[models.RevokeRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
@@ -304,15 +277,3 @@ func formatActionMessage(template string, count int) string {
 	return fmt.Sprintf(template+"%s", count, suffix)
 }
 
-// mapValidationError converts validation errors to domain errors.
-func mapValidationError(err error) error {
-	return dErrors.New(dErrors.CodeValidation, err.Error())
-}
-
-// prepareRequest sanitizes, normalizes, and validates a consent request.
-// This replaces the reflection-based sanitize() with type-safe methods.
-func prepareRequest(req models.ConsentRequest) error {
-	req.Sanitize()
-	req.Normalize()
-	return req.Validate()
-}

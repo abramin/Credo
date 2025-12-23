@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -184,22 +183,25 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	requestID := request.GetRequestID(ctx)
 	clientIP := metadata.GetClientIP(ctx)
 
-	var req models.AuthorizationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode authorize request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
+	req, ok := httputil.DecodeJSON[models.AuthorizationRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
 	// Check auth rate limit using email + IP composite key (PRD-017 FR-2)
+	// Rate limit before validation to count all attempts
 	if !h.checkRateLimit(ctx, w, requestID, req.Email, clientIP, "authorize") {
 		return
 	}
 
-	res, err := h.auth.Authorize(ctx, &req)
+	// Normalize and validate after rate limit check
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		httputil.WriteError(w, err)
+		return
+	}
+
+	res, err := h.auth.Authorize(ctx, req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "authorize failed",
 			"error", err,
@@ -237,22 +239,25 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	requestID := request.GetRequestID(ctx)
 	clientIP := metadata.GetClientIP(ctx)
 
-	var req models.TokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode token request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
+	req, ok := httputil.DecodeJSON[models.TokenRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
 	// Check token rate limit using client_id + IP composite key
+	// Rate limit before validation to count all attempts
 	if req.ClientID != "" && !h.checkRateLimit(ctx, w, requestID, req.ClientID, clientIP, "token") {
 		return
 	}
 
-	res, err := h.auth.Token(ctx, &req)
+	// Normalize and validate after rate limit check
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		httputil.WriteError(w, err)
+		return
+	}
+
+	res, err := h.auth.Token(ctx, req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "token exchange failed",
 			"error", err,
@@ -399,13 +404,8 @@ func (h *Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
 
-	var req models.RevokeTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode revoke request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
+	req, ok := httputil.DecodeAndPrepare[models.RevokeTokenRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 

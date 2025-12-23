@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -64,6 +63,34 @@ func (h *Handler) RegisterAdmin(r chi.Router) {
 	r.Put("/admin/rate-limit/quota/{api_key}/tier", h.HandleUpdateQuotaTier)
 }
 
+// requireQuotaService checks that the quota service is configured.
+// Returns false if not configured (error response already written).
+func (h *Handler) requireQuotaService(w http.ResponseWriter) bool {
+	if h.quotaService == nil {
+		httputil.WriteError(w, dErrors.New(dErrors.CodeInternal, "quota service not configured"))
+		return false
+	}
+	return true
+}
+
+// requireAPIKeyFromPath parses api_key from URL path parameter.
+// Returns the raw string (for logging) and parsed ID.
+// Returns false if parsing fails (error response already written).
+func (h *Handler) requireAPIKeyFromPath(r *http.Request, w http.ResponseWriter, requestID string) (string, id.APIKeyID, bool) {
+	ctx := r.Context()
+	apiKeyStr := chi.URLParam(r, "api_key")
+	apiKeyID, err := id.ParseAPIKeyID(apiKeyStr)
+	if err != nil {
+		h.logger.WarnContext(ctx, "invalid api_key format",
+			"api_key", apiKeyStr,
+			"request_id", requestID,
+		)
+		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid api_key format"))
+		return "", "", false
+	}
+	return apiKeyStr, apiKeyID, true
+}
+
 // HandleAddAllowlist implements POST /admin/rate-limit/allowlist.
 // Input: { "type": "ip", "identifier": "192.168.1.100", "reason": "...", "expires_at": "..." }
 // Output: { "allowlisted": true, "identifier": "192.168.1.100", "expires_at": "..." }
@@ -75,18 +102,13 @@ func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 	// Limit request body size to prevent DoS via large payloads
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024) // 64KB max
 
-	var req models.AddAllowlistRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode add allowlist request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
+	req, ok := httputil.DecodeAndPrepare[models.AddAllowlistRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
 	adminUserID := auth.GetUserID(ctx)
-	entry, err := h.service.AddToAllowlist(ctx, &req, adminUserID)
+	entry, err := h.service.AddToAllowlist(ctx, req, adminUserID)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to add to allowlist",
 			"error", err,
@@ -116,17 +138,12 @@ func (h *Handler) HandleRemoveAllowlist(w http.ResponseWriter, r *http.Request) 
 	// Limit request body size to prevent DoS via large payloads
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024) // 64KB max
 
-	var req models.RemoveAllowlistRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode remove allowlist request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
+	req, ok := httputil.DecodeAndPrepare[models.RemoveAllowlistRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
-	err := h.service.RemoveFromAllowlist(ctx, &req)
+	err := h.service.RemoveFromAllowlist(ctx, req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to remove from allowlist",
 			"error", err,
@@ -173,18 +190,12 @@ func (h *Handler) HandleResetRateLimit(w http.ResponseWriter, r *http.Request) {
 	// Limit request body size to prevent DoS via large payloads
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024) // 64KB max
 
-	var req models.ResetRateLimitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode reset rate limit request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
+	req, ok := httputil.DecodeAndPrepare[models.ResetRateLimitRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
-	// TODO: Implement
-	err := h.service.ResetRateLimit(ctx, &req)
+	err := h.service.ResetRateLimit(ctx, req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to reset rate limit",
 			"error", err,
@@ -207,19 +218,12 @@ func (h *Handler) HandleGetQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
 
-	if h.quotaService == nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeInternal, "quota service not configured"))
+	if !h.requireQuotaService(w) {
 		return
 	}
 
-	apiKeyStr := chi.URLParam(r, "api_key")
-	apiKeyID, err := id.ParseAPIKeyID(apiKeyStr)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid api_key format",
-			"api_key", apiKeyStr,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid api_key format"))
+	apiKeyStr, apiKeyID, ok := h.requireAPIKeyFromPath(r, w, requestID)
+	if !ok {
 		return
 	}
 
@@ -257,19 +261,12 @@ func (h *Handler) HandleResetQuota(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
 
-	if h.quotaService == nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeInternal, "quota service not configured"))
+	if !h.requireQuotaService(w) {
 		return
 	}
 
-	apiKeyStr := chi.URLParam(r, "api_key")
-	apiKeyID, err := id.ParseAPIKeyID(apiKeyStr)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid api_key format",
-			"api_key", apiKeyStr,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid api_key format"))
+	apiKeyStr, apiKeyID, ok := h.requireAPIKeyFromPath(r, w, requestID)
+	if !ok {
 		return
 	}
 
@@ -304,8 +301,7 @@ func (h *Handler) HandleListQuotas(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
 
-	if h.quotaService == nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeInternal, "quota service not configured"))
+	if !h.requireQuotaService(w) {
 		return
 	}
 
@@ -345,39 +341,23 @@ func (h *Handler) HandleUpdateQuotaTier(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
 
-	if h.quotaService == nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeInternal, "quota service not configured"))
+	if !h.requireQuotaService(w) {
 		return
 	}
 
-	apiKeyStr := chi.URLParam(r, "api_key")
-	apiKeyID, err := id.ParseAPIKeyID(apiKeyStr)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid api_key format",
-			"api_key", apiKeyStr,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid api_key format"))
+	apiKeyStr, apiKeyID, ok := h.requireAPIKeyFromPath(r, w, requestID)
+	if !ok {
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
-	var req models.UpdateQuotaTierRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.logger.WarnContext(ctx, "failed to decode update tier request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
+
+	req, ok := httputil.DecodeAndPrepare[models.UpdateQuotaTierRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
-	if err := req.Validate(); err != nil {
-		httputil.WriteError(w, err)
-		return
-	}
-
-	tier := models.QuotaTier(strings.TrimSpace(strings.ToLower(req.Tier)))
+	tier := models.QuotaTier(req.Tier) // Already normalized by DecodeAndPrepare
 	if err := h.quotaService.UpdateTier(ctx, apiKeyID, tier); err != nil {
 		h.logger.ErrorContext(ctx, "failed to update tier",
 			"error", err,

@@ -7,6 +7,7 @@ import (
 
 	"credo/internal/auth/email"
 	dErrors "credo/pkg/domain-errors"
+	strutil "credo/pkg/platform/strings"
 )
 
 type AuthorizationRequest struct {
@@ -30,23 +31,7 @@ func (r *AuthorizationRequest) Normalize() {
 	if len(r.Scopes) == 0 {
 		r.Scopes = []string{string(ScopeOpenID)}
 	}
-	r.Scopes = trimAndDedupScopes(r.Scopes)
-}
-
-func trimAndDedupScopes(scopes []string) []string {
-	seen := make(map[string]struct{})
-	normalized := make([]string, 0, len(scopes))
-	for _, s := range scopes {
-		trimmed := strings.TrimSpace(s)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; !ok {
-			seen[trimmed] = struct{}{}
-			normalized = append(normalized, trimmed)
-		}
-	}
-	return normalized
+	r.Scopes = strutil.DedupeAndTrim(r.Scopes)
 }
 
 // Validate validates the authorization request following strict validation order:

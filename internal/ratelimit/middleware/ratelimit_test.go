@@ -53,6 +53,11 @@ func (s *MiddlewareSecuritySuite) SetupTest() {
 	s.fallback = NewFallbackLimiter(fallbackConfig, allowlist.New(), s.logger)
 }
 
+func withClientMetadata(req *http.Request) *http.Request {
+	ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
+	return req.WithContext(ctx)
+}
+
 // =============================================================================
 // Mock Rate Limiter for Testing
 // =============================================================================
@@ -128,9 +133,7 @@ func (s *MiddlewareSecuritySuite) TestFailOpenBehavior() {
 		})
 
 		// Create request with client IP in context
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		req = req.WithContext(ctx)
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 
 		rr := httptest.NewRecorder()
 
@@ -155,9 +158,7 @@ func (s *MiddlewareSecuritySuite) TestFailOpenBehavior() {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		req = req.WithContext(ctx)
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 
 		rr := httptest.NewRecorder()
 
@@ -214,9 +215,7 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		req = req.WithContext(ctx)
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 
 		rr := httptest.NewRecorder()
 
@@ -247,9 +246,8 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 			nextCalled = true
 		})
 
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		ctx = context.WithValue(ctx, authmw.ContextKeyUserID, "user-123")
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, "user-123")
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
@@ -286,9 +284,7 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 			nextCalled = true
 		})
 
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		req = req.WithContext(ctx)
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 
 		rr := httptest.NewRecorder()
 
@@ -331,7 +327,6 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 	s.Run("circuit breaker opens after consecutive failures", func() {
 		// Setup: Rate limiter that always fails
-		failCount := 0
 		limiter := &mockRateLimiter{
 			checkIPErr: errors.New("store unavailable"),
 		}
@@ -345,21 +340,16 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 
 		// Make 5 consecutive failing requests to trigger circuit breaker
 		for range 5 {
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-			req = req.WithContext(ctx)
+			req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 			rr := httptest.NewRecorder()
 
 			handler := middleware.RateLimit(models.ClassRead)(next)
 			handler.ServeHTTP(rr, req)
-			failCount++
 		}
 
 		// After threshold, circuit should be open
 		// The middleware should indicate degraded mode
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		req = req.WithContext(ctx)
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 		rr := httptest.NewRecorder()
 
 		handler := middleware.RateLimit(models.ClassRead)(next)
@@ -384,9 +374,7 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 		})
 
 		for i := 0; i < 5; i++ {
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-			req = req.WithContext(ctx)
+			req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 			rr := httptest.NewRecorder()
 			handler := middleware.RateLimit(models.ClassRead)(next)
 			handler.ServeHTTP(rr, req)
@@ -395,18 +383,14 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 		// Now make requests - should use in-memory fallback
 		// Requests should still have rate limit enforcement via fallback
 		for i := 0; i < s.fallbackAuthLimit; i++ {
-			req := httptest.NewRequest(http.MethodGet, "/auth/authorize", nil)
-			ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-			req = req.WithContext(ctx)
+			req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/auth/authorize", nil))
 			rr := httptest.NewRecorder()
 			handler := middleware.RateLimit(models.ClassAuth)(next)
 			handler.ServeHTTP(rr, req)
 		}
 
 		// After exceeding in-memory limit, should block
-		req := httptest.NewRequest(http.MethodGet, "/auth/authorize", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		req = req.WithContext(ctx)
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/auth/authorize", nil))
 		rr := httptest.NewRecorder()
 		handler := middleware.RateLimit(models.ClassAuth)(next)
 		handler.ServeHTTP(rr, req)
@@ -432,9 +416,7 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 
 		// Open the circuit with 5 failures
 		for i := 0; i < 5; i++ {
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-			req = req.WithContext(ctx)
+			req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 			rr := httptest.NewRecorder()
 			handler := middleware.RateLimit(models.ClassRead)(next)
 			handler.ServeHTTP(rr, req)
@@ -450,9 +432,7 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 
 		// Make successful requests - circuit should eventually close
 		for range 3 { // 3 successful probes threshold
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-			req = req.WithContext(ctx)
+			req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 			rr := httptest.NewRecorder()
 			handler := middleware.RateLimit(models.ClassRead)(next)
 			handler.ServeHTTP(rr, req)
@@ -462,9 +442,7 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 		}
 
 		// After successful probes, circuit should be closed
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		ctx := metadata.WithClientMetadata(req.Context(), "192.168.1.1", "test-agent")
-		req = req.WithContext(ctx)
+		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
 		rr := httptest.NewRecorder()
 		handler := middleware.RateLimit(models.ClassRead)(next)
 		handler.ServeHTTP(rr, req)

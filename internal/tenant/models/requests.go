@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	dErrors "credo/pkg/domain-errors"
+	strutil "credo/pkg/platform/strings"
 )
+
+const maxNameLength = 128
 
 type CreateTenantRequest struct {
 	Name string `json:"name"`
@@ -24,14 +27,7 @@ func (r *CreateTenantRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
-	r.Name = strings.TrimSpace(r.Name)
-	if r.Name == "" {
-		return dErrors.New(dErrors.CodeValidation, "name is required")
-	}
-	if len(r.Name) > 128 {
-		return dErrors.New(dErrors.CodeValidation, "name must be 128 characters or less")
-	}
-	return nil
+	return validateRequiredName(r.Name)
 }
 
 type CreateClientRequest struct {
@@ -49,9 +45,9 @@ func (r *CreateClientRequest) Normalize() {
 		return
 	}
 	r.Name = strings.TrimSpace(r.Name)
-	r.RedirectURIs = normalizeStrings(r.RedirectURIs)
-	r.AllowedGrants = normalizeStrings(lowerStrings(r.AllowedGrants))
-	r.AllowedScopes = normalizeStrings(r.AllowedScopes)
+	r.RedirectURIs = strutil.DedupeAndTrim(r.RedirectURIs)
+	r.AllowedGrants = strutil.DedupeAndTrimLower(r.AllowedGrants)
+	r.AllowedScopes = strutil.DedupeAndTrim(r.AllowedScopes)
 }
 
 func (r *CreateClientRequest) Validate() error {
@@ -61,41 +57,22 @@ func (r *CreateClientRequest) Validate() error {
 	// Note: We don't validate tenant_id != uuid.Nil here.
 	// Instead, we let the service look up the tenant and return 404 if not found.
 	// This gives consistent "tenant not found" behavior for both nil and non-existent UUIDs.
-	r.Name = strings.TrimSpace(r.Name)
-	if r.Name == "" {
-		return dErrors.New(dErrors.CodeValidation, "name is required")
+	if err := validateRequiredName(r.Name); err != nil {
+		return err
 	}
-	if len(r.Name) > 128 {
-		return dErrors.New(dErrors.CodeValidation, "name must be 128 characters or less")
+	if err := validateRequiredSlice(r.RedirectURIs, "redirect_uris", "redirect_uri", validateRedirectURI); err != nil {
+		return err
 	}
-	if len(r.RedirectURIs) == 0 {
-		return dErrors.New(dErrors.CodeValidation, "redirect_uris are required")
-	}
-	for _, uri := range r.RedirectURIs {
-		if err := validateRedirectURI(uri); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeValidation, "invalid redirect_uri")
-		}
-	}
-	if len(r.AllowedGrants) == 0 {
-		return dErrors.New(dErrors.CodeValidation, "allowed_grants are required")
-	}
-	for _, grant := range r.AllowedGrants {
-		if err := validateGrant(grant); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeValidation, "invalid allowed_grants")
-		}
+	if err := validateRequiredSlice(r.AllowedGrants, "allowed_grants", "allowed_grants", validateGrant); err != nil {
+		return err
 	}
 	if r.Public {
 		if slices.Contains(r.AllowedGrants, "client_credentials") {
 			return dErrors.New(dErrors.CodeValidation, "client_credentials grant requires a confidential client")
 		}
 	}
-	if len(r.AllowedScopes) == 0 {
-		return dErrors.New(dErrors.CodeValidation, "allowed_scopes are required")
-	}
-	for _, scope := range r.AllowedScopes {
-		if err := validateScope(scope); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeValidation, "invalid allowed_scopes")
-		}
+	if err := validateRequiredSlice(r.AllowedScopes, "allowed_scopes", "allowed_scopes", validateScope); err != nil {
+		return err
 	}
 	return nil
 }
@@ -153,6 +130,31 @@ func validateScope(scope string) error {
 	return nil
 }
 
+func validateRequiredName(name string) error {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return dErrors.New(dErrors.CodeValidation, "name is required")
+	}
+	if len(trimmed) > maxNameLength {
+		return dErrors.New(dErrors.CodeValidation, "name must be 128 characters or less")
+	}
+	return nil
+}
+
+// validateRequiredSlice validates a required slice field.
+// Returns error if empty or any item fails validation.
+func validateRequiredSlice(field []string, fieldName string, invalidName string, validateItem func(string) error) error {
+	if len(field) == 0 {
+		return dErrors.New(dErrors.CodeValidation, fieldName+" are required")
+	}
+	for _, item := range field {
+		if err := validateItem(item); err != nil {
+			return dErrors.Wrap(err, dErrors.CodeValidation, "invalid "+invalidName)
+		}
+	}
+	return nil
+}
+
 // validateOptionalSlice validates an optional slice field.
 // Returns nil if field is nil, error if empty or any item fails validation.
 func validateOptionalSlice(field *[]string, fieldName string, validateItem func(string) error) error {
@@ -180,7 +182,7 @@ func validateOptionalName(name *string) error {
 	if trimmed == "" {
 		return dErrors.New(dErrors.CodeValidation, "name cannot be empty")
 	}
-	if len(trimmed) > 128 {
+	if len(trimmed) > maxNameLength {
 		return dErrors.New(dErrors.CodeValidation, "name must be 128 characters or less")
 	}
 	return nil
@@ -203,15 +205,15 @@ func (r *UpdateClientRequest) Normalize() {
 		r.Name = &trimmed
 	}
 	if r.RedirectURIs != nil {
-		normalized := normalizeStrings(*r.RedirectURIs)
+		normalized := strutil.DedupeAndTrim(*r.RedirectURIs)
 		r.RedirectURIs = &normalized
 	}
 	if r.AllowedGrants != nil {
-		normalized := normalizeStrings(lowerStrings(*r.AllowedGrants))
+		normalized := strutil.DedupeAndTrimLower(*r.AllowedGrants)
 		r.AllowedGrants = &normalized
 	}
 	if r.AllowedScopes != nil {
-		normalized := normalizeStrings(*r.AllowedScopes)
+		normalized := strutil.DedupeAndTrim(*r.AllowedScopes)
 		r.AllowedScopes = &normalized
 	}
 }
@@ -245,29 +247,4 @@ func (r *UpdateClientRequest) Validate() error {
 		return err
 	}
 	return nil
-}
-
-func normalizeStrings(values []string) []string {
-	seen := make(map[string]struct{})
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
-}
-
-func lowerStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		out = append(out, strings.ToLower(v))
-	}
-	return out
 }

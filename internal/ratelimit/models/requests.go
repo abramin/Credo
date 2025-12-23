@@ -8,6 +8,37 @@ import (
 	dErrors "credo/pkg/domain-errors"
 )
 
+// validateAllowlistEntry validates common fields for allowlist and rate limit requests.
+// Follows validation order: Size -> Required -> Syntax -> Semantic.
+func validateAllowlistEntry(entryType AllowlistEntryType, identifier string) error {
+	// Size
+	if len(identifier) > 255 {
+		return dErrors.New(dErrors.CodeValidation, "identifier must be 255 characters or less")
+	}
+
+	// Required
+	if entryType == "" {
+		return dErrors.New(dErrors.CodeValidation, "type is required")
+	}
+	if identifier == "" {
+		return dErrors.New(dErrors.CodeValidation, "identifier is required")
+	}
+
+	// Syntax
+	if !entryType.IsValid() {
+		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
+	}
+
+	// Semantic: validate IP format when type is 'ip'
+	if entryType == AllowlistTypeIP {
+		if net.ParseIP(identifier) == nil {
+			return dErrors.New(dErrors.CodeValidation, "identifier must be a valid IP address")
+		}
+	}
+
+	return nil
+}
+
 type AddAllowlistRequest struct {
 	Type       AllowlistEntryType `json:"type"`
 	Identifier string             `json:"identifier"`
@@ -30,35 +61,18 @@ func (r *AddAllowlistRequest) Validate() error {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
-	if len(r.Identifier) > 255 {
-		return dErrors.New(dErrors.CodeValidation, "identifier must be 255 characters or less")
-	}
-	if len(r.Reason) > 500 {
-		return dErrors.New(dErrors.CodeValidation, "reason must be 500 characters or less")
+	// Validate common entry fields
+	if err := validateAllowlistEntry(r.Type, r.Identifier); err != nil {
+		return err
 	}
 
-	if r.Type == "" {
-		return dErrors.New(dErrors.CodeValidation, "type is required")
-	}
-	if r.Identifier == "" {
-		return dErrors.New(dErrors.CodeValidation, "identifier is required")
+	// AddAllowlist-specific validations
+	if len(r.Reason) > 500 {
+		return dErrors.New(dErrors.CodeValidation, "reason must be 500 characters or less")
 	}
 	if r.Reason == "" {
 		return dErrors.New(dErrors.CodeValidation, "reason is required")
 	}
-
-	entryType := AllowlistEntryType(r.Type)
-	if !entryType.IsValid() {
-		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
-	}
-
-	// Semantic: validate IP format when type is 'ip'
-	if entryType == AllowlistTypeIP {
-		if net.ParseIP(r.Identifier) == nil {
-			return dErrors.New(dErrors.CodeValidation, "identifier must be a valid IP address")
-		}
-	}
-
 	if r.ExpiresAt != nil && r.ExpiresAt.Before(time.Now()) {
 		return dErrors.New(dErrors.CodeValidation, "expires_at must be in the future")
 	}
@@ -84,31 +98,7 @@ func (r *RemoveAllowlistRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
-
-	if len(r.Identifier) > 255 {
-		return dErrors.New(dErrors.CodeValidation, "identifier must be 255 characters or less")
-	}
-
-	if r.Type == "" {
-		return dErrors.New(dErrors.CodeValidation, "type is required")
-	}
-	if r.Identifier == "" {
-		return dErrors.New(dErrors.CodeValidation, "identifier is required")
-	}
-
-	entryType := AllowlistEntryType(r.Type)
-	if !entryType.IsValid() {
-		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
-	}
-
-	// Semantic: validate IP format when type is 'ip'
-	if entryType == AllowlistTypeIP {
-		if net.ParseIP(r.Identifier) == nil {
-			return dErrors.New(dErrors.CodeValidation, "identifier must be a valid IP address")
-		}
-	}
-
-	return nil
+	return validateAllowlistEntry(r.Type, r.Identifier)
 }
 
 type ResetRateLimitRequest struct {
@@ -132,32 +122,14 @@ func (r *ResetRateLimitRequest) Validate() error {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
-	if len(r.Identifier) > 255 {
-		return dErrors.New(dErrors.CodeValidation, "identifier must be 255 characters or less")
+	// Validate common entry fields
+	if err := validateAllowlistEntry(r.Type, r.Identifier); err != nil {
+		return err
 	}
 
-	if r.Type == "" {
-		return dErrors.New(dErrors.CodeValidation, "type is required")
-	}
-	if r.Identifier == "" {
-		return dErrors.New(dErrors.CodeValidation, "identifier is required")
-	}
-
-	if !r.Type.IsValid() {
-		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
-	}
-
-	// Semantic: validate IP format when type is 'ip'
-	if r.Type == AllowlistTypeIP {
-		if net.ParseIP(r.Identifier) == nil {
-			return dErrors.New(dErrors.CodeValidation, "identifier must be a valid IP address")
-		}
-	}
-
-	if r.Class != "" {
-		if !r.Class.IsValid() {
-			return dErrors.New(dErrors.CodeValidation, "class must be 'auth', 'sensitive', 'read', or 'write'")
-		}
+	// ResetRateLimit-specific: optional class validation
+	if r.Class != "" && !r.Class.IsValid() {
+		return dErrors.New(dErrors.CodeValidation, "class must be 'auth', 'sensitive', 'read', or 'write'")
 	}
 
 	return nil
@@ -177,12 +149,18 @@ type UpdateQuotaTierRequest struct {
 	Tier string `json:"tier"`
 }
 
+func (r *UpdateQuotaTierRequest) Normalize() {
+	if r == nil {
+		return
+	}
+	r.Tier = strings.TrimSpace(strings.ToLower(r.Tier))
+}
+
 func (r *UpdateQuotaTierRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
-	tier := QuotaTier(strings.TrimSpace(strings.ToLower(r.Tier)))
-	if !tier.IsValid() {
+	if !QuotaTier(r.Tier).IsValid() {
 		return dErrors.New(dErrors.CodeValidation, "tier must be 'free', 'starter', 'business', or 'enterprise'")
 	}
 	return nil
