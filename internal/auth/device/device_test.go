@@ -115,30 +115,18 @@ func TestDeviceBindingFingerprint(t *testing.T) {
 	})
 }
 
-func TestDeviceIDValidation(t *testing.T) {
-	svc := NewService(true)
-
-	t.Run("legacy session without device ID is allowed", func(t *testing.T) {
-		assert.True(t, svc.ValidateDeviceID("", "any-cookie"))
-	})
-
-	t.Run("mismatch fails validation (enforcement decision is higher-level)", func(t *testing.T) {
-		assert.False(t, svc.ValidateDeviceID("device-a", "device-b"))
-	})
-}
-
 func TestFingerprintComparison(t *testing.T) {
 	svc := NewService(true)
-
-	t.Run("legacy session without stored fingerprint does not drift", func(t *testing.T) {
-		matched, drift := svc.CompareFingerprints("", "abc")
-		assert.True(t, matched)
-		assert.False(t, drift)
-	})
 
 	t.Run("mismatch reports drift", func(t *testing.T) {
 		matched, drift := svc.CompareFingerprints("a", "b")
 		assert.False(t, matched)
 		assert.True(t, drift)
+	})
+
+	t.Run("match reports no drift", func(t *testing.T) {
+		matched, drift := svc.CompareFingerprints("abc", "abc")
+		assert.True(t, matched)
+		assert.False(t, drift)
 	})
 }

@@ -59,20 +59,8 @@ func (s *Service) ComputeFingerprint(userAgentString string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// When the session has no device ID (legacy), validation passes.
-func (s *Service) ValidateDeviceID(sessionDeviceID, cookieDeviceID string) bool {
-	if !s.enabled {
-		return true
-	}
-	if sessionDeviceID == "" {
-		return true
-	}
-	return sessionDeviceID == cookieDeviceID
-}
-
-// When the session has no fingerprint (legacy), comparison passes.
 func (s *Service) CompareFingerprints(stored, current string) (matched bool, driftDetected bool) {
-	if !s.enabled || stored == "" {
+	if !s.enabled {
 		return true, false
 	}
 	matched = stored == current

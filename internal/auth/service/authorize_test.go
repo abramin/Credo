@@ -105,8 +105,8 @@ func (s *ServiceSuite) TestAuthorize() {
 		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
 
 		result, err := s.service.Authorize(ctx, &req)
-		assert.NoError(s.T(), err)
-		assert.NotEmpty(s.T(), result.DeviceID)
+		s.NoError(err)
+		s.NotEmpty(result.DeviceID)
 	})
 
 	s.T().Run("invalid redirect_uri scheme rejected", func(t *testing.T) {
@@ -114,10 +114,10 @@ func (s *ServiceSuite) TestAuthorize() {
 		req.RedirectURI = "ftp://client.app/callback" // Invalid scheme
 
 		result, err := s.service.Authorize(context.Background(), &req)
-		assert.Error(s.T(), err)
-		assert.Nil(s.T(), result)
-		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeBadRequest))
-		assert.Contains(s.T(), err.Error(), "redirect_uri scheme")
+		s.Error(err)
+		s.Nil(result)
+		s.True(dErrors.HasCode(err, dErrors.CodeBadRequest))
+		s.Contains(err.Error(), "redirect_uri scheme")
 	})
 
 	s.T().Run("user store error", func(t *testing.T) {
@@ -142,8 +142,8 @@ func (s *ServiceSuite) TestAuthorize() {
 		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(assert.AnError)
 
 		result, err := s.service.Authorize(ctx, &req)
-		assert.Error(s.T(), err)
-		assert.Nil(s.T(), result)
+		s.Error(err)
+		s.Nil(result)
 	})
 }
 
@@ -167,9 +167,9 @@ func (s *ServiceSuite) TestAuthorizeClientValidation() {
 		result, err := s.service.Authorize(ctx, &req)
 
 		// PRD-026A FR-4.5.3: inactive client returns invalid_client
-		assert.Error(t, err, "expected error when client is inactive")
-		assert.Nil(t, result)
-		assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidClient),
+		s.Error(err, "expected error when client is inactive")
+		s.Nil(result)
+		s.True(dErrors.HasCode(err, dErrors.CodeInvalidClient),
 			"expected invalid_client error code")
 	})
 }
@@ -211,10 +211,10 @@ func (s *ServiceSuite) TestAuthorizeRedirectURIValidation() {
 
 		// This test documents the expected behavior per PRD-026A FR-8:
 		// "Redirect URI Matching: Exact match against registered URIs"
-		assert.Error(t, err, "expected error when redirect_uri is not in client.RedirectURIs")
-		assert.Nil(t, result)
-		assert.True(t, dErrors.HasCode(err, dErrors.CodeBadRequest), "expected bad_request error code")
-		assert.Contains(t, err.Error(), "redirect_uri", "error message should mention redirect_uri")
+		s.Error(err, "expected error when redirect_uri is not in client.RedirectURIs")
+		s.Nil(result)
+		s.True(dErrors.HasCode(err, dErrors.CodeBadRequest), "expected bad_request error code")
+		s.Contains(err.Error(), "redirect_uri", "error message should mention redirect_uri")
 	})
 
 	s.T().Run("redirect_uri in client.RedirectURIs accepted", func(t *testing.T) {
@@ -240,16 +240,13 @@ func (s *ServiceSuite) TestAuthorizeRedirectURIValidation() {
 		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
 
 		result, err := s.service.Authorize(ctx, &req)
-		assert.NoError(t, err, "expected success when redirect_uri is in client.RedirectURIs")
-		assert.NotNil(t, result)
+		s.NoError(err, "expected success when redirect_uri is in client.RedirectURIs")
+		s.NotNil(result)
 	})
 }
 
 // TestAuthorizeScopeEnforcement tests that authorize rejects requests
 // when requested scopes are not a subset of client.AllowedScopes (PRD-026A FR-7).
-//
-// NOTE: This test is expected to FAIL until scope enforcement is implemented.
-// PRD-026A FR-7: "Scope Enforcement: Requested scopes must be subset of client allowed_scopes"
 func (s *ServiceSuite) TestAuthorizeScopeEnforcement() {
 	tenantID := id.TenantID(uuid.New())
 	clientID := id.ClientID(uuid.New())
@@ -279,18 +276,16 @@ func (s *ServiceSuite) TestAuthorizeScopeEnforcement() {
 		}
 		ctx := context.Background()
 
-		// Client resolution succeeds
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
 
 		// Expect failure BEFORE user lookup - scope validation should happen early
 		result, err := s.service.Authorize(ctx, &req)
 
-		// This test documents the expected behavior per PRD-026A FR-7:
 		// "Scope Enforcement: Requested scopes must be subset of client allowed_scopes; reject otherwise."
-		assert.Error(t, err, "expected error when requested scopes exceed client.AllowedScopes")
-		assert.Nil(t, result)
-		assert.True(t, dErrors.HasCode(err, dErrors.CodeBadRequest), "expected bad_request error code")
-		assert.Contains(t, err.Error(), "scope", "error message should mention scope")
+		s.Error(err, "expected error when requested scopes exceed client.AllowedScopes")
+		s.Nil(result)
+		s.True(dErrors.HasCode(err, dErrors.CodeBadRequest), "expected bad_request error code")
+		s.Contains(err.Error(), "scope", "error message should mention scope")
 	})
 
 	s.T().Run("requested scopes within client.AllowedScopes accepted", func(t *testing.T) {
@@ -316,12 +311,12 @@ func (s *ServiceSuite) TestAuthorizeScopeEnforcement() {
 		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
 
 		result, err := s.service.Authorize(ctx, &req)
-		assert.NoError(t, err, "expected success when scopes are within client.AllowedScopes")
-		assert.NotNil(t, result)
+		s.NoError(err, "expected success when scopes are within client.AllowedScopes")
+		s.NotNil(result)
 	})
 
 	s.T().Run("empty client.AllowedScopes allows any scope", func(t *testing.T) {
-		// Client with no scope restrictions (legacy behavior)
+		// Client with no scope restrictions
 		clientNoRestrictions := &tenant.Client{
 			ID:            clientID,
 			TenantID:      tenantID,
@@ -354,7 +349,7 @@ func (s *ServiceSuite) TestAuthorizeScopeEnforcement() {
 		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
 
 		result, err := s.service.Authorize(ctx, &req)
-		assert.NoError(t, err, "expected success when client has no scope restrictions")
-		assert.NotNil(t, result)
+		s.NoError(err, "expected success when client has no scope restrictions")
+		s.NotNil(result)
 	})
 }
