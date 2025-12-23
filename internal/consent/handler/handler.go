@@ -88,9 +88,7 @@ func (h *Handler) HandleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
 		return
 	}
-	sanitize(&grantReq)
-	grantReq.Normalize()
-	if err := grantReq.Validate(); err != nil {
+	if err := prepareRequest(&grantReq); err != nil {
 		h.logger.WarnContext(ctx, "invalid grant consent request",
 			"request_id", requestID,
 			"error", err,
@@ -130,9 +128,7 @@ func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid request body"))
 		return
 	}
-	sanitize(&revokeReq)
-	revokeReq.Normalize()
-	if err := revokeReq.Validate(); err != nil {
+	if err := prepareRequest(&revokeReq); err != nil {
 		h.logger.WarnContext(ctx, "invalid revoke consent request",
 			"request_id", requestID,
 			"error", err,
@@ -311,4 +307,12 @@ func formatActionMessage(template string, count int) string {
 // mapValidationError converts validation errors to domain errors.
 func mapValidationError(err error) error {
 	return dErrors.New(dErrors.CodeValidation, err.Error())
+}
+
+// prepareRequest sanitizes, normalizes, and validates a consent request.
+// This replaces the reflection-based sanitize() with type-safe methods.
+func prepareRequest(req models.ConsentRequest) error {
+	req.Sanitize()
+	req.Normalize()
+	return req.Validate()
 }

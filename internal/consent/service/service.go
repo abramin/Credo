@@ -23,7 +23,8 @@ import (
 // shardedConsentTx provides fine-grained locking using sharded mutexes.
 // Instead of a single global lock, operations are distributed across N shards
 // based on a hash of the user ID, reducing contention under concurrent load.
-const numConsentShards = 32
+// Increased from 32 to 128 shards for better distribution under high concurrency.
+const numConsentShards = 128
 
 // defaultConsentTxTimeout is the maximum duration for a consent transaction.
 const defaultConsentTxTimeout = 5 * time.Second
@@ -71,10 +72,16 @@ func (t *shardedConsentTx) selectShard(ctx context.Context) int {
 	return 0
 }
 
+// hashConsentString uses FNV-1a for better hash distribution than simple multiply-add.
 func hashConsentString(s string) uint32 {
-	var h uint32
+	const (
+		fnvOffset = 2166136261
+		fnvPrime  = 16777619
+	)
+	h := uint32(fnvOffset)
 	for i := 0; i < len(s); i++ {
-		h = h*31 + uint32(s[i])
+		h ^= uint32(s[i])
+		h *= fnvPrime
 	}
 	return h
 }
@@ -216,46 +223,47 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 
 func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID id.UserID, purpose models.Purpose) (*models.Record, error) {
 	now := requesttime.Now(ctx)
-	expiry := now.Add(s.consentTTL)
 	existing, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to read consent")
 	}
 
-	// Reuse existing consent record (active, expired, or revoked) to maintain clean DB
-	// History is tracked via audit log
-	if err == nil && existing != nil {
-		wasActive := existing.IsActive(now)
+	if existing != nil {
+		return s.renewGrantTx(ctx, txStore, userID, existing, now)
+	}
+	return s.createGrantTx(ctx, txStore, userID, purpose, now)
+}
 
-		// Idempotent within configured window: skip update if recently granted
-		// This prevents audit noise from rapid repeated requests while still allowing periodic TTL extension
-		if wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
-			return existing, nil
-		}
+// renewGrantTx updates an existing consent record and emits audit/metrics.
+func (s *Service) renewGrantTx(ctx context.Context, txStore Store, userID id.UserID, existing *models.Record, now time.Time) (*models.Record, error) {
+	wasActive := existing.IsActive(now)
 
-		updated := *existing
-		updated.GrantedAt = now
-		updated.ExpiresAt = &expiry
-		updated.RevokedAt = nil
-		if err := txStore.Update(ctx, &updated); err != nil {
-			return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to renew consent")
-		}
-		s.emitAudit(ctx, audit.Event{
-			UserID:    userID,
-			Purpose:   string(purpose),
-			Action:    models.AuditActionConsentGranted,
-			Decision:  models.AuditDecisionGranted,
-			Reason:    models.AuditReasonUserInitiated,
-			Timestamp: now,
-		})
-		s.incrementConsentsGranted(purpose)
-		if !wasActive {
-			s.incrementActiveConsents(1)
-		}
-		return &updated, nil
+	// Idempotent within configured window: skip update if recently granted
+	if wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
+		return existing, nil
 	}
 
-	// First-time consent grant - create new record using constructor
+	expiry := now.Add(s.consentTTL)
+	updated := *existing
+	updated.GrantedAt = now
+	updated.ExpiresAt = &expiry
+	updated.RevokedAt = nil
+
+	if err := txStore.Update(ctx, &updated); err != nil {
+		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to renew consent")
+	}
+
+	s.emitGrantAudit(ctx, userID, existing.Purpose, now)
+	s.incrementConsentsGranted(existing.Purpose)
+	if !wasActive {
+		s.incrementActiveConsents(1)
+	}
+	return &updated, nil
+}
+
+// createGrantTx creates a new consent record and emits audit/metrics.
+func (s *Service) createGrantTx(ctx context.Context, txStore Store, userID id.UserID, purpose models.Purpose, now time.Time) (*models.Record, error) {
+	expiry := now.Add(s.consentTTL)
 	record, err := models.NewRecord(
 		id.ConsentID(uuid.New()),
 		userID,
@@ -266,9 +274,19 @@ func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID id.Us
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to create consent record")
 	}
+
 	if err := txStore.Save(ctx, record); err != nil {
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to save consent")
 	}
+
+	s.emitGrantAudit(ctx, userID, purpose, now)
+	s.incrementConsentsGranted(purpose)
+	s.incrementActiveConsents(1)
+	return record, nil
+}
+
+// emitGrantAudit emits the audit event for a consent grant.
+func (s *Service) emitGrantAudit(ctx context.Context, userID id.UserID, purpose models.Purpose, now time.Time) {
 	s.emitAudit(ctx, audit.Event{
 		UserID:    userID,
 		Purpose:   string(purpose),
@@ -277,9 +295,6 @@ func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID id.Us
 		Reason:    models.AuditReasonUserInitiated,
 		Timestamp: now,
 	})
-	s.incrementConsentsGranted(purpose)
-	s.incrementActiveConsents(1)
-	return record, nil
 }
 
 // Revoke revokes consent for the specified purposes.
