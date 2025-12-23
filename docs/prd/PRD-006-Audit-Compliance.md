@@ -268,6 +268,271 @@ func (h *Handler) handleDataExport(w http.ResponseWriter, r *http.Request) {
 - **Caching:** Permit a Redis cache for hot investigative queries (recent 24h) to accelerate compliance dashboards; cache
   invalidations are driven by Kafka consumer offsets so caches stay consistent with the index.
 
+### TR-6: SQL Query Patterns & Database Design
+
+**Objective:** Demonstrate intermediate-to-advanced SQL capabilities for audit storage and compliance queries.
+
+**Query Patterns Required:**
+
+- **CTEs for Event Chain Correlation:** Use CTEs to trace related audit events:
+  ```sql
+  WITH session_events AS (
+    SELECT id, user_id, action, timestamp, request_id
+    FROM audit_events
+    WHERE request_id = :correlation_id
+  ),
+  user_journey AS (
+    SELECT se.*,
+           ROW_NUMBER() OVER (ORDER BY timestamp) AS step_num
+    FROM session_events se
+  )
+  SELECT * FROM user_journey ORDER BY step_num;
+  ```
+
+- **Window Functions for Audit Analytics:** Use `LEAD()`, `LAG()`, sliding windows for pattern detection:
+  ```sql
+  SELECT user_id, action, timestamp,
+         LEAD(action) OVER (PARTITION BY user_id ORDER BY timestamp) AS next_action,
+         LAG(timestamp) OVER (PARTITION BY user_id ORDER BY timestamp) AS prev_timestamp,
+         timestamp - LAG(timestamp) OVER (PARTITION BY user_id ORDER BY timestamp) AS time_delta,
+         COUNT(*) OVER (
+           PARTITION BY user_id
+           ORDER BY timestamp
+           RANGE BETWEEN INTERVAL '1 hour' PRECEDING AND CURRENT ROW
+         ) AS actions_last_hour
+  FROM audit_events
+  WHERE timestamp > NOW() - INTERVAL '7 days';
+  ```
+
+- **Aggregate Functions with HAVING for Compliance Reports:**
+  ```sql
+  SELECT user_id,
+         COUNT(*) AS total_events,
+         COUNT(DISTINCT action) AS unique_actions,
+         MIN(timestamp) AS first_event,
+         MAX(timestamp) AS last_event,
+         SUM(CASE WHEN decision = 'denied' THEN 1 ELSE 0 END) AS denied_count
+  FROM audit_events
+  WHERE timestamp BETWEEN :start_date AND :end_date
+  GROUP BY user_id
+  HAVING COUNT(*) > 100 OR SUM(CASE WHEN decision = 'denied' THEN 1 ELSE 0 END) > 5;
+  ```
+
+- **Set Operations for Cross-User Investigation:**
+  ```sql
+  -- Users who did both consent_granted and data_exported
+  SELECT DISTINCT user_id FROM audit_events WHERE action = 'consent_granted'
+  INTERSECT
+  SELECT DISTINCT user_id FROM audit_events WHERE action = 'data_exported'
+
+  EXCEPT
+
+  -- Exclude users who subsequently revoked consent
+  SELECT DISTINCT user_id FROM audit_events WHERE action = 'consent_revoked';
+  ```
+
+- **Correlated Subqueries for Event Comparison:**
+  ```sql
+  SELECT a.id, a.user_id, a.action, a.timestamp,
+         (SELECT COUNT(*) FROM audit_events b
+          WHERE b.user_id = a.user_id
+            AND b.timestamp < a.timestamp) AS prior_event_count,
+         EXISTS (SELECT 1 FROM audit_events c
+                 WHERE c.user_id = a.user_id
+                   AND c.action = 'consent_granted'
+                   AND c.timestamp < a.timestamp) AS had_prior_consent
+  FROM audit_events a
+  WHERE a.action = 'decision_made';
+  ```
+
+- **Self-Join for Suspicious Pattern Detection (Semi-Join/Anti-Join):**
+  ```sql
+  -- Find users with rapid successive failed decisions (semi-join pattern)
+  SELECT DISTINCT a1.user_id
+  FROM audit_events a1
+  WHERE EXISTS (
+    SELECT 1 FROM audit_events a2
+    WHERE a1.user_id = a2.user_id
+      AND a1.id != a2.id
+      AND a1.decision = 'denied' AND a2.decision = 'denied'
+      AND ABS(EXTRACT(EPOCH FROM (a1.timestamp - a2.timestamp))) < 60
+  );
+
+  -- Find consent grants with no subsequent decision (anti-join pattern)
+  SELECT c.user_id, c.purpose, c.timestamp
+  FROM audit_events c
+  WHERE c.action = 'consent_granted'
+    AND NOT EXISTS (
+      SELECT 1 FROM audit_events d
+      WHERE d.user_id = c.user_id
+        AND d.action = 'decision_made'
+        AND d.timestamp > c.timestamp
+    );
+  ```
+
+**Database Design:**
+
+- **Partitioning Strategy:** Range partition by timestamp (daily/weekly partitions); use `pg_partman` for automated management
+- **Covering Indexes:**
+  - `(user_id, timestamp)` for user timeline queries
+  - `(action, timestamp)` for action-based filtering
+  - `(request_id)` for correlation lookups
+- **Materialized Views:** Pre-aggregate daily/weekly compliance summaries:
+  ```sql
+  CREATE MATERIALIZED VIEW daily_audit_summary AS
+  SELECT DATE(timestamp) AS audit_date,
+         action,
+         COUNT(*) AS event_count,
+         COUNT(DISTINCT user_id) AS unique_users
+  FROM audit_events
+  GROUP BY DATE(timestamp), action
+  WITH DATA;
+
+  CREATE UNIQUE INDEX ON daily_audit_summary (audit_date, action);
+  ```
+
+- **WORM Storage Compliance:** Audit tables use `pg_dumpall` with append-only semantics; no UPDATE/DELETE triggers allowed
+
+---
+
+**SQL Indexing Enhancements (from "Use The Index, Luke"):**
+
+**Partition Pruning for Time-Based Queries:**
+
+```sql
+-- WHY THIS MATTERS: Audit tables can grow to billions of rows.
+-- Without partitioning, every query scans the entire table.
+-- Range partitioning by timestamp enables partition pruning.
+
+-- Create partitioned audit table:
+CREATE TABLE audit_events (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    request_id UUID,
+    details JSONB
+) PARTITION BY RANGE (timestamp);
+
+-- Monthly partitions:
+CREATE TABLE audit_events_2025_01 PARTITION OF audit_events
+    FOR VALUES FROM ('2025-01-01') TO ('2025-02-01');
+CREATE TABLE audit_events_2025_02 PARTITION OF audit_events
+    FOR VALUES FROM ('2025-02-01') TO ('2025-03-01');
+-- ... automated via pg_partman
+
+-- Query with partition pruning:
+EXPLAIN ANALYZE
+SELECT * FROM audit_events
+WHERE timestamp >= '2025-01-15' AND timestamp < '2025-01-20'
+  AND user_id = :uid;
+
+-- Expected: "Append" with only "audit_events_2025_01" scanned
+-- NOT: All partitions scanned
+```
+
+**Pagination: Offset vs Seek Method (Book Chapter 6):**
+
+```sql
+-- WHY THIS MATTERS: Data export (GET /me/data-export) may return thousands of events.
+-- Offset pagination degrades as page number increases.
+-- Seek (keyset) pagination is O(1) regardless of page.
+
+-- ANTI-PATTERN: Offset pagination
+SELECT * FROM audit_events
+WHERE user_id = :uid
+ORDER BY timestamp DESC
+OFFSET 10000 LIMIT 100;
+-- PostgreSQL scans and discards 10,000 rows, then returns 100
+-- Page 1000 is 10x slower than page 1
+
+-- SOLUTION: Seek (keyset) pagination
+SELECT * FROM audit_events
+WHERE user_id = :uid
+  AND timestamp < :last_seen_timestamp  -- Seek condition
+ORDER BY timestamp DESC
+LIMIT 100;
+-- Uses index to jump directly to position; O(1) per page
+
+-- For exact duplicate timestamps, use composite key:
+SELECT * FROM audit_events
+WHERE user_id = :uid
+  AND (timestamp, id) < (:last_ts, :last_id)
+ORDER BY timestamp DESC, id DESC
+LIMIT 100;
+-- Handles tie-breaker on duplicate timestamps
+```
+
+**Sort-Merge Join for Large Compliance Reports:**
+
+```sql
+-- WHY THIS MATTERS: Compliance reports may join audit_events with users or consents.
+-- For large datasets, Sort-Merge Join can outperform Nested Loop.
+-- PostgreSQL chooses automatically, but index on sort key helps.
+
+-- Index supporting sort-merge:
+CREATE INDEX idx_audit_user_time ON audit_events (user_id, timestamp);
+CREATE INDEX idx_consent_user_time ON consent_records (user_id, granted_at);
+
+-- Compliance report joining audit with consent:
+EXPLAIN ANALYZE
+SELECT a.user_id, a.action, a.timestamp, c.purpose, c.granted_at
+FROM audit_events a
+JOIN consent_records c
+  ON a.user_id = c.user_id
+  AND a.timestamp > c.granted_at
+WHERE a.action = 'decision_made'
+  AND a.timestamp BETWEEN '2025-01-01' AND '2025-02-01';
+
+-- EXPLAIN may show: "Merge Join" when both sides are pre-sorted
+-- Merge Join is efficient when:
+-- 1. Both inputs are sorted on join key
+-- 2. Output is also required sorted
+-- 3. Large datasets (Hash Join needs memory)
+```
+
+**EXPLAIN ANALYZE Evidence for Audit Queries:**
+
+```sql
+-- Verify partition pruning:
+EXPLAIN (ANALYZE, VERBOSE)
+SELECT * FROM audit_events
+WHERE timestamp >= '2025-01-01' AND timestamp < '2025-01-08'
+  AND user_id = :uid;
+-- Look for: "Partitions removed: X" or only one partition in Append
+
+-- Verify seek pagination uses index:
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM audit_events
+WHERE user_id = :uid AND timestamp < '2025-01-15'
+ORDER BY timestamp DESC LIMIT 100;
+-- Look for: "Index Scan Backward"
+-- NOT: "Seq Scan" or "Sort"
+
+-- Verify compliance join:
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT a.user_id, COUNT(*)
+FROM audit_events a
+JOIN consent_records c ON a.user_id = c.user_id
+WHERE a.timestamp > c.granted_at
+GROUP BY a.user_id;
+-- Look for: "Merge Join" or "Hash Join" (appropriate for data size)
+```
+
+---
+
+**Acceptance Criteria (SQL):**
+- [ ] Event correlation uses CTEs with window functions
+- [ ] Audit analytics use sliding window aggregations
+- [ ] Compliance reports use GROUP BY/HAVING with aggregate filters
+- [ ] Cross-user investigations use UNION/INTERSECT/EXCEPT
+- [ ] Suspicious pattern detection uses semi-joins and anti-joins
+- [ ] Partitioned tables verified with `EXPLAIN ANALYZE` showing partition pruning
+- [ ] Materialized views for summaries with scheduled refresh
+- [ ] **NEW:** Data export uses seek pagination, not offset
+- [ ] **NEW:** Partition pruning verified (only relevant partitions scanned)
+- [ ] **NEW:** Large compliance reports use appropriate join strategy (Merge/Hash)
+
 ---
 
 ## 4. Implementation Steps
@@ -356,10 +621,12 @@ curl "http://localhost:8080/me/data-export?action=consent_granted" \
 
 ## Revision History
 
-| Version | Date       | Author       | Changes                                                                                         |
-| ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------------- |
-| 1.5     | 2025-12-18 | Security Eng | Added anchoring/verification requirements alongside partitioning and least-privilege interfaces |
-| 1.4     | 2025-12-18 | Security Eng | Added secure storage/integrity (hash chaining, partitioning, least-privilege interfaces)        |
-| 1.3     | 2025-12-16 | Engineering  | Formalize async publisher (buffered channel + worker, shutdown semantics, metrics/backpressure) |
-| 1.2     | 2025-12-12 | Engineering  | Add FR-3: Searchable Audit Queries (Investigations) & TR-5: Event Streaming & Indexing Pipeline |
-| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                     |
+| Version | Date       | Author       | Changes                                                                                                     |
+| ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
+| 1.7     | 2025-12-21 | Engineering  | Enhanced TR-6: Added partition pruning, seek pagination, sort-merge joins, EXPLAIN requirements             |
+| 1.6     | 2025-12-21 | Engineering  | Added TR-6: SQL Query Patterns (CTEs, window functions, aggregates, set operations, semi/anti-joins, views) |
+| 1.5     | 2025-12-18 | Security Eng | Added anchoring/verification requirements alongside partitioning and least-privilege interfaces             |
+| 1.4     | 2025-12-18 | Security Eng | Added secure storage/integrity (hash chaining, partitioning, least-privilege interfaces)                    |
+| 1.3     | 2025-12-16 | Engineering  | Formalize async publisher (buffered channel + worker, shutdown semantics, metrics/backpressure)             |
+| 1.2     | 2025-12-12 | Engineering  | Add FR-3: Searchable Audit Queries (Investigations) & TR-5: Event Streaming & Indexing Pipeline             |
+| 1.0     | 2025-12-03 | Product Team | Initial PRD                                                                                                 |

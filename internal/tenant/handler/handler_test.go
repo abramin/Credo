@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"credo/internal/platform/middleware"
+	adminmw "credo/pkg/platform/middleware/admin"
 	"credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
@@ -36,7 +36,7 @@ func (s *HandlerSuite) SetupTest() {
 
 	h := New(svc, logger)
 	r := chi.NewRouter()
-	r.Use(middleware.RequireAdminToken(adminToken, logger))
+	r.Use(adminmw.RequireAdminToken(adminToken, logger))
 	h.Register(r)
 	s.router = r
 }

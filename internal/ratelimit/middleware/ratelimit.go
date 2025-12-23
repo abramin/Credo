@@ -7,74 +7,76 @@ import (
 	"strconv"
 	"time"
 
-	platformMW "credo/internal/platform/middleware"
 	"credo/internal/ratelimit/models"
-	"credo/internal/transport/httputil"
+	"credo/pkg/platform/httputil"
+	auth "credo/pkg/platform/middleware/auth"
+	metadata "credo/pkg/platform/middleware/metadata"
+	"credo/pkg/platform/privacy"
 )
 
-// RateLimiter defines the interface for rate limit checking.
-// This is implemented by the ratelimit service.
 type RateLimiter interface {
-	// CheckIPRateLimit checks IP-based rate limit
 	CheckIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error)
-
-	// CheckUserRateLimit checks user-based rate limit
 	CheckUserRateLimit(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error)
-
-	// CheckBothLimits checks both IP and user limits (both must pass)
 	CheckBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error)
-
-	// CheckAuthRateLimit checks auth-specific limits with lockout
 	CheckAuthRateLimit(ctx context.Context, identifier, ip string) (*models.RateLimitResult, error)
-
-	// CheckGlobalThrottle checks global DDoS throttle
 	CheckGlobalThrottle(ctx context.Context) (bool, error)
 }
 
-// Middleware provides HTTP middleware for rate limiting.
-// Per PRD-017 TR-3: Middleware implementation.
 type Middleware struct {
-	limiter RateLimiter
-	logger  *slog.Logger
+	limiter  RateLimiter
+	logger   *slog.Logger
+	disabled bool
 }
 
-// New creates a new rate limit Middleware.
-func New(limiter RateLimiter, logger *slog.Logger) *Middleware {
-	return &Middleware{
-		limiter: limiter,
-		logger:  logger,
+// Option configures the rate limit middleware.
+type Option func(*Middleware)
+
+// WithDisabled disables rate limiting entirely (for testing/demo mode).
+func WithDisabled(disabled bool) Option {
+	return func(m *Middleware) {
+		m.disabled = disabled
 	}
 }
 
-// RateLimit returns middleware that enforces per-IP rate limiting.
-// Per PRD-017 FR-1, TR-3: Per-IP rate limiting middleware.
-//
-// TODO: Implement this middleware
-// 1. Extract client IP from context (set by ClientMetadata middleware)
-// 2. Check if allowlisted (via limiter)
-// 3. Call limiter.CheckIPRateLimit
-// 4. Add rate limit headers to response
-// 5. If not allowed, return 429 with retry-after
-// 6. Else call next handler
+func New(limiter RateLimiter, logger *slog.Logger, opts ...Option) *Middleware {
+	m := &Middleware{
+		limiter: limiter,
+		logger:  logger,
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	if m.disabled {
+		logger.Info("rate limiting disabled")
+	}
+	return m
+}
+
 func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.disabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx := r.Context()
-			ip := platformMW.GetClientIP(ctx)
+			ip := metadata.GetClientIP(ctx)
 
-			// TODO: Implement rate limit check
-			// result, err := m.limiter.CheckIPRateLimit(ctx, ip, class)
-			// if err != nil { ... log and allow through ... }
-			//
-			// Add headers regardless of outcome
-			// addRateLimitHeaders(w, result)
-			//
-			// if !result.Allowed {
-			//     writeRateLimitExceeded(w, result)
-			//     return
-			// }
+			result, err := m.limiter.CheckIPRateLimit(ctx, ip, class)
+			if err != nil {
+				m.logger.Error("failed to check IP rate limit", "error", err, "ip_prefix", privacy.AnonymizeIP(ip))
+				next.ServeHTTP(w, r)
+				return
+			}
 
-			_ = ip // Remove when implemented
+			//Add headers regardless of outcome
+			addRateLimitHeaders(w, result)
+
+			if !result.Allowed {
+				writeRateLimitExceeded(w, result)
+				return
+			}
 
 			next.ServeHTTP(w, r)
 		})
@@ -82,34 +84,31 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 }
 
 // RateLimitAuthenticated returns middleware that enforces both IP and user rate limits.
-// Per PRD-017 FR-2: Both limits must pass for authenticated endpoints.
-//
-// TODO: Implement this middleware
-// 1. Extract client IP and user ID from context
-// 2. Call limiter.CheckBothLimits
-// 3. Add rate limit headers (use the more restrictive values)
-// 4. If not allowed, return 429 with appropriate message
-// 5. Else call next handler
 func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.disabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx := r.Context()
-			ip := platformMW.GetClientIP(ctx)
-			userID := platformMW.GetUserID(ctx)
+			ip := metadata.GetClientIP(ctx)
+			userID := auth.GetUserID(ctx)
 
-			// TODO: Implement combined rate limit check
-			// result, err := m.limiter.CheckBothLimits(ctx, ip, userID, class)
-			// if err != nil { ... log and allow through ... }
-			//
-			// addRateLimitHeaders(w, result)
-			//
-			// if !result.Allowed {
-			//     writeUserRateLimitExceeded(w, result)
-			//     return
-			// }
+			result, err := m.limiter.CheckBothLimits(ctx, ip, userID, class)
+			if err != nil {
+				m.logger.Error("failed to check combined rate limit", "error", err, "ip_prefix", privacy.AnonymizeIP(ip), "user_id", userID)
+				next.ServeHTTP(w, r)
+				return
+			}
 
-			_ = ip
-			_ = userID
+			addRateLimitHeaders(w, result)
+
+			if !result.Allowed {
+				writeUserRateLimitExceeded(w, result)
+				return
+			}
 
 			next.ServeHTTP(w, r)
 		})
@@ -117,7 +116,6 @@ func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(htt
 }
 
 // RateLimitAuth returns middleware for authentication endpoints with lockout.
-// Per PRD-017 FR-2b: OWASP authentication-specific protections.
 //
 // TODO: Implement this middleware
 // This is applied to /auth/authorize, /auth/token, /auth/password-reset, /mfa/*
@@ -131,7 +129,7 @@ func (m *Middleware) RateLimitAuth() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
-			ip := platformMW.GetClientIP(ctx)
+			ip := metadata.GetClientIP(ctx)
 
 			// TODO: Implement auth rate limit with lockout
 			// Note: May need to peek at request body to get email/username
@@ -153,7 +151,6 @@ func (m *Middleware) RateLimitAuth() func(http.Handler) http.Handler {
 }
 
 // GlobalThrottle returns middleware for global DDoS protection.
-// Per PRD-017 FR-6: Global request throttling.
 //
 // TODO: Implement this middleware
 // 1. Call limiter.CheckGlobalThrottle
@@ -181,10 +178,7 @@ func (m *Middleware) GlobalThrottle() func(http.Handler) http.Handler {
 }
 
 // addRateLimitHeaders adds X-RateLimit-* headers to the response.
-// Per PRD-017 FR-1: Standard rate limit headers.
-//
-// TODO: Implement this helper
-// Headers:
+// // Headers:
 // - X-RateLimit-Limit: {limit}
 // - X-RateLimit-Remaining: {remaining}
 // - X-RateLimit-Reset: {unix timestamp}
@@ -197,14 +191,8 @@ func addRateLimitHeaders(w http.ResponseWriter, result *models.RateLimitResult) 
 	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt.Unix(), 10))
 }
 
-// writeRateLimitExceeded writes a 429 response for IP rate limit exceeded.
-// Per PRD-017 FR-1: 429 response format.
-//
-// TODO: Implement this helper
 func writeRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResult) {
 	w.Header().Set("Retry-After", strconv.Itoa(result.RetryAfter))
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusTooManyRequests)
 	httputil.WriteJSON(w, http.StatusTooManyRequests, &models.RateLimitExceededResponse{
 		Error:      "rate_limit_exceeded",
 		Message:    "Too many requests from this IP address. Please try again later.",
@@ -212,14 +200,8 @@ func writeRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResul
 	})
 }
 
-// writeUserRateLimitExceeded writes a 429 response for user rate limit exceeded.
-// Per PRD-017 FR-2: User-specific rate limit response.
-//
-// TODO: Implement this helper
 func writeUserRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitResult) {
 	w.Header().Set("Retry-After", strconv.Itoa(result.RetryAfter))
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusTooManyRequests)
 	httputil.WriteJSON(w, http.StatusTooManyRequests, &models.UserRateLimitExceededResponse{
 		Error:          "user_rate_limit_exceeded",
 		Message:        "You have exceeded your request quota for this operation.",
@@ -229,14 +211,8 @@ func writeUserRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitR
 	})
 }
 
-// writeServiceOverloaded writes a 503 response for global throttle exceeded.
-// Per PRD-017 FR-6: 503 response for DDoS protection.
-//
-// TODO: Implement this helper
 func writeServiceOverloaded(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "60")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
 	httputil.WriteJSON(w, http.StatusServiceUnavailable, &models.ServiceOverloadedResponse{
 		Error:      "service_unavailable",
 		Message:    "Service is temporarily overloaded. Please try again later.",

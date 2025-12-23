@@ -1,4 +1,4 @@
-package audit
+package publisher
 
 import (
 	"context"
@@ -7,13 +7,14 @@ import (
 	"time"
 
 	id "credo/pkg/domain"
+	audit "credo/pkg/platform/audit"
 )
 
 // Publisher captures structured audit events. It is append-only and uses the
 // storage layer for persistence so tests can swap sinks easily.
 type Publisher struct {
-	store  Store
-	events chan Event
+	store  audit.Store
+	events chan audit.Event
 	wg     sync.WaitGroup
 	logger *slog.Logger
 	async  bool
@@ -27,7 +28,7 @@ type PublisherOption func(*Publisher)
 func WithAsyncBuffer(size int) PublisherOption {
 	return func(p *Publisher) {
 		if size > 0 {
-			p.events = make(chan Event, size)
+			p.events = make(chan audit.Event, size)
 			p.async = true
 		}
 	}
@@ -40,7 +41,7 @@ func WithPublisherLogger(logger *slog.Logger) PublisherOption {
 	}
 }
 
-func NewPublisher(store Store, opts ...PublisherOption) *Publisher {
+func NewPublisher(store audit.Store, opts ...PublisherOption) *Publisher {
 	p := &Publisher{store: store}
 	for _, opt := range opts {
 		opt(p)
@@ -76,7 +77,7 @@ func (p *Publisher) Close() {
 	}
 }
 
-func (p *Publisher) Emit(ctx context.Context, base Event) error {
+func (p *Publisher) Emit(ctx context.Context, base audit.Event) error {
 	if base.Timestamp.IsZero() {
 		base.Timestamp = time.Now()
 	}
@@ -98,6 +99,6 @@ func (p *Publisher) Emit(ctx context.Context, base Event) error {
 	return p.store.Append(ctx, base)
 }
 
-func (p *Publisher) List(ctx context.Context, userID id.UserID) ([]Event, error) {
+func (p *Publisher) List(ctx context.Context, userID id.UserID) ([]audit.Event, error) {
 	return p.store.ListByUser(ctx, userID)
 }

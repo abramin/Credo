@@ -1,13 +1,12 @@
 package models
 
 import (
-	"fmt"
 	"net/url"
 	"slices"
 	"strings"
 
-	"credo/internal/sentinel"
-	"credo/pkg/email"
+	"credo/internal/auth/email"
+	dErrors "credo/pkg/domain-errors"
 )
 
 // AuthorizationRequest represents an OAuth authorization request from a client.
@@ -59,48 +58,48 @@ func trimAndDedupScopes(scopes []string) []string {
 // 4. Semantic validation (business rules - done in service layer)
 func (r *AuthorizationRequest) Validate() error {
 	if r == nil {
-		return fmt.Errorf("request is required: %w", sentinel.ErrBadRequest)
+		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
 	// Phase 1: Size validation (fail fast on oversized input)
 	if len(r.Email) > 255 {
-		return fmt.Errorf("email must be 255 characters or less: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "email must be 255 characters or less")
 	}
 	if len(r.ClientID) > 100 {
-		return fmt.Errorf("client_id must be 100 characters or less: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "client_id must be 100 characters or less")
 	}
 	if len(r.RedirectURI) > 2048 {
-		return fmt.Errorf("redirect_uri must be 2048 characters or less: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "redirect_uri must be 2048 characters or less")
 	}
 	if len(r.State) > 500 {
-		return fmt.Errorf("state must be 500 characters or less: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "state must be 500 characters or less")
 	}
 
 	// Phase 2: Required fields (presence checks)
 	if r.Email == "" {
-		return fmt.Errorf("email is required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "email is required")
 	}
 	if r.ClientID == "" {
-		return fmt.Errorf("client_id is required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "client_id is required")
 	}
 	if len(r.ClientID) < 3 {
-		return fmt.Errorf("client_id must be at least 3 characters: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "client_id must be at least 3 characters")
 	}
 	if r.RedirectURI == "" {
-		return fmt.Errorf("redirect_uri is required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "redirect_uri is required")
 	}
 
 	// Phase 3: Syntax validation (format checks)
 	if !email.IsValidEmail(r.Email) {
-		return fmt.Errorf("email must be valid: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "email must be valid")
 	}
 	parsed, err := url.Parse(r.RedirectURI)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("redirect_uri must be a valid URL: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "redirect_uri must be a valid URL")
 	}
 	if len(r.Scopes) > 0 {
 		if slices.Contains(r.Scopes, "") {
-			return fmt.Errorf("scopes cannot contain empty strings: %w", sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeValidation, "scopes cannot contain empty strings")
 		}
 	}
 
@@ -135,33 +134,33 @@ func (r *TokenRequest) Normalize() {
 // 4. Semantic validation (grant-type specific requirements)
 func (r *TokenRequest) Validate() error {
 	if r == nil {
-		return fmt.Errorf("request is required: %w", sentinel.ErrBadRequest)
+		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
 	// Phase 2: Required fields (presence checks)
 	if r.GrantType == "" {
-		return fmt.Errorf("grant_type is required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "grant_type is required")
 	}
 	if r.ClientID == "" {
-		return fmt.Errorf("client_id is required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "client_id is required")
 	}
 
 	// Phase 3: Syntax validation (enum check)
 	if r.GrantType != string(GrantAuthorizationCode) && r.GrantType != string(GrantRefreshToken) {
-		return fmt.Errorf("unsupported grant_type: %w", sentinel.ErrBadRequest)
+		return dErrors.New(dErrors.CodeBadRequest, "unsupported grant_type")
 	}
 
 	// Phase 4: Semantic validation (grant-type specific requirements)
 	if r.GrantType == string(GrantAuthorizationCode) {
 		if r.Code == "" {
-			return fmt.Errorf("code is required for authorization_code grant: %w", sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeValidation, "code is required for authorization_code grant")
 		}
 		if r.RedirectURI == "" {
-			return fmt.Errorf("redirect_uri is required: %w", sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeValidation, "redirect_uri is required")
 		}
 	} else if r.GrantType == string(GrantRefreshToken) {
 		if r.RefreshToken == "" {
-			return fmt.Errorf("refresh_token is required for refresh_token grant: %w", sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeValidation, "refresh_token is required for refresh_token grant")
 		}
 	}
 	return nil
@@ -179,12 +178,12 @@ type RevokeTokenRequest struct {
 // 3. Syntax validation (enum checks)
 func (r *RevokeTokenRequest) Validate() error {
 	if r == nil {
-		return fmt.Errorf("request is required: %w", sentinel.ErrBadRequest)
+		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
 	// Phase 2: Required fields (presence checks)
 	if r.Token == "" {
-		return fmt.Errorf("token is required: %w", sentinel.ErrInvalidInput)
+		return dErrors.New(dErrors.CodeValidation, "token is required")
 	}
 	// client_id is optional per RFC 7009 (only required for public clients)
 
@@ -195,7 +194,7 @@ func (r *RevokeTokenRequest) Validate() error {
 			string(TokenTypeRefresh): {},
 		}
 		if _, ok := allowed[r.TokenTypeHint]; !ok {
-			return fmt.Errorf("token_type_hint must be access_token or refresh_token if provided: %w", sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeValidation, "token_type_hint must be access_token or refresh_token if provided")
 		}
 	}
 	return nil

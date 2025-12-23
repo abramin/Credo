@@ -15,7 +15,6 @@ import (
 )
 
 // TestInMemoryAllowlistStore_Add tests adding entries to the allowlist.
-// Per PRD-017 FR-4: Allowlist management.
 func TestInMemoryAllowlistStore_Add(t *testing.T) {
 	store := NewInMemoryAllowlistStore()
 	ctx := context.Background()
@@ -75,7 +74,6 @@ func TestInMemoryAllowlistStore_Remove(t *testing.T) {
 	})
 }
 
-// Per PRD-017 FR-4: Middleware check before rate limiting.
 func TestInMemoryAllowlistStore_IsAllowlisted(t *testing.T) {
 	ctx := context.Background()
 	activeEntry := newAllowlistEntry(t, models.AllowlistTypeIP, "transient-ip")

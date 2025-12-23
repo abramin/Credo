@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"credo/internal/audit"
+	"credo/pkg/platform/audit"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 )

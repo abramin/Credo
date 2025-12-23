@@ -12,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"credo/internal/audit"
+	auditpublisher "credo/pkg/platform/audit/publisher"
+	auditstore "credo/pkg/platform/audit/store/memory"
 	auth "credo/internal/auth/handler"
 	"credo/internal/auth/models"
 	"credo/internal/auth/service"
@@ -21,7 +22,9 @@ import (
 	sessionStore "credo/internal/auth/store/session"
 	userStore "credo/internal/auth/store/user"
 	jwttoken "credo/internal/jwt_token"
-	"credo/internal/platform/middleware"
+	adminmw "credo/pkg/platform/middleware/admin"
+	authmw "credo/pkg/platform/middleware/auth"
+	metadata "credo/pkg/platform/middleware/metadata"
 	tenantModels "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 
@@ -58,7 +61,7 @@ func SetupSuite(t *testing.T) (
 	*sessionStore.InMemorySessionStore,
 	*authCodeStore.InMemoryAuthorizationCodeStore,
 	*jwttoken.JWTService,
-	*audit.InMemoryStore,
+	*auditstore.InMemoryStore,
 ) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -72,7 +75,7 @@ func SetupSuite(t *testing.T) (
 		"credo-client",
 		15*time.Minute,
 	)
-	auditStore := audit.NewInMemoryStore()
+	auditStore := auditstore.NewInMemoryStore()
 	jwtValidator := jwttoken.NewJWTServiceAdapter(jwtService)
 	clientResolver := &stubClientResolver{
 		defaultTenantID: id.TenantID(uuid.New()),
@@ -88,12 +91,12 @@ func SetupSuite(t *testing.T) (
 		&cfg,
 		service.WithLogger(logger),
 		service.WithJWTService(jwtService),
-		service.WithAuditPublisher(audit.NewPublisher(auditStore)),
+		service.WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
 		service.WithClientResolver(clientResolver),
 	)
 
 	router := chi.NewRouter()
-	router.Use(middleware.ClientMetadata)
+	router.Use(metadata.ClientMetadata)
 	authHandler := auth.New(authService, logger, "__Secure-Device-ID", 31536000)
 
 	// Public endpoints (no auth required) - mirrors production setup
@@ -103,7 +106,7 @@ func SetupSuite(t *testing.T) (
 
 	// Protected endpoints (auth required)
 	router.Group(func(r chi.Router) {
-		r.Use(middleware.RequireAuth(jwtValidator, authService, logger)) // authService implements TokenRevocationChecker
+		r.Use(authmw.RequireAuth(jwtValidator, authService, logger)) // authService implements TokenRevocationChecker
 		r.Get("/auth/userinfo", authHandler.HandleUserInfo)
 		r.Get("/auth/sessions", authHandler.HandleListSessions)
 		r.Delete("/auth/sessions/{session_id}", authHandler.HandleRevokeSession)
@@ -111,7 +114,7 @@ func SetupSuite(t *testing.T) (
 
 	// Admin endpoints (admin token required)
 	router.Group(func(r chi.Router) {
-		r.Use(middleware.RequireAdminToken("test-admin-token", logger))
+		r.Use(adminmw.RequireAdminToken("test-admin-token", logger))
 		authHandler.RegisterAdmin(r)
 	})
 

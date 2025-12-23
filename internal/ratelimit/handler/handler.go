@@ -8,10 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"credo/internal/platform/middleware"
+	request "credo/pkg/platform/middleware/request"
 	"credo/internal/ratelimit/models"
-	"credo/internal/transport/httputil"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/httputil"
 )
 
 // Service defines the interface for rate limiting operations.
@@ -27,7 +27,6 @@ type Service interface {
 }
 
 // Handler handles rate limit admin endpoints.
-// Per PRD-017 FR-4: Admin endpoints for allowlist management.
 type Handler struct {
 	service Service
 	logger  *slog.Logger
@@ -42,7 +41,6 @@ func New(service Service, logger *slog.Logger) *Handler {
 }
 
 // RegisterAdmin registers admin routes for rate limit management.
-// Per PRD-017 FR-4: POST /admin/rate-limit/allowlist
 func (h *Handler) RegisterAdmin(r chi.Router) {
 	r.Post("/admin/rate-limit/allowlist", h.HandleAddAllowlist)
 	r.Delete("/admin/rate-limit/allowlist", h.HandleRemoveAllowlist)
@@ -51,7 +49,6 @@ func (h *Handler) RegisterAdmin(r chi.Router) {
 }
 
 // HandleAddAllowlist implements POST /admin/rate-limit/allowlist.
-// Per PRD-017 FR-4: Add IP or user to allowlist.
 //
 // Input: { "type": "ip", "identifier": "192.168.1.100", "reason": "...", "expires_at": "..." }
 // Output: { "allowlisted": true, "identifier": "192.168.1.100", "expires_at": "..." }
@@ -64,7 +61,7 @@ func (h *Handler) RegisterAdmin(r chi.Router) {
 // 5. Return AllowlistEntryResponse
 func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.AddAllowlistRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -77,7 +74,7 @@ func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: Implement - validate request, get admin user ID, call service
-	// adminUserID := middleware.GetUserID(ctx)
+	// adminUserID := auth.GetUserID(ctx)
 	// entry, err := h.service.AddToAllowlist(ctx, &req, adminUserID)
 	// if err != nil { ... }
 	// httputil.WriteJSON(w, http.StatusOK, &models.AllowlistEntryResponse{...})
@@ -86,7 +83,6 @@ func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRemoveAllowlist implements DELETE /admin/rate-limit/allowlist.
-// Per PRD-017 FR-4: Remove IP or user from allowlist.
 //
 // Input: { "type": "ip", "identifier": "192.168.1.100" }
 // Output: 204 No Content
@@ -94,7 +90,7 @@ func (h *Handler) HandleAddAllowlist(w http.ResponseWriter, r *http.Request) {
 // TODO: Implement this handler
 func (h *Handler) HandleRemoveAllowlist(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.RemoveAllowlistRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -122,7 +118,7 @@ func (h *Handler) HandleRemoveAllowlist(w http.ResponseWriter, r *http.Request) 
 // TODO: Implement this handler
 func (h *Handler) HandleListAllowlist(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	// TODO: Implement
 	// entries, err := h.service.ListAllowlist(ctx)
@@ -142,7 +138,7 @@ func (h *Handler) HandleListAllowlist(w http.ResponseWriter, r *http.Request) {
 // TODO: Implement this handler
 func (h *Handler) HandleResetRateLimit(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := middleware.GetRequestID(ctx)
+	requestID := request.GetRequestID(ctx)
 
 	var req models.ResetRateLimitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"credo/internal/admin"
-	"credo/internal/audit"
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
 	authService "credo/internal/auth/service"
@@ -27,13 +26,24 @@ import (
 	"credo/internal/platform/config"
 	"credo/internal/platform/httpserver"
 	"credo/internal/platform/logger"
-	"credo/internal/platform/metrics"
-	"credo/internal/platform/middleware"
+	rateLimitMW "credo/internal/ratelimit/middleware"
+	rateLimitModels "credo/internal/ratelimit/models"
+	rateLimit "credo/internal/ratelimit/service"
+	rwallowlistStore "credo/internal/ratelimit/store/allowlist"
+	rwbucketStore "credo/internal/ratelimit/store/bucket"
 	"credo/internal/seeder"
 	tenantHandler "credo/internal/tenant/handler"
 	tenantService "credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
+	auditpublisher "credo/pkg/platform/audit/publisher"
+	auditstore "credo/pkg/platform/audit/store/memory"
+	"credo/pkg/platform/metrics"
+	adminmw "credo/pkg/platform/middleware/admin"
+	auth "credo/pkg/platform/middleware/auth"
+	devicemw "credo/pkg/platform/middleware/device"
+	metadata "credo/pkg/platform/middleware/metadata"
+	request "credo/pkg/platform/middleware/request"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -57,7 +67,7 @@ type authModule struct {
 	Sessions      *sessionStore.InMemorySessionStore
 	Codes         *authCodeStore.InMemoryAuthorizationCodeStore
 	RefreshTokens *refreshTokenStore.InMemoryRefreshTokenStore
-	AuditStore    *audit.InMemoryStore
+	AuditStore    *auditstore.InMemoryStore
 }
 
 type consentModule struct {
@@ -78,6 +88,13 @@ func main() {
 		panic(err)
 	}
 
+	rateLimitService, allowlistStore, err := buildRateLimitService(infra.Log)
+	if err != nil {
+		infra.Log.Error("failed to initialize rate limit service", "error", err)
+		os.Exit(1)
+	}
+	rateLimitMiddleware := rateLimitMW.New(rateLimitService, infra.Log, rateLimitMW.WithDisabled(infra.Cfg.DemoMode))
+
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 	tenantMod := buildTenantModule(infra)
@@ -89,9 +106,14 @@ func main() {
 	consentMod := buildConsentModule(infra)
 
 	startCleanupWorker(appCtx, infra.Log, authMod.Cleanup)
+	go func() {
+		if err := allowlistStore.StartCleanup(appCtx, 5*time.Minute); err != nil && err != context.Canceled {
+			infra.Log.Error("rate limit cleanup stopped", "error", err)
+		}
+	}()
 
 	r := setupRouter(infra)
-	registerRoutes(r, infra, authMod, consentMod, tenantMod)
+	registerRoutes(r, infra, authMod, consentMod, tenantMod, rateLimitMiddleware)
 
 	mainSrv := httpserver.New(infra.Cfg.Addr, r)
 	startServer(mainSrv, infra.Log, "main API")
@@ -104,6 +126,21 @@ func main() {
 	}
 
 	waitForShutdown([]*http.Server{mainSrv, adminSrv}, infra.Log, cancelApp)
+}
+
+func buildRateLimitService(logger *slog.Logger) (*rateLimit.Service, *rwallowlistStore.InMemoryAllowlistStore, error) {
+	bucketStore := rwbucketStore.NewInMemoryBucketStore()
+	allowlistStore := rwallowlistStore.NewInMemoryAllowlistStore()
+	svc, err := rateLimit.New(
+		bucketStore,
+		allowlistStore,
+		rateLimit.WithLogger(logger),
+	)
+	if err != nil {
+		logger.Error("failed to create rate limit service", "error", err)
+		return nil, nil, err
+	}
+	return svc, allowlistStore, nil
 }
 
 func buildInfra() (*infraBundle, error) {
@@ -120,7 +157,7 @@ func buildInfra() (*infraBundle, error) {
 		"allowed_redirect_schemes", cfg.Auth.AllowedRedirectSchemes,
 	)
 	if cfg.DemoMode {
-		log.Info("CRENE_ENV=demo — starting isolated demo environment",
+		log.Info("CREDO_ENV=demo — starting isolated demo environment",
 			"stores", "in-memory",
 			"issuer_base_url", cfg.Auth.JWTIssuerBaseURL,
 		)
@@ -145,7 +182,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 	sessions := sessionStore.NewInMemorySessionStore()
 	codes := authCodeStore.NewInMemoryAuthorizationCodeStore()
 	refreshTokens := refreshTokenStore.NewInMemoryRefreshTokenStore()
-	auditStore := audit.NewInMemoryStore()
+	auditStore := auditstore.NewInMemoryStore()
 
 	if infra.Cfg.DemoMode {
 		seederSvc := seeder.New(users, sessions, codes, refreshTokens, auditStore, infra.Log)
@@ -174,7 +211,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		authService.WithLogger(infra.Log),
 		authService.WithJWTService(infra.JWTService),
 		authService.WithTRL(trl),
-		authService.WithAuditPublisher(audit.NewPublisher(auditStore)),
+		authService.WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
 		authService.WithClientResolver(tenantService),
 	)
 	if err != nil {
@@ -189,6 +226,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		cleanupWorker.WithCleanupInterval(infra.Cfg.Auth.AuthCleanupInterval),
 	)
 	if err != nil {
+		infra.Log.Error("failed to create auth cleanup service", "error", err)
 		return nil, err
 	}
 
@@ -208,7 +246,7 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 func buildConsentModule(infra *infraBundle) *consentModule {
 	consentSvc := consentService.NewService(
 		consentStore.NewInMemoryStore(),
-		audit.NewPublisher(audit.NewInMemoryStore()),
+		auditpublisher.NewPublisher(auditstore.NewInMemoryStore()),
 		infra.Log,
 		consentService.WithConsentTTL(infra.Cfg.Consent.ConsentTTL),
 		consentService.WithGrantWindow(infra.Cfg.Consent.ConsentGrantWindow),
@@ -261,17 +299,17 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Common middleware for all routes (must be defined before routes)
-	r.Use(middleware.ClientMetadata)
-	r.Use(middleware.Device(&middleware.DeviceConfig{
+	r.Use(metadata.ClientMetadata)
+	r.Use(devicemw.Device(&devicemw.DeviceConfig{
 		CookieName:    infra.Cfg.Auth.DeviceCookieName,
 		FingerprintFn: infra.DeviceService.ComputeFingerprint,
 	}))
-	r.Use(middleware.Recovery(infra.Log))
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger(infra.Log))
-	r.Use(middleware.Timeout(30 * time.Second)) // TODO: make configurable
-	r.Use(middleware.ContentTypeJSON)
-	r.Use(middleware.LatencyMiddleware(infra.Metrics))
+	r.Use(request.Recovery(infra.Log))
+	r.Use(request.RequestID)
+	r.Use(request.Logger(infra.Log))
+	r.Use(request.Timeout(30 * time.Second)) // TODO: make configurable
+	r.Use(request.ContentTypeJSON)
+	r.Use(request.LatencyMiddleware(infra.Metrics))
 
 	// Add Prometheus metrics endpoint (no auth required)
 	r.Handle("/metrics", promhttp.Handler())
@@ -284,7 +322,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 }
 
 // registerRoutes wires HTTP handlers to the shared router
-func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule) {
+func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, rateLimitMiddleware *rateLimitMW.Middleware) {
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
@@ -298,21 +336,39 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 		})
 	}
 
-	r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
-	r.Post("/auth/token", authMod.Handler.HandleToken)
-	r.Post("/auth/revoke", authMod.Handler.HandleRevoke)
-
+	// Auth public endpoints - ClassAuth (10 req/min)
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
-		r.Get("/auth/userinfo", authMod.Handler.HandleUserInfo)
-		r.Get("/auth/sessions", authMod.Handler.HandleListSessions)
-		r.Delete("/auth/sessions/{session_id}", authMod.Handler.HandleRevokeSession)
-		consentMod.Handler.Register(r)
+		r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassAuth))
+		r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
+		r.Post("/auth/token", authMod.Handler.HandleToken)
+		r.Post("/auth/revoke", authMod.Handler.HandleRevoke)
 	})
 
+	// Protected read endpoints - ClassRead (100 req/min)
+	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassRead))
+		r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
+		r.Get("/auth/userinfo", authMod.Handler.HandleUserInfo)
+		r.Get("/auth/sessions", authMod.Handler.HandleListSessions)
+		r.Get("/auth/consent", consentMod.Handler.HandleGetConsents)
+	})
+
+	// Protected sensitive endpoints - ClassSensitive (30 req/min)
+	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassSensitive))
+		r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
+		r.Delete("/auth/sessions/{session_id}", authMod.Handler.HandleRevokeSession)
+		r.Post("/auth/consent", consentMod.Handler.HandleGrantConsent)
+		r.Post("/auth/consent/revoke", consentMod.Handler.HandleRevokeConsent)
+		r.Post("/auth/consent/revoke-all", consentMod.Handler.HandleRevokeAllConsents)
+		r.Delete("/auth/consent", consentMod.Handler.HandleDeleteAllConsents)
+	})
+
+	// Admin endpoints - ClassWrite (50 req/min)
 	if infra.Cfg.Security.AdminAPIToken != "" {
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
+			r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassWrite))
+			r.Use(adminmw.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
 			authMod.Handler.RegisterAdmin(r)
 			tenantMod.Handler.Register(r)
 		})
@@ -324,11 +380,11 @@ func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *
 	r := chi.NewRouter()
 
 	// Common middleware for all routes
-	r.Use(middleware.Recovery(log))
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger(log))
-	r.Use(middleware.Timeout(30 * time.Second))
-	r.Use(middleware.ContentTypeJSON)
+	r.Use(request.Recovery(log))
+	r.Use(request.RequestID)
+	r.Use(request.Logger(log))
+	r.Use(request.Timeout(30 * time.Second))
+	r.Use(request.ContentTypeJSON)
 
 	// Health check and metrics
 	r.Handle("/metrics", promhttp.Handler())
@@ -350,7 +406,7 @@ func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *
 	// All admin routes require authentication
 	adminHandler := admin.New(adminSvc, log)
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.RequireAdminToken(cfg.Security.AdminAPIToken, log))
+		r.Use(adminmw.RequireAdminToken(cfg.Security.AdminAPIToken, log))
 		adminHandler.Register(r)
 		tenantHandler.Register(r)
 	})

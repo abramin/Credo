@@ -1,15 +1,19 @@
-package audit
+package worker
 
-import "context"
+import (
+	"context"
+
+	audit "credo/pkg/platform/audit"
+)
 
 // Worker consumes audit events from a channel and persists them. It keeps
 // background processing testable without wiring queue implementations yet.
 type Worker struct {
-	store Store
-	inbox <-chan Event
+	store audit.Store
+	inbox <-chan audit.Event
 }
 
-func NewWorker(store Store, inbox <-chan Event) *Worker {
+func NewWorker(store audit.Store, inbox <-chan audit.Event) *Worker {
 	return &Worker{store: store, inbox: inbox}
 }
 

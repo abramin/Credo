@@ -5,10 +5,11 @@ import (
 
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+
+	"github.com/google/uuid"
 )
 
 // EndpointClass categorizes endpoints for differentiated rate limiting.
-// Per PRD-017 FR-1: Different endpoint classes have different rate limits.
 type EndpointClass string
 
 const (
@@ -21,6 +22,15 @@ const (
 	// ClassWrite: Write operations (50 req/min) - general mutations
 	ClassWrite EndpointClass = "write"
 )
+
+// IsValid checks if the endpoint class is one of the supported enum values.
+func (c EndpointClass) IsValid() bool {
+	switch c {
+	case ClassAuth, ClassSensitive, ClassRead, ClassWrite:
+		return true
+	}
+	return false
+}
 
 // AllowlistEntryType defines whether an allowlist entry is for an IP or user.
 type AllowlistEntryType string
@@ -54,17 +64,15 @@ func (t AllowlistEntryType) String() string {
 }
 
 // RateLimitResult represents the outcome of a rate limit check.
-// Per PRD-017 FR-1: Headers include X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset.
 type RateLimitResult struct {
-	Allowed   bool      `json:"allowed"`
-	Limit     int       `json:"limit"`
-	Remaining int       `json:"remaining"`
-	ResetAt   time.Time `json:"reset_at"`
-	RetryAfter int      `json:"retry_after,omitempty"` // seconds, only set when not allowed
+	Allowed    bool      `json:"allowed"`
+	Limit      int       `json:"limit"`
+	Remaining  int       `json:"remaining"`
+	ResetAt    time.Time `json:"reset_at"`
+	RetryAfter int       `json:"retry_after,omitempty"` // seconds, only set when not allowed
 }
 
 // AllowlistEntry represents an IP or user that bypasses rate limits.
-// Per PRD-017 FR-4: Admin can allowlist IPs or users.
 type AllowlistEntry struct {
 	ID         string             `json:"id"`
 	Type       AllowlistEntryType `json:"type"`
@@ -76,10 +84,9 @@ type AllowlistEntry struct {
 }
 
 // RateLimitViolation represents a recorded rate limit violation for audit.
-// Per PRD-017 FR-1: Emit audit event on rate_limit_exceeded.
 type RateLimitViolation struct {
 	ID            string        `json:"id"`
-	Identifier    string        `json:"identifier"`    // IP or user_id
+	Identifier    string        `json:"identifier"` // IP or user_id
 	EndpointClass EndpointClass `json:"endpoint_class"`
 	Endpoint      string        `json:"endpoint"`
 	Limit         int           `json:"limit"`
@@ -88,7 +95,6 @@ type RateLimitViolation struct {
 }
 
 // QuotaTier represents partner API quota configuration.
-// Per PRD-017 FR-5: Partner API quotas by tier.
 type QuotaTier string
 
 const (
@@ -98,8 +104,16 @@ const (
 	QuotaTierEnterprise QuotaTier = "enterprise"
 )
 
+// IsValid checks if the quota tier is one of the supported enum values.
+func (t QuotaTier) IsValid() bool {
+	switch t {
+	case QuotaTierFree, QuotaTierStarter, QuotaTierBusiness, QuotaTierEnterprise:
+		return true
+	}
+	return false
+}
+
 // APIKeyQuota tracks quota usage for a partner API key.
-// Per PRD-017 FR-5: Track monthly quotas per API key.
 type APIKeyQuota struct {
 	APIKeyID       string    `json:"api_key_id"`
 	Tier           QuotaTier `json:"tier"`
@@ -111,31 +125,29 @@ type APIKeyQuota struct {
 }
 
 // AuthLockout tracks authentication-specific lockout state.
-// Per PRD-017 FR-2b: OWASP authentication-specific protections.
 type AuthLockout struct {
-	Identifier      string    `json:"identifier"`      // username/email + IP composite key
-	FailureCount    int       `json:"failure_count"`   // failures in current window
-	DailyFailures   int       `json:"daily_failures"`  // failures today (for hard lock)
+	Identifier      string     `json:"identifier"`     // username/email + IP composite key
+	FailureCount    int        `json:"failure_count"`  // failures in current window
+	DailyFailures   int        `json:"daily_failures"` // failures today (for hard lock)
 	LockedUntil     *time.Time `json:"locked_until,omitempty"`
-	LastFailureAt   time.Time `json:"last_failure_at"`
-	RequiresCaptcha bool      `json:"requires_captcha"` // after 3 consecutive lockouts in 24h
+	LastFailureAt   time.Time  `json:"last_failure_at"`
+	RequiresCaptcha bool       `json:"requires_captcha"` // after 3 consecutive lockouts in 24h
 }
 
 // NewAllowlistEntry creates an AllowlistEntry with domain invariant validation.
 func NewAllowlistEntry(entryType AllowlistEntryType, identifier, reason string, createdBy id.UserID, expiresAt *time.Time) (*AllowlistEntry, error) {
+	if !entryType.IsValid() {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid allowlist entry type")
+	}
 	if identifier == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")
-	}
-	if entryType != AllowlistTypeIP && entryType != AllowlistTypeUserID {
-		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid allowlist entry type")
 	}
 	if reason == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "reason cannot be empty")
 	}
 
-	// TODO: Implement - generate unique ID
 	return &AllowlistEntry{
-		ID:         "", // TODO: generate UUID
+		ID:         uuid.NewString(),
 		Type:       entryType,
 		Identifier: identifier,
 		Reason:     reason,
@@ -151,4 +163,88 @@ func (e *AllowlistEntry) IsExpired() bool {
 		return false
 	}
 	return time.Now().After(*e.ExpiresAt)
+}
+
+// NewAuthLockout creates an AuthLockout with domain invariant validation.
+func NewAuthLockout(identifier string) (*AuthLockout, error) {
+	if identifier == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")
+	}
+	return &AuthLockout{
+		Identifier:      identifier,
+		FailureCount:    0,
+		DailyFailures:   0,
+		LockedUntil:     nil,
+		LastFailureAt:   time.Now(),
+		RequiresCaptcha: false,
+	}, nil
+}
+
+// IsLocked checks if the account is currently locked.
+func (l *AuthLockout) IsLocked() bool {
+	if l.LockedUntil == nil {
+		return false
+	}
+	return time.Now().Before(*l.LockedUntil)
+}
+
+// NewAPIKeyQuota creates an APIKeyQuota with domain invariant validation.
+func NewAPIKeyQuota(apiKeyID string, tier QuotaTier, monthlyLimit int, overageAllowed bool) (*APIKeyQuota, error) {
+	if apiKeyID == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "api_key_id cannot be empty")
+	}
+	if !tier.IsValid() {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid quota tier")
+	}
+	if monthlyLimit < 0 {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "monthly_limit cannot be negative")
+	}
+
+	now := time.Now()
+	periodStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	periodEnd := periodStart.AddDate(0, 1, 0).Add(-time.Nanosecond)
+
+	return &APIKeyQuota{
+		APIKeyID:       apiKeyID,
+		Tier:           tier,
+		MonthlyLimit:   monthlyLimit,
+		CurrentUsage:   0,
+		OverageAllowed: overageAllowed,
+		PeriodStart:    periodStart,
+		PeriodEnd:      periodEnd,
+	}, nil
+}
+
+// IsOverQuota checks if the API key has exceeded its monthly quota.
+func (q *APIKeyQuota) IsOverQuota() bool {
+	return q.CurrentUsage >= q.MonthlyLimit
+}
+
+// NewRateLimitViolation creates a RateLimitViolation with domain invariant validation.
+func NewRateLimitViolation(identifier string, class EndpointClass, endpoint string, limit, windowSeconds int) (*RateLimitViolation, error) {
+	if identifier == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")
+	}
+	if !class.IsValid() {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid endpoint class")
+	}
+	if endpoint == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "endpoint cannot be empty")
+	}
+	if limit <= 0 {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "limit must be positive")
+	}
+	if windowSeconds <= 0 {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "window_seconds must be positive")
+	}
+
+	return &RateLimitViolation{
+		ID:            uuid.NewString(),
+		Identifier:    identifier,
+		EndpointClass: class,
+		Endpoint:      endpoint,
+		Limit:         limit,
+		WindowSeconds: windowSeconds,
+		OccurredAt:    time.Now(),
+	}, nil
 }

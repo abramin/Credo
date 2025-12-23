@@ -1,7 +1,9 @@
-package middleware
+package device
 
 import (
 	"net/http"
+
+	metadata "credo/pkg/platform/middleware/metadata"
 )
 
 // DeviceConfig holds configuration for the Device middleware.
@@ -36,7 +38,7 @@ func Device(cfg *DeviceConfig) func(http.Handler) http.Handler {
 
 			// Pre-compute fingerprint from User-Agent (already in context from ClientMetadata)
 			if cfg.FingerprintFn != nil {
-				userAgent := GetUserAgent(ctx)
+				userAgent := metadata.GetUserAgent(ctx)
 				if userAgent != "" {
 					fingerprint := cfg.FingerprintFn(userAgent)
 					ctx = WithDeviceFingerprint(ctx, fingerprint)

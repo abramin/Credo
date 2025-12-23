@@ -70,7 +70,7 @@ var (
 
 // FromEnv builds config from environment variables
 func FromEnv() (Server, error) {
-	env := getEnv("CRENE_ENV", "local")
+	env := getEnv("CREDO_ENV", "local")
 	demoMode := env == "demo"
 
 	cfg := Server{
@@ -141,7 +141,7 @@ func loadSecurityConfig(env string, demoMode bool) SecurityConfig {
 	adminToken := os.Getenv("ADMIN_API_TOKEN")
 	if adminToken == "" {
 		switch strings.ToLower(env) {
-		case "local", "dev", "development", "testing", "test":
+		case "local", "dev", "development", "testing", "test", "demo":
 			adminToken = "demo-admin-token"
 		}
 	}

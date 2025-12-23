@@ -6,14 +6,13 @@ import (
 	"log/slog"
 	"time"
 
-	"credo/internal/audit"
-	"credo/internal/platform/middleware"
+	"credo/pkg/platform/audit"
+	request "credo/pkg/platform/middleware/request"
 	"credo/internal/ratelimit/models"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/privacy"
 )
 
-// Service provides rate limiting and abuse prevention operations.
-// Per PRD-017: Core rate limiting service.
 type Service struct {
 	buckets        BucketStore
 	allowlist      AllowlistStore
@@ -25,31 +24,47 @@ type Service struct {
 	config         *Config
 }
 
-// Option is a functional option for configuring the Service.
 type Option func(*Service)
 
-// WithLogger sets the logger for the service.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {
 		s.logger = logger
 	}
 }
 
-// WithAuditPublisher sets the audit publisher for the service.
 func WithAuditPublisher(publisher AuditPublisher) Option {
 	return func(s *Service) {
 		s.auditPublisher = publisher
 	}
 }
 
-// WithConfig sets the rate limit configuration.
 func WithConfig(cfg *Config) Option {
 	return func(s *Service) {
 		s.config = cfg
 	}
 }
 
-// New creates a new rate limiting Service.
+func WithAuthLockoutStore(store AuthLockoutStore) Option {
+	return func(s *Service) {
+		s.authLockout = store
+	}
+}
+
+func WithQuotaStore(store QuotaStore) Option {
+	return func(s *Service) {
+		s.quotas = store
+	}
+}
+
+func WithGlobalThrottleStore(store GlobalThrottleStore) Option {
+	return func(s *Service) {
+		s.globalThrottle = store
+	}
+}
+
+const keyPrefixUser = "user"
+const keyPrefixIP = "ip"
+
 func New(
 	buckets BucketStore,
 	allowlist AllowlistStore,
@@ -75,66 +90,92 @@ func New(
 	return svc, nil
 }
 
-// SetAuthLockoutStore sets the auth lockout store (optional dependency).
-func (s *Service) SetAuthLockoutStore(store AuthLockoutStore) {
-	s.authLockout = store
-}
-
-// SetQuotaStore sets the quota store (optional dependency).
-func (s *Service) SetQuotaStore(store QuotaStore) {
-	s.quotas = store
-}
-
-// SetGlobalThrottleStore sets the global throttle store (optional dependency).
-func (s *Service) SetGlobalThrottleStore(store GlobalThrottleStore) {
-	s.globalThrottle = store
-}
-
-// CheckIPRateLimit checks the per-IP rate limit for an endpoint class.
-// Per PRD-017 FR-1: Per-IP rate limiting.
-//
-// TODO: Implement this method
-// 1. Check if IP is allowlisted - if so, return allowed with max limits
-// 2. Build rate limit key: "ip:{ip}:{class}"
-// 3. Get limit and window for endpoint class from config
-// 4. Call buckets.Allow() to check and increment
-// 5. If not allowed, emit audit event "rate_limit_exceeded"
-// 6. Return RateLimitResult with headers info
 func (s *Service) CheckIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	// TODO: Implement - see steps above
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	requestsPerWindow, window := s.config.GetIPLimit(class)
+	return s.checkRateLimit(ctx, ip, class, keyPrefixIP, requestsPerWindow, window, privacy.AnonymizeIP(ip))
 }
 
-// CheckUserRateLimit checks the per-user rate limit for an endpoint class.
-// Per PRD-017 FR-2: Per-user rate limiting.
-//
-// TODO: Implement this method
-// 1. Check if userID is allowlisted - if so, return allowed with max limits
-// 2. Build rate limit key: "user:{userID}:{class}"
-// 3. Get user limit and window for endpoint class from config
-// 4. Call buckets.Allow() to check and increment
-// 5. If not allowed, emit audit event "user_rate_limit_exceeded"
-// 6. Return RateLimitResult with quota info
 func (s *Service) CheckUserRateLimit(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	// TODO: Implement - see steps above
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	requestsPerWindow, window := s.config.GetUserLimit(class)
+	return s.checkRateLimit(ctx, userID, class, keyPrefixUser, requestsPerWindow, window, userID)
 }
 
-// CheckBothLimits checks both IP and user rate limits.
-// Per PRD-017 FR-2: Both must pass for authenticated endpoints.
-//
-// TODO: Implement this method
-// 1. Check IP rate limit
-// 2. If IP limit exceeded, return immediately
-// 3. Check user rate limit
-// 4. Return the more restrictive result
+// checkRateLimit is the common rate limiting logic for both IP and user checks.
+func (s *Service) checkRateLimit(
+	ctx context.Context,
+	identifier string,
+	class models.EndpointClass,
+	keyPrefix string,
+	requestsPerWindow int,
+	window time.Duration,
+	logIdentifier string,
+) (*models.RateLimitResult, error) {
+	a, err := s.allowlist.IsAllowlisted(ctx, identifier)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to check allowlist")
+	}
+	if a {
+		return &models.RateLimitResult{
+			Allowed:    true,
+			Limit:      requestsPerWindow,
+			Remaining:  requestsPerWindow,
+			ResetAt:    time.Now().Add(window),
+			RetryAfter: 0,
+		}, nil
+	}
+
+	key := fmt.Sprintf("%s:%s:%s", keyPrefix, identifier, class)
+	result, err := s.buckets.Allow(ctx, key, requestsPerWindow, window)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to check rate limit")
+	}
+
+	if !result.Allowed {
+		s.logAudit(ctx, keyPrefix+"_rate_limit_exceeded",
+			"identifier", logIdentifier,
+			"endpoint_class", class,
+			"limit", requestsPerWindow,
+			"window_seconds", int(window.Seconds()),
+		)
+	}
+
+	return result, nil
+}
+
 func (s *Service) CheckBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	// TODO: Implement - see steps above
-	return nil, dErrors.New(dErrors.CodeInternal, "not implemented")
+	requestsPerWindow, window := s.config.GetIPLimit(class)
+	ipRes, err := s.checkRateLimit(ctx, ip, class, keyPrefixIP, requestsPerWindow, window, privacy.AnonymizeIP(ip))
+	if err != nil {
+		return nil, err
+	}
+	if !ipRes.Allowed {
+		return ipRes, nil
+	}
+	requestsPerWindow, window = s.config.GetUserLimit(class)
+	userRes, err := s.checkRateLimit(ctx, userID, class, keyPrefixUser, requestsPerWindow, window, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !userRes.Allowed {
+		return userRes, nil
+	}
+
+	// **If both pass**, return a combined result that shows the more restrictive remaining count and reset time
+	if ipRes.Remaining < userRes.Remaining {
+		return ipRes, nil
+	} else if userRes.Remaining < ipRes.Remaining {
+		return userRes, nil
+	} else {
+		// If remaining counts are equal, return the one with the earlier reset time
+		if ipRes.ResetAt.Before(userRes.ResetAt) {
+			return ipRes, nil
+		} else {
+			return userRes, nil
+		}
+	}
 }
 
 // CheckAuthRateLimit checks authentication-specific rate limits with lockout.
-// Per PRD-017 FR-2b: OWASP authentication-specific protections.
 //
 // TODO: Implement this method
 // 1. Build composite key: "{email/username}:{ip}"
@@ -149,7 +190,6 @@ func (s *Service) CheckAuthRateLimit(ctx context.Context, identifier, ip string)
 }
 
 // RecordAuthFailure records a failed authentication attempt.
-// Per PRD-017 FR-2b: Track failures for lockout.
 //
 // TODO: Implement this method
 // 1. Record failure in authLockout store
@@ -163,7 +203,6 @@ func (s *Service) RecordAuthFailure(ctx context.Context, identifier, ip string) 
 }
 
 // ClearAuthFailures clears auth failure state after successful login.
-// Per PRD-017 FR-2b: Clear state on success.
 //
 // TODO: Implement this method
 func (s *Service) ClearAuthFailures(ctx context.Context, identifier, ip string) error {
@@ -172,18 +211,19 @@ func (s *Service) ClearAuthFailures(ctx context.Context, identifier, ip string) 
 }
 
 // GetProgressiveBackoff calculates backoff delay based on failure count.
-// Per PRD-017 FR-2b: Progressive backoff (250ms → 500ms → 1s).
-//
-// TODO: Implement this method
-// Returns delay duration based on failure count
+// Per PRD-017 FR-2b: 250ms → 500ms → 1s (capped).
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
-	// TODO: Implement progressive backoff calculation
-	// Base: 250ms, doubles each failure, max 1s
-	return 0
+	if failureCount <= 0 {
+		return 0
+	}
+	base := 250 * time.Millisecond
+	delay := min(
+		// 250ms, 500ms, 1s, 2s...
+		base*time.Duration(1<<(failureCount-1)), time.Second)
+	return delay
 }
 
 // CheckAPIKeyQuota checks quota for partner API key.
-// Per PRD-017 FR-5: Partner API quotas.
 //
 // TODO: Implement this method
 // 1. Get quota for API key
@@ -198,7 +238,6 @@ func (s *Service) CheckAPIKeyQuota(ctx context.Context, apiKeyID string) (*model
 }
 
 // CheckGlobalThrottle checks global request throttle for DDoS protection.
-// Per PRD-017 FR-6: Global throttling.
 //
 // TODO: Implement this method
 // 1. Increment global counter
@@ -211,7 +250,6 @@ func (s *Service) CheckGlobalThrottle(ctx context.Context) (bool, error) {
 }
 
 // AddToAllowlist adds an IP or user to the rate limit allowlist.
-// Per PRD-017 FR-4: Admin allowlist management.
 //
 // TODO: Implement this method
 // 1. Validate request
@@ -224,7 +262,6 @@ func (s *Service) AddToAllowlist(ctx context.Context, req *models.AddAllowlistRe
 }
 
 // RemoveFromAllowlist removes an IP or user from the allowlist.
-// Per PRD-017 FR-4: Admin allowlist management.
 //
 // TODO: Implement this method
 // 1. Validate request
@@ -236,7 +273,6 @@ func (s *Service) RemoveFromAllowlist(ctx context.Context, req *models.RemoveAll
 }
 
 // ListAllowlist returns all active allowlist entries.
-// Per PRD-017 FR-4: Admin can view allowlist.
 //
 // TODO: Implement this method
 func (s *Service) ListAllowlist(ctx context.Context) ([]*models.AllowlistEntry, error) {
@@ -245,7 +281,6 @@ func (s *Service) ListAllowlist(ctx context.Context) ([]*models.AllowlistEntry, 
 }
 
 // ResetRateLimit resets the rate limit counter for an identifier.
-// Per PRD-017 TR-1: Admin reset operation.
 //
 // TODO: Implement this method
 // 1. Validate request
@@ -259,7 +294,7 @@ func (s *Service) ResetRateLimit(ctx context.Context, req *models.ResetRateLimit
 
 // logAudit emits an audit event for rate limiting operations.
 func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
-	if requestID := middleware.GetRequestID(ctx); requestID != "" {
+	if requestID := request.GetRequestID(ctx); requestID != "" {
 		attrs = append(attrs, "request_id", requestID)
 	}
 	args := append(attrs, "event", event, "log_type", "audit")

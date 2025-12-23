@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"credo/internal/auth/models"
-	"credo/internal/sentinel"
 	id "credo/pkg/domain"
+	"credo/pkg/platform/sentinel"
 )
 
 // ErrNotFound is returned when a requested record is not found in the store.
@@ -156,7 +156,7 @@ func (s *InMemorySessionStore) AdvanceLastSeen(_ context.Context, sessionID id.S
 		return nil, fmt.Errorf("session not found: %w", ErrNotFound)
 	}
 	if session.ClientID.String() != clientID {
-		return nil, fmt.Errorf("client_id mismatch: %w", sentinel.ErrInvalidInput)
+		return nil, fmt.Errorf("client_id mismatch: %w", sentinel.ErrInvalidState)
 	}
 	if session.Status == "revoked" {
 		return nil, ErrSessionRevoked
@@ -197,7 +197,7 @@ func (s *InMemorySessionStore) AdvanceLastRefreshed(_ context.Context, sessionID
 		return nil, fmt.Errorf("session not found: %w", ErrNotFound)
 	}
 	if session.ClientID.String() != clientID {
-		return nil, fmt.Errorf("client_id mismatch: %w", sentinel.ErrInvalidInput)
+		return nil, fmt.Errorf("client_id mismatch: %w", sentinel.ErrInvalidState)
 	}
 	if session.Status == "revoked" {
 		return nil, ErrSessionRevoked

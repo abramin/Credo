@@ -395,7 +395,152 @@ POST /admin/review-queue/{id}/deny
 **Backend:** Existing API + admin endpoints
 **Auth:** Admin role required (JWT with `role:admin`)
 
-## 4. Acceptance Criteria
+## 4. Technical Requirements
+
+### TR-1: SQL Query Patterns for Admin Operations
+
+**Objective:** Demonstrate intermediate-to-advanced SQL capabilities for admin dashboard and operations.
+
+**Query Patterns Required:**
+
+- **CTEs for Paginated User Search with Aggregates:**
+  ```sql
+  WITH user_stats AS (
+    SELECT u.id, u.email, u.created_at,
+           COUNT(DISTINCT s.id) AS session_count,
+           COUNT(DISTINCT c.id) AS consent_count,
+           MAX(s.last_activity) AS last_active
+    FROM users u
+    LEFT JOIN sessions s ON u.id = s.user_id AND s.status = 'active'
+    LEFT JOIN consent_records c ON u.id = c.user_id AND c.revoked_at IS NULL
+    WHERE u.tenant_id = :tenant_id  -- RLS scoping
+      AND (u.email ILIKE :search OR u.id::text ILIKE :search)
+    GROUP BY u.id
+  )
+  SELECT * FROM user_stats
+  ORDER BY last_active DESC NULLS LAST
+  LIMIT :page_size OFFSET :offset;
+  ```
+
+- **Window Functions for Session Timeline:**
+  ```sql
+  SELECT s.id, s.user_id, s.created_at, s.last_activity,
+         ROW_NUMBER() OVER (PARTITION BY s.user_id ORDER BY s.created_at DESC) AS session_rank,
+         LAG(s.created_at) OVER (PARTITION BY s.user_id ORDER BY s.created_at) AS prev_session,
+         s.created_at - LAG(s.created_at) OVER (PARTITION BY s.user_id ORDER BY s.created_at) AS gap
+  FROM sessions s
+  WHERE s.user_id = :user_id
+    AND s.tenant_id = :tenant_id  -- RLS
+  ORDER BY s.created_at DESC;
+  ```
+
+- **CASE for Consent Status Categorization:**
+  ```sql
+  SELECT
+    purpose,
+    COUNT(*) AS total,
+    SUM(CASE
+      WHEN revoked_at IS NOT NULL THEN 1
+      WHEN expires_at < NOW() THEN 1
+      ELSE 0
+    END) AS inactive_count,
+    SUM(CASE
+      WHEN revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) THEN 1
+      ELSE 0
+    END) AS active_count
+  FROM consent_records
+  WHERE tenant_id = :tenant_id
+  GROUP BY purpose
+  HAVING COUNT(*) > 0
+  ORDER BY total DESC;
+  ```
+
+- **Subquery for Bulk Operations Preview:**
+  ```sql
+  -- Preview users affected by bulk session revocation
+  SELECT u.id, u.email,
+         (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id AND s.status = 'active') AS active_sessions,
+         (SELECT MAX(last_activity) FROM sessions s WHERE s.user_id = u.id) AS last_seen
+  FROM users u
+  WHERE u.tenant_id = :tenant_id
+    AND u.id IN (
+      SELECT DISTINCT user_id FROM sessions
+      WHERE created_at < NOW() - INTERVAL '90 days'
+        AND status = 'active'
+    );
+  ```
+
+- **Views for Admin Summaries (Avoid Wide Joins):**
+  ```sql
+  CREATE VIEW admin_user_summary AS
+  SELECT
+    u.id, u.email, u.created_at,
+    COALESCE(ss.session_count, 0) AS session_count,
+    COALESCE(cs.consent_count, 0) AS consent_count,
+    COALESCE(cs.active_consent_count, 0) AS active_consent_count,
+    ss.last_activity
+  FROM users u
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS session_count, MAX(last_activity) AS last_activity
+    FROM sessions WHERE user_id = u.id
+  ) ss ON true
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS consent_count,
+           COUNT(*) FILTER (WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())) AS active_consent_count
+    FROM consent_records WHERE user_id = u.id
+  ) cs ON true;
+
+  -- Use view instead of wide join
+  SELECT * FROM admin_user_summary WHERE id = :user_id;
+  ```
+
+- **Semi-Join for Permission Checks:**
+  ```sql
+  -- Only show users admin has access to (tenant scoping)
+  SELECT u.*
+  FROM users u
+  WHERE EXISTS (
+    SELECT 1 FROM admin_permissions ap
+    WHERE ap.admin_id = :current_admin_id
+      AND ap.tenant_id = u.tenant_id
+      AND ap.capability = 'user:read'
+  );
+  ```
+
+**Database Design:**
+
+- **Row-Level Security (RLS):** Enable `ALTER TABLE users ENABLE ROW LEVEL SECURITY;` with policies for tenant isolation
+- **Partial Indexes:** `CREATE INDEX idx_active_sessions ON sessions (user_id) WHERE status = 'active';`
+- **Materialized View for Dashboard Stats:**
+  ```sql
+  CREATE MATERIALIZED VIEW dashboard_stats AS
+  SELECT
+    tenant_id,
+    COUNT(DISTINCT u.id) AS total_users,
+    COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'active') AS active_sessions,
+    COUNT(DISTINCT c.id) FILTER (WHERE c.revoked_at IS NULL) AS active_consents
+  FROM users u
+  LEFT JOIN sessions s ON u.id = s.user_id
+  LEFT JOIN consent_records c ON u.id = c.user_id
+  GROUP BY tenant_id
+  WITH DATA;
+
+  REFRESH MATERIALIZED VIEW CONCURRENTLY dashboard_stats;
+  ```
+
+**Acceptance Criteria (SQL):**
+- [ ] User search uses CTEs with aggregate stats and pagination
+- [ ] Session timeline uses window functions (ROW_NUMBER, LAG)
+- [ ] Consent reports use CASE for status categorization
+- [ ] Bulk operation previews use correlated subqueries
+- [ ] Admin summaries use views/materialized views (no wide joins)
+- [ ] Permission checks use semi-joins (EXISTS)
+- [ ] RLS policies enforce tenant isolation at database level
+- [ ] All queries parameterized (no SQL injection)
+
+---
+
+## 5. Acceptance Criteria
 - [ ] Admin can search and manage users
 - [ ] Admin can view and revoke sessions
 - [ ] Admin can export consent reports
@@ -406,8 +551,9 @@ POST /admin/review-queue/{id}/deny
 - [ ] Role-based admin access: authenticated requests without sufficient capability are rejected with 403 Forbidden _(dependency from [PRD-026A](PRD-026A-Tenant-Client-Management.md))_
 
 ## Revision History
-| Version | Date       | Author       | Changes                                                  |
-| ------- | ---------- | ------------ | -------------------------------------------------------- |
-| 1.2     | 2025-12-18 | Engineering  | Added role-based admin access criterion (403 for insufficient capability) from PRD-026A |
-| 1.1     | 2025-12-18 | Security Eng | Added RLS/tenant scoping, view-based summaries, short-lived admin auth/CSRF |
-| 1.0     | 2025-12-12 | Product Team | Initial PRD                                              |
+| Version | Date       | Author       | Changes                                                                                   |
+| ------- | ---------- | ------------ | ----------------------------------------------------------------------------------------- |
+| 1.3     | 2025-12-21 | Engineering  | Added TR-1: SQL Query Patterns (CTEs, window functions, CASE, subqueries, views, RLS)    |
+| 1.2     | 2025-12-18 | Engineering  | Added role-based admin access criterion (403 for insufficient capability) from PRD-026A  |
+| 1.1     | 2025-12-18 | Security Eng | Added RLS/tenant scoping, view-based summaries, short-lived admin auth/CSRF              |
+| 1.0     | 2025-12-12 | Product Team | Initial PRD                                                                               |

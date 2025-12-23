@@ -48,7 +48,154 @@ This note highlights places to strengthen existing PRDs with explicit requiremen
 - **PRD-019 API Versioning & Lifecycle (Security)**
   - Require schema-diff gates that block unsafe changes, with signed migration manifests and rollback drills; publish deprecation headers with security impact notes.
 
+---
+
+## Retrofits for Completed PRDs
+
+The following PRDs are already implemented. These SQL/database enhancements should be applied as technical debt items or during future refactoring:
+
+### PRD-001: Authentication & Session Management (Completed)
+
+**SQL Query Patterns to Retrofit:**
+
+- **Window Functions for Session Analytics:**
+  ```sql
+  SELECT user_id, session_id, created_at,
+         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS session_rank,
+         COUNT(*) OVER (PARTITION BY user_id) AS total_sessions,
+         LAG(created_at) OVER (PARTITION BY user_id ORDER BY created_at) AS prev_session_start
+  FROM sessions
+  WHERE status = 'active';
+  ```
+
+- **CTE for Concurrent Session Detection:**
+  ```sql
+  WITH active_sessions AS (
+    SELECT user_id, COUNT(*) AS session_count
+    FROM sessions
+    WHERE status = 'active' AND expires_at > NOW()
+    GROUP BY user_id
+    HAVING COUNT(*) > :max_concurrent_sessions
+  )
+  SELECT s.* FROM sessions s
+  JOIN active_sessions a ON s.user_id = a.user_id;
+  ```
+
+- **Indexes:** Composite index on `(user_id, status, created_at)` for session lookups
+
+### PRD-001B: Admin User Deletion (Completed)
+
+**SQL Query Patterns to Retrofit:**
+
+- **CTE for Deletion Impact Preview:**
+  ```sql
+  WITH user_data AS (
+    SELECT 'sessions' AS table_name, COUNT(*) AS row_count FROM sessions WHERE user_id = :user_id
+    UNION ALL SELECT 'audit_events', COUNT(*) FROM audit_events WHERE user_id = :user_id
+    UNION ALL SELECT 'consent_records', COUNT(*) FROM consent_records WHERE user_id = :user_id
+  )
+  SELECT * FROM user_data WHERE row_count > 0;
+  ```
+
+- **Transactional Cascade Delete:**
+  ```sql
+  BEGIN;
+  DELETE FROM sessions WHERE user_id = :user_id;
+  DELETE FROM consent_records WHERE user_id = :user_id;
+  UPDATE audit_events SET user_id = :pseudonym WHERE user_id = :user_id;
+  DELETE FROM users WHERE id = :user_id;
+  COMMIT;
+  ```
+
+- **Foreign Key Constraints:** Ensure `ON DELETE CASCADE` or `ON DELETE RESTRICT` is configured appropriately
+
+### PRD-002: Consent Management (Completed)
+
+**SQL Query Patterns to Retrofit (extends existing bullets):**
+
+- **CASE for Consent Status:**
+  ```sql
+  SELECT user_id, purpose,
+         CASE
+           WHEN revoked_at IS NOT NULL THEN 'revoked'
+           WHEN expires_at < NOW() THEN 'expired'
+           ELSE 'active'
+         END AS status
+  FROM consent_records
+  WHERE user_id = :user_id;
+  ```
+
+- **Semi-Join for Users with Specific Consent:**
+  ```sql
+  SELECT u.* FROM users u
+  WHERE EXISTS (
+    SELECT 1 FROM consent_records c
+    WHERE c.user_id = u.id
+      AND c.purpose = 'registry_check'
+      AND c.revoked_at IS NULL
+  );
+  ```
+
+- **Partial Index:** `CREATE INDEX idx_active_consents ON consent_records (user_id, purpose) WHERE revoked_at IS NULL;`
+
+### PRD-016: Token Lifecycle & Revocation (Mostly Completed)
+
+**SQL Query Patterns to Retrofit (extends existing bullets):**
+
+- **Window Function for Token Refresh Velocity:**
+  ```sql
+  SELECT token_id, user_id, refreshed_at,
+         COUNT(*) OVER (
+           PARTITION BY user_id
+           ORDER BY refreshed_at
+           RANGE BETWEEN INTERVAL '5 minutes' PRECEDING AND CURRENT ROW
+         ) AS refreshes_last_5min
+  FROM token_refresh_log
+  WHERE refreshes_last_5min > :velocity_threshold;
+  ```
+
+- **Anti-Join for Orphaned Tokens:**
+  ```sql
+  SELECT t.id, t.user_id FROM tokens t
+  WHERE NOT EXISTS (
+    SELECT 1 FROM sessions s WHERE s.id = t.session_id
+  );
+  ```
+
+### PRD-026A: Tenant & Client Management (Completed)
+
+**SQL Query Patterns to Retrofit:**
+
+- **Aggregate with GROUP BY for Client Stats:**
+  ```sql
+  SELECT t.id AS tenant_id, t.name,
+         COUNT(DISTINCT c.id) AS client_count,
+         COUNT(DISTINCT u.id) AS user_count
+  FROM tenants t
+  LEFT JOIN clients c ON t.id = c.tenant_id
+  LEFT JOIN users u ON t.id = u.tenant_id
+  GROUP BY t.id, t.name
+  ORDER BY user_count DESC;
+  ```
+
+- **Row-Level Security Policy:**
+  ```sql
+  ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
+  CREATE POLICY tenant_isolation ON clients
+    USING (tenant_id = current_setting('app.current_tenant')::uuid);
+  ```
+
+- **JSONB for Client Metadata:**
+  ```sql
+  SELECT id, name, metadata->>'redirect_uris' AS redirect_uris
+  FROM clients
+  WHERE metadata @> '{"type": "confidential"}';
+  ```
+
+---
+
 ## How to apply
 - Fold these bullets into the relevant PRD acceptance criteria sections.
 - Add metrics to validate them: e.g., latency/complexity bounds, `EXPLAIN` screenshots/plan outputs, security audit events emitted.
 - Include feature-driven integration scenarios (godog) that exercise the new constraints (e.g., proving RLS blocks cross-tenant reads, proving Merkle proofs verify).
+- For completed PRDs, create technical debt tickets to retrofit the SQL patterns during maintenance windows.

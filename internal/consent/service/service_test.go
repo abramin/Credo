@@ -27,7 +27,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
-	"credo/internal/audit"
+	auditpublisher "credo/pkg/platform/audit/publisher"
+	auditstore "credo/pkg/platform/audit/store/memory"
 	"credo/internal/consent/models"
 	"credo/internal/consent/service/mocks"
 	"credo/internal/consent/store"
@@ -40,14 +41,14 @@ type ServiceSuite struct {
 	ctrl       *gomock.Controller
 	mockStore  *mocks.MockStore
 	service    *Service
-	auditStore *audit.InMemoryStore
+	auditStore *auditstore.InMemoryStore
 }
 
 func (s *ServiceSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.mockStore = mocks.NewMockStore(s.ctrl)
-	s.auditStore = audit.NewInMemoryStore()
-	auditor := audit.NewPublisher(s.auditStore)
+	s.auditStore = auditstore.NewInMemoryStore()
+	auditor := auditpublisher.NewPublisher(s.auditStore)
 	s.service = NewService(
 		s.mockStore,
 		auditor,

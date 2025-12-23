@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"credo/internal/sentinel"
+	dErrors "credo/pkg/domain-errors"
 )
 
 // Generate creates a cryptographically secure random secret.
@@ -25,12 +25,12 @@ func Generate() (string, error) {
 // Use this to securely store secrets for later verification.
 func Hash(secret string) (string, error) {
 	if secret == "" {
-		return "", fmt.Errorf("secret cannot be empty: %w", sentinel.ErrInvalidInput)
+		return "", dErrors.New(dErrors.CodeInvalidInput, "secret cannot be empty")
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
 	if err != nil {
 		if errors.Is(err, bcrypt.ErrPasswordTooLong) {
-			return "", fmt.Errorf("secret is too long: %w", sentinel.ErrInvalidInput)
+			return "", dErrors.New(dErrors.CodeInvalidInput, "secret is too long")
 		}
 		return "", fmt.Errorf("could not hash secret: %w", err)
 	}
@@ -41,7 +41,7 @@ func Hash(secret string) (string, error) {
 func Verify(secret, hash string) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(secret)); err != nil {
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			return fmt.Errorf("invalid secret: %w", sentinel.ErrInvalidInput)
+			return dErrors.New(dErrors.CodeInvalidInput, "invalid secret")
 		}
 		return fmt.Errorf("could not verify secret: %w", err)
 	}

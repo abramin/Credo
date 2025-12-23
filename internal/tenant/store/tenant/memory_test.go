@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"credo/internal/sentinel"
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
+	"credo/pkg/platform/sentinel"
 )
 
 func TestCreateIfNameAvailable_Success(t *testing.T) {

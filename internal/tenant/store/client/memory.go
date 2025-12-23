@@ -6,8 +6,8 @@ import (
 
 	id "credo/pkg/domain"
 
-	"credo/internal/sentinel"
 	"credo/internal/tenant/models"
+	"credo/pkg/platform/sentinel"
 )
 
 // ErrNotFound is returned when a client is not found.

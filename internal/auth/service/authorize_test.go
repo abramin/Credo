@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"credo/internal/auth/device"
+	authdevice "credo/internal/auth/device"
 	"credo/internal/auth/models"
-	"credo/internal/platform/middleware"
+	devicemw "credo/pkg/platform/middleware/device"
+	metadata "credo/pkg/platform/middleware/metadata"
 	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
@@ -67,7 +68,7 @@ func (s *ServiceSuite) TestAuthorize() {
 		prevBinding := s.service.DeviceBindingEnabled
 		prevDeviceSvc := s.service.deviceService
 		s.service.DeviceBindingEnabled = true
-		deviceSvc := device.NewService(true)
+		deviceSvc := authdevice.NewService(true)
 		s.service.deviceService = deviceSvc
 		t.Cleanup(func() {
 			s.service.DeviceBindingEnabled = prevBinding
@@ -77,9 +78,9 @@ func (s *ServiceSuite) TestAuthorize() {
 		req := baseReq
 		req.State = "xyz"
 		userAgent := "Mozilla/5.0"
-		ctx := middleware.WithClientMetadata(context.Background(), "192.168.1.1", userAgent)
+		ctx := metadata.WithClientMetadata(context.Background(), "192.168.1.1", userAgent)
 		// Inject pre-computed fingerprint (as Device middleware would)
-		ctx = middleware.WithDeviceFingerprint(ctx, deviceSvc.ComputeFingerprint(userAgent))
+		ctx = devicemw.WithDeviceFingerprint(ctx, deviceSvc.ComputeFingerprint(userAgent))
 
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
 
