@@ -10,7 +10,6 @@ import (
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/service/requestlimit"
-	"credo/internal/ratelimit/store/allowlist"
 	"credo/internal/ratelimit/store/bucket"
 	"credo/pkg/platform/httputil"
 	auth "credo/pkg/platform/middleware/auth"
@@ -112,19 +111,11 @@ type fallbackLimiter struct {
 }
 
 func NewFallbackLimiter(cfg *config.Config, allowlistStore requestlimit.AllowlistStore, logger *slog.Logger) RateLimiter {
-	return newFallbackLimiterWithConfig(cfg, allowlistStore, logger)
-}
-
-func newFallbackLimiter(logger *slog.Logger) RateLimiter {
-	return newFallbackLimiterWithConfig(config.DefaultConfig(), allowlist.New(), logger)
-}
-
-func newFallbackLimiterWithConfig(cfg *config.Config, allowlistStore requestlimit.AllowlistStore, logger *slog.Logger) RateLimiter {
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-	if allowlistStore == nil {
-		allowlistStore = allowlist.New()
+	if cfg == nil || allowlistStore == nil {
+		if logger != nil {
+			logger.Error("fallback limiter requires config and allowlist store")
+		}
+		return nil
 	}
 	requests, err := requestlimit.New(
 		bucket.New(),
@@ -192,13 +183,11 @@ func WithFallbackLimiter(limiter RateLimiter) Option {
 }
 
 func New(limiter RateLimiter, logger *slog.Logger, opts ...Option) *Middleware {
-	fallback := newFallbackLimiter(logger)
 	m := &Middleware{
 		limiter:         limiter,
 		logger:          logger,
 		ipBreaker:       newCircuitBreaker(),
 		combinedBreaker: newCircuitBreaker(),
-		fallback:        fallback,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -374,18 +363,31 @@ type ClientMiddleware struct {
 	logger         *slog.Logger
 	disabled       bool
 	circuitBreaker *CircuitBreaker
-	fallback       *fallbackClientLimiter
+	fallback       ClientRateLimiter
+}
+
+type ClientOption func(*ClientMiddleware)
+
+func WithClientFallbackLimiter(limiter ClientRateLimiter) ClientOption {
+	return func(m *ClientMiddleware) {
+		if limiter != nil {
+			m.fallback = limiter
+		}
+	}
 }
 
 // NewClientMiddleware creates a new client rate limit middleware.
-func NewClientMiddleware(limiter ClientRateLimiter, logger *slog.Logger, disabled bool) *ClientMiddleware {
-	return &ClientMiddleware{
+func NewClientMiddleware(limiter ClientRateLimiter, logger *slog.Logger, disabled bool, opts ...ClientOption) *ClientMiddleware {
+	m := &ClientMiddleware{
 		limiter:        limiter,
 		logger:         logger,
 		disabled:       disabled,
 		circuitBreaker: newCircuitBreaker(),
-		fallback:       newFallbackClientLimiter(),
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // RateLimitClient returns middleware that enforces per-client rate limits on OAuth endpoints.
@@ -507,8 +509,11 @@ type fallbackClientLimiter struct {
 	limit   config.Limit
 }
 
-func newFallbackClientLimiter() *fallbackClientLimiter {
-	limit := config.DefaultConfig().ClientLimits.PublicLimit
+func NewFallbackClientLimiter(cfg *config.ClientLimitConfig) ClientRateLimiter {
+	if cfg == nil {
+		return nil
+	}
+	limit := cfg.PublicLimit
 	return &fallbackClientLimiter{
 		buckets: bucket.New(),
 		limit:   limit,
@@ -516,8 +521,7 @@ func newFallbackClientLimiter() *fallbackClientLimiter {
 }
 
 func (f *fallbackClientLimiter) Check(ctx context.Context, clientID, endpoint string) (*models.RateLimitResult, error) {
-	key := "client:" + models.SanitizeKeySegment(clientID) + ":" + models.SanitizeKeySegment(endpoint)
-	return f.buckets.Allow(ctx, key, f.limit.RequestsPerWindow, f.limit.Window)
+	return f.buckets.Allow(ctx, models.NewClientRateLimitKey(clientID, endpoint), f.limit.RequestsPerWindow, f.limit.Window)
 }
 
 func (m *ClientMiddleware) checkClientLimit(ctx context.Context, clientID, endpoint string) (*models.RateLimitResult, bool, error) {

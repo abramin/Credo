@@ -11,7 +11,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/store/allowlist"
 	"credo/pkg/platform/middleware/metadata"
 )
 
@@ -23,7 +25,8 @@ import (
 
 type MiddlewareSecuritySuite struct {
 	suite.Suite
-	logger *slog.Logger
+	logger   *slog.Logger
+	fallback RateLimiter
 }
 
 func TestMiddlewareSecuritySuite(t *testing.T) {
@@ -32,6 +35,7 @@ func TestMiddlewareSecuritySuite(t *testing.T) {
 
 func (s *MiddlewareSecuritySuite) SetupTest() {
 	s.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	s.fallback = NewFallbackLimiter(config.DefaultConfig(), allowlist.New(), s.logger)
 }
 
 // =============================================================================
@@ -84,7 +88,7 @@ func (s *MiddlewareSecuritySuite) TestFailOpenBehavior() {
 		limiter := &mockRateLimiter{
 			checkIPErr: errors.New("store unavailable"),
 		}
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		// Track if next handler was called
 		nextCalled := false
@@ -113,7 +117,7 @@ func (s *MiddlewareSecuritySuite) TestFailOpenBehavior() {
 		limiter := &mockRateLimiter{
 			checkBothErr: errors.New("store unavailable"),
 		}
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		nextCalled := false
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +143,7 @@ func (s *MiddlewareSecuritySuite) TestFailOpenBehavior() {
 		limiter := &mockRateLimiter{
 			checkGlobalErr: errors.New("store unavailable"),
 		}
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		nextCalled := false
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +176,7 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 				Remaining: 99,
 			},
 		}
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		nextCalled := false
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +208,7 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 				RetryAfter: 60,
 			},
 		}
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		nextCalled := false
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +235,7 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 				Allowed: false, // Would block if enabled
 			},
 		}
-		middleware := New(limiter, s.logger, WithDisabled(true))
+		middleware := New(limiter, s.logger, WithDisabled(true), WithFallbackLimiter(s.fallback))
 
 		nextCalled := false
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -262,7 +266,7 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 		}
 
 		// Track circuit state - expect circuit breaker to track failures
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -301,7 +305,7 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 			checkIPErr: errors.New("store unavailable"),
 		}
 
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		// Trigger circuit breaker open state (5 failures)
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -349,7 +353,7 @@ func (s *MiddlewareSecuritySuite) TestCircuitBreaker() {
 		// Start with failures to open circuit
 		limiter.checkIPErr = errors.New("store unavailable")
 
-		middleware := New(limiter, s.logger)
+		middleware := New(limiter, s.logger, WithFallbackLimiter(s.fallback))
 
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)

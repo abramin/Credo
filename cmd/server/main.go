@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -35,6 +36,7 @@ import (
 	rateLimitModels "credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/service/authlockout"
 	rateLimitChecker "credo/internal/ratelimit/service/checker"
+	rateLimitClientLimit "credo/internal/ratelimit/service/clientlimit"
 	"credo/internal/ratelimit/service/globalthrottle"
 	"credo/internal/ratelimit/service/quota"
 	"credo/internal/ratelimit/service/requestlimit"
@@ -98,6 +100,18 @@ type tenantModule struct {
 	Clients *clientstore.InMemory
 }
 
+type tenantClientLookup struct {
+	tenantSvc *tenantService.Service
+}
+
+func (t *tenantClientLookup) IsConfidentialClient(ctx context.Context, clientID string) (bool, error) {
+	client, _, err := t.tenantSvc.ResolveClient(ctx, clientID)
+	if err != nil {
+		return false, err
+	}
+	return client.IsConfidential(), nil
+}
+
 func main() {
 	infra, err := buildInfra()
 	if err != nil {
@@ -125,6 +139,11 @@ func main() {
 		infra.Log.Error("failed to initialize auth module", "error", err)
 		os.Exit(1)
 	}
+	clientRateLimitMiddleware, err := buildClientRateLimitMiddleware(infra.Log, tenantMod.Service, rateLimitCfg, infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting)
+	if err != nil {
+		infra.Log.Error("failed to initialize client rate limit middleware", "error", err)
+		os.Exit(1)
+	}
 	consentMod := buildConsentModule(infra)
 
 	startCleanupWorker(appCtx, infra.Log, authMod.Cleanup)
@@ -135,7 +154,7 @@ func main() {
 	}()
 
 	r := setupRouter(infra)
-	registerRoutes(r, infra, authMod, consentMod, tenantMod, rateLimitMiddleware)
+	registerRoutes(r, infra, authMod, consentMod, tenantMod, rateLimitMiddleware, clientRateLimitMiddleware)
 
 	mainSrv := httpserver.New(infra.Cfg.Addr, r)
 	startServer(mainSrv, infra.Log, "main API")
@@ -211,6 +230,30 @@ func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rw
 	// adminSvc, err := rateLimitAdmin.New(allowlistStore, bucketStore, rateLimitAdmin.WithLogger(logger))
 
 	return checkerSvc, allowlistStore, cfg, nil
+}
+
+func buildClientRateLimitMiddleware(logger *slog.Logger, tenantSvc *tenantService.Service, cfg *rateLimitConfig.Config, disabled bool) (*rateLimitMW.ClientMiddleware, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("rate limit config is required")
+	}
+	clientLookup := &tenantClientLookup{tenantSvc: tenantSvc}
+	clientBucketStore := rwbucketStore.New()
+	clientLimiter, err := rateLimitClientLimit.New(
+		clientBucketStore,
+		clientLookup,
+		rateLimitClientLimit.WithLogger(logger),
+		rateLimitClientLimit.WithConfig(&cfg.ClientLimits),
+	)
+	if err != nil {
+		return nil, err
+	}
+	fallback := rateLimitMW.NewFallbackClientLimiter(&cfg.ClientLimits)
+	return rateLimitMW.NewClientMiddleware(
+		clientLimiter,
+		logger,
+		disabled,
+		rateLimitMW.WithClientFallbackLimiter(fallback),
+	), nil
 }
 
 func buildInfra() (*infraBundle, error) {
@@ -411,7 +454,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 }
 
 // registerRoutes wires HTTP handlers to the shared router
-func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, rateLimitMiddleware *rateLimitMW.Middleware) {
+func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, rateLimitMiddleware *rateLimitMW.Middleware, clientRateLimitMiddleware *rateLimitMW.ClientMiddleware) {
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
@@ -428,6 +471,9 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 	// Auth public endpoints - ClassAuth (10 req/min)
 	r.Group(func(r chi.Router) {
 		r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassAuth))
+		if clientRateLimitMiddleware != nil {
+			r.Use(clientRateLimitMiddleware.RateLimitClient())
+		}
 		r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
 		r.Post("/auth/token", authMod.Handler.HandleToken)
 		r.Post("/auth/revoke", authMod.Handler.HandleRevoke)

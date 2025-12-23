@@ -9,9 +9,10 @@ import (
 type KeyPrefix string
 
 const (
-	KeyPrefixIP   KeyPrefix = "ip"
-	KeyPrefixUser KeyPrefix = "user"
-	KeyPrefixAuth KeyPrefix = "auth"
+	KeyPrefixIP     KeyPrefix = "ip"
+	KeyPrefixUser   KeyPrefix = "user"
+	KeyPrefixAuth   KeyPrefix = "auth"
+	KeyPrefixClient KeyPrefix = "client"
 )
 
 // RateLimitKey is a value object encapsulating rate limit bucket key construction.
@@ -63,4 +64,13 @@ func sanitizeKeySegment(s string) string {
 // Prefer using RateLimitKey constructors for new code.
 func SanitizeKeySegment(s string) string {
 	return sanitizeKeySegment(s)
+}
+
+// NewClientRateLimitKey creates a key for per-client endpoint limits.
+func NewClientRateLimitKey(clientID, endpoint string) string {
+	return fmt.Sprintf("%s:%s:%s",
+		KeyPrefixClient,
+		sanitizeKeySegment(clientID),
+		sanitizeKeySegment(endpoint),
+	)
 }

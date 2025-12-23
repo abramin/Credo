@@ -14,8 +14,6 @@ import (
 	request "credo/pkg/platform/middleware/request"
 )
 
-const keyPrefix = "client"
-
 type BucketStore interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
 }
@@ -110,7 +108,7 @@ func (s *Service) Check(ctx context.Context, clientID, endpoint string) (*models
 		clientType = "public"
 	}
 
-	key := fmt.Sprintf("%s:%s:%s", keyPrefix, models.SanitizeKeySegment(clientID), models.SanitizeKeySegment(endpoint))
+	key := models.NewClientRateLimitKey(clientID, endpoint)
 
 	result, err := s.buckets.Allow(ctx, key, limit.RequestsPerWindow, limit.Window)
 	if err != nil {
