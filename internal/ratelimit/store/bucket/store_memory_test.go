@@ -6,9 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"credo/internal/ratelimit/models"
-
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -32,57 +29,9 @@ func (s *InMemoryBucketStoreSuite) SetupTest() {
 	s.ctx = context.Background()
 }
 
-func (s *InMemoryBucketStoreSuite) TestAllow() {
-	s.Run("first request allowed", func() {
-		result, err := s.store.Allow(s.ctx, "allow:first", testLimit, testWindow)
-		s.Require().NoError(err)
-		s.True(result.Allowed)
-		s.Equal(testLimit, result.Limit)
-		s.Equal(testLimit-1, result.Remaining)
-	})
-
-	s.Run("requests up to limit allowed", func() {
-		var result *models.RateLimitResult
-		var err error
-		for range testLimit {
-			result, err = s.store.Allow(s.ctx, "allow:limit", testLimit, testWindow)
-		}
-		s.Require().NoError(err)
-		s.True(result.Allowed)
-		s.Equal(testLimit, result.Limit)
-		s.Equal(0, result.Remaining)
-	})
-
-	s.Run("request over limit denied", func() {
-		for range testLimit {
-			_, err := s.store.Allow(s.ctx, "allow:over", testLimit, testWindow)
-			require.NoError(s.T(), err)
-		}
-		result, err := s.store.Allow(s.ctx, "allow:over", testLimit, testWindow)
-		s.Require().NoError(err)
-		s.False(result.Allowed)
-		s.Equal(0, result.Remaining)
-	})
-
-	s.Run("after window expires requests allowed", func() {
-		key := "allow:reset"
-		_, err := s.store.Allow(s.ctx, key, testLimit, testWindow)
-		s.Require().NoError(err)
-
-		// Simulate window expiry by clearing timestamps
-		s.store.mu.Lock()
-		if sw, exists := s.store.buckets[key]; exists {
-			sw.timestamps = []time.Time{}
-		}
-		s.store.mu.Unlock()
-
-		result, err := s.store.Allow(s.ctx, key, testLimit, testWindow)
-		s.Require().NoError(err)
-		s.True(result.Allowed)
-		s.Equal(testLimit, result.Limit)
-		s.Equal(testLimit-1, result.Remaining)
-	})
-}
+// NOTE: Basic Allow() tests (first request, up to limit, over limit, window reset)
+// are covered by E2E FR-1 scenarios in ratelimit.feature. Only store-specific
+// behaviors that cannot be tested via HTTP are tested here.
 
 func (s *InMemoryBucketStoreSuite) TestAllowN() {
 	s.Run("cost of 1 behaves like Allow", func() {
