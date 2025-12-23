@@ -13,6 +13,7 @@ import (
 	authAdapters "credo/internal/auth/adapters"
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
+	authPorts "credo/internal/auth/ports"
 	authmetrics "credo/internal/auth/metrics"
 	authService "credo/internal/auth/service"
 	authCodeStore "credo/internal/auth/store/authorization-code"
@@ -108,7 +109,7 @@ func main() {
 		infra.Log.Error("failed to initialize rate limit services", "error", err)
 		os.Exit(1)
 	}
-	rateLimitMiddleware := rateLimitMW.New(checkerSvc, infra.Log, rateLimitMW.WithDisabled(infra.Cfg.DemoMode))
+	rateLimitMiddleware := rateLimitMW.New(checkerSvc, infra.Log, rateLimitMW.WithDisabled(infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting))
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
@@ -298,8 +299,11 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		return nil, err
 	}
 
-	// Create rate limit adapter for auth handler
-	rateLimitAdapter := authAdapters.NewRateLimitAdapter(checkerSvc)
+	// Create rate limit adapter for auth handler (nil if rate limiting is disabled)
+	var rateLimitAdapter authPorts.RateLimitPort
+	if !infra.Cfg.DemoMode && !infra.Cfg.DisableRateLimiting {
+		rateLimitAdapter = authAdapters.NewRateLimitAdapter(checkerSvc)
+	}
 
 	return &authModule{
 		Service:       authSvc,
