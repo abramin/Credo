@@ -176,6 +176,58 @@ func (l *AuthLockout) IsLocked() bool {
 	return time.Now().Before(*l.LockedUntil)
 }
 
+// RecordFailure increments failure counters and updates timestamp.
+// Returns the updated lockout record for chaining.
+func (l *AuthLockout) RecordFailure(now time.Time) *AuthLockout {
+	l.FailureCount++
+	l.DailyFailures++
+	l.LastFailureAt = now
+	return l
+}
+
+// ShouldHardLock returns true if failure count has reached the hard lock threshold.
+func (l *AuthLockout) ShouldHardLock(threshold int) bool {
+	return l.FailureCount >= threshold
+}
+
+// ApplyHardLock sets the lockout expiration time.
+func (l *AuthLockout) ApplyHardLock(duration time.Duration, now time.Time) {
+	lockedUntil := now.Add(duration)
+	l.LockedUntil = &lockedUntil
+}
+
+// ShouldRequireCaptcha returns true if daily failures have reached the captcha threshold.
+func (l *AuthLockout) ShouldRequireCaptcha(threshold int) bool {
+	return l.DailyFailures >= threshold
+}
+
+// MarkRequiresCaptcha sets the captcha requirement flag.
+func (l *AuthLockout) MarkRequiresCaptcha() {
+	l.RequiresCaptcha = true
+}
+
+// Clear resets the lockout record to allow fresh attempts.
+func (l *AuthLockout) Clear() {
+	l.FailureCount = 0
+	l.LockedUntil = nil
+	// Note: DailyFailures and RequiresCaptcha are NOT cleared here
+	// as they track 24-hour state, not per-window state
+}
+
+// RemainingAttempts returns how many attempts are left before hitting the limit.
+func (l *AuthLockout) RemainingAttempts(limit int) int {
+	remaining := limit - l.FailureCount
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// IsAttemptLimitReached returns true if the failure count has reached the window limit.
+func (l *AuthLockout) IsAttemptLimitReached(limit int) bool {
+	return l.FailureCount >= limit
+}
+
 func NewAPIKeyQuota(apiKeyID id.APIKeyID, tier QuotaTier, monthlyLimit int, overageAllowed bool, now time.Time) (*APIKeyQuota, error) {
 	if apiKeyID.IsNil() {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "api_key_id cannot be empty")

@@ -2,7 +2,7 @@ package requestlimit
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -62,10 +62,10 @@ func New(
 	opts ...Option,
 ) (*Service, error) {
 	if buckets == nil {
-		return nil, fmt.Errorf("buckets store is required")
+		return nil, errors.New("buckets store is required")
 	}
 	if allowlist == nil {
-		return nil, fmt.Errorf("allowlist store is required")
+		return nil, errors.New("allowlist store is required")
 	}
 
 	svc := &Service{
@@ -88,7 +88,7 @@ func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointC
 		s.logAudit(ctx, "rate_limit_config_missing",
 			"identifier", privacy.AnonymizeIP(ip),
 			"endpoint_class", class,
-			"limit_type", keyPrefixIP,
+			"limit_type", models.KeyPrefixIP,
 		)
 		return &models.RateLimitResult{
 			Allowed:    false,
@@ -98,7 +98,7 @@ func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointC
 			RetryAfter: 60, // Retry in 60 seconds
 		}, nil
 	}
-	return s.checkRateLimit(ctx, ip, class, keyPrefixIP, requestsPerWindow, window, privacy.AnonymizeIP(ip))
+	return s.checkRateLimit(ctx, ip, class, models.KeyPrefixIP, requestsPerWindow, window, privacy.AnonymizeIP(ip))
 }
 
 func (s *Service) CheckUser(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
@@ -108,7 +108,7 @@ func (s *Service) CheckUser(ctx context.Context, userID string, class models.End
 		s.logAudit(ctx, "rate_limit_config_missing",
 			"identifier", userID,
 			"endpoint_class", class,
-			"limit_type", keyPrefixUser,
+			"limit_type", models.KeyPrefixUser,
 		)
 		return &models.RateLimitResult{
 			Allowed:    false,
@@ -118,14 +118,14 @@ func (s *Service) CheckUser(ctx context.Context, userID string, class models.End
 			RetryAfter: 60, // Retry in 60 seconds
 		}, nil
 	}
-	return s.checkRateLimit(ctx, userID, class, keyPrefixUser, requestsPerWindow, window, userID)
+	return s.checkRateLimit(ctx, userID, class, models.KeyPrefixUser, requestsPerWindow, window, userID)
 }
 
 func (s *Service) checkRateLimit(
 	ctx context.Context,
 	identifier string,
 	class models.EndpointClass,
-	keyPrefix string,
+	keyPrefix models.KeyPrefix,
 	requestsPerWindow int,
 	window time.Duration,
 	logIdentifier string,
@@ -144,14 +144,14 @@ func (s *Service) checkRateLimit(
 		}, nil
 	}
 
-	key := fmt.Sprintf("%s:%s:%s", keyPrefix, models.SanitizeKeySegment(identifier), class)
-	result, err := s.buckets.Allow(ctx, key, requestsPerWindow, window)
+	key := models.NewRateLimitKey(keyPrefix, identifier, class)
+	result, err := s.buckets.Allow(ctx, key.String(), requestsPerWindow, window)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to check rate limit")
 	}
 
 	if !result.Allowed {
-		s.logAudit(ctx, keyPrefix+"_rate_limit_exceeded",
+		s.logAudit(ctx, string(keyPrefix)+"_rate_limit_exceeded",
 			"identifier", logIdentifier,
 			"endpoint_class", class,
 			"limit", requestsPerWindow,
@@ -170,7 +170,7 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 		s.logAudit(ctx, "rate_limit_config_missing",
 			"identifier", privacy.AnonymizeIP(ip),
 			"endpoint_class", class,
-			"limit_type", keyPrefixIP,
+			"limit_type", models.KeyPrefixIP,
 		)
 		return &models.RateLimitResult{
 			Allowed:    false,
@@ -181,7 +181,7 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 		}, nil
 	}
 
-	ipRes, err := s.checkRateLimit(ctx, ip, class, keyPrefixIP, ipRequestsPerWindow, ipWindow, privacy.AnonymizeIP(ip))
+	ipRes, err := s.checkRateLimit(ctx, ip, class, models.KeyPrefixIP, ipRequestsPerWindow, ipWindow, privacy.AnonymizeIP(ip))
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 		s.logAudit(ctx, "rate_limit_config_missing",
 			"identifier", userID,
 			"endpoint_class", class,
-			"limit_type", keyPrefixUser,
+			"limit_type", models.KeyPrefixUser,
 		)
 		return &models.RateLimitResult{
 			Allowed:    false,
@@ -207,7 +207,7 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 		}, nil
 	}
 
-	userRes, err := s.checkRateLimit(ctx, userID, class, keyPrefixUser, userRequestsPerWindow, userWindow, userID)
+	userRes, err := s.checkRateLimit(ctx, userID, class, models.KeyPrefixUser, userRequestsPerWindow, userWindow, userID)
 	if err != nil {
 		return nil, err
 	}

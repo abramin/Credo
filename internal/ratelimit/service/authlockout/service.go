@@ -2,7 +2,7 @@ package authlockout
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -13,7 +13,6 @@ import (
 	request "credo/pkg/platform/middleware/request"
 )
 
-const keyPrefixAuth = "auth"
 
 type Store interface {
 	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
@@ -56,7 +55,7 @@ func WithConfig(cfg *config.AuthLockoutConfig) Option {
 
 func New(store Store, opts ...Option) (*Service, error) {
 	if store == nil {
-		return nil, fmt.Errorf("auth lockout store is required")
+		return nil, errors.New("auth lockout store is required")
 	}
 
 	defaultCfg := config.DefaultConfig().AuthLockout
@@ -73,14 +72,14 @@ func New(store Store, opts ...Option) (*Service, error) {
 }
 
 func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.AuthRateLimitResult, error) {
-	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, models.SanitizeKeySegment(identifier), models.SanitizeKeySegment(ip))
+	key := models.NewAuthLockoutKey(identifier, ip).String()
 	failureRecord, err := s.store.Get(ctx, key)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get auth lockout record")
 	}
 
 	// Check if currently hard-locked (FR-2b: "hard lock for 15 minutes")
-	if failureRecord != nil && failureRecord.LockedUntil != nil && time.Now().Before(*failureRecord.LockedUntil) {
+	if failureRecord != nil && failureRecord.IsLocked() {
 		retryAfter := int(time.Until(*failureRecord.LockedUntil).Seconds())
 		s.logAudit(ctx, "auth_lockout_triggered",
 			"identifier", identifier,
@@ -99,21 +98,18 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	}
 
 	// Check failure count against sliding window (FR-2b: "5 attempts/15 min")
-	if failureRecord != nil && failureRecord.FailureCount >= s.config.AttemptsPerWindow {
-		remaining := s.config.AttemptsPerWindow - failureRecord.FailureCount
-		if remaining <= 0 {
-			// Block - too many attempts in window
-			resetAt := failureRecord.LastFailureAt.Add(s.config.WindowDuration)
-			return &models.AuthRateLimitResult{
-				RateLimitResult: models.RateLimitResult{
-					Allowed:    false,
-					ResetAt:    resetAt,
-					RetryAfter: int(time.Until(resetAt).Seconds()),
-				},
-				RequiresCaptcha: failureRecord.RequiresCaptcha,
-				FailureCount:    failureRecord.FailureCount,
-			}, nil
-		}
+	if failureRecord != nil && failureRecord.IsAttemptLimitReached(s.config.AttemptsPerWindow) {
+		// Block - too many attempts in window
+		resetAt := s.config.ResetTime(failureRecord.LastFailureAt)
+		return &models.AuthRateLimitResult{
+			RateLimitResult: models.RateLimitResult{
+				Allowed:    false,
+				ResetAt:    resetAt,
+				RetryAfter: int(time.Until(resetAt).Seconds()),
+			},
+			RequiresCaptcha: failureRecord.RequiresCaptcha,
+			FailureCount:    failureRecord.FailureCount,
+		}, nil
 	}
 
 	// Apply progressive backoff (FR-2b: "250ms → 500ms → 1s")
@@ -123,7 +119,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 			RateLimitResult: models.RateLimitResult{
 				Allowed:    true,
 				Limit:      s.config.AttemptsPerWindow,
-				Remaining:  s.config.AttemptsPerWindow - failureRecord.FailureCount,
+				Remaining:  failureRecord.RemainingAttempts(s.config.AttemptsPerWindow),
 				ResetAt:    time.Now().Add(s.config.WindowDuration),
 				RetryAfter: int(delay.Milliseconds()),
 			},
@@ -146,20 +142,19 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 }
 
 func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*models.AuthLockout, error) {
-	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, models.SanitizeKeySegment(identifier), models.SanitizeKeySegment(ip))
+	key := models.NewAuthLockoutKey(identifier, ip).String()
 	current, err := s.store.RecordFailure(ctx, key)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to record auth failure")
 	}
 
-	if current.FailureCount >= s.config.HardLockThreshold {
-		lockDuration := s.config.HardLockDuration
-		lockedUntil := time.Now().Add(lockDuration)
-		current.LockedUntil = &lockedUntil
-		err = s.store.Update(ctx, current)
-		if err != nil {
-			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update auth lockout record")
-		}
+	needsUpdate := false
+	now := time.Now()
+
+	// Check if hard lock threshold reached
+	if current.ShouldHardLock(s.config.HardLockThreshold) {
+		current.ApplyHardLock(s.config.HardLockDuration, now)
+		needsUpdate = true
 		s.logAudit(ctx, "auth_lockout_triggered",
 			"identifier", identifier,
 			"ip", ip,
@@ -167,12 +162,15 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 		)
 	}
 
-	// Require CAPTCHA after 3 consecutive lockouts within 24 hours
-	if current.DailyFailures >= s.config.CaptchaAfterLockouts {
-		current.RequiresCaptcha = true
-		err = s.store.Update(ctx, current)
-		if err != nil {
-			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update auth lockout record for captcha")
+	// Require CAPTCHA after consecutive lockouts within 24 hours
+	if current.ShouldRequireCaptcha(s.config.CaptchaAfterLockouts) && !current.RequiresCaptcha {
+		current.MarkRequiresCaptcha()
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		if err = s.store.Update(ctx, current); err != nil {
+			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update auth lockout record")
 		}
 	}
 
@@ -180,7 +178,7 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 }
 
 func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
-	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, models.SanitizeKeySegment(identifier), models.SanitizeKeySegment(ip))
+	key := models.NewAuthLockoutKey(identifier, ip).String()
 	err := s.store.Clear(ctx, key)
 	if err != nil {
 		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to clear auth failures")
@@ -195,13 +193,7 @@ func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 }
 
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
-	if failureCount <= 0 {
-		return 0
-	}
-	base := 250 * time.Millisecond
-	delay := min(
-		base*time.Duration(1<<(failureCount-1)), time.Second)
-	return delay
+	return s.config.CalculateBackoff(failureCount)
 }
 
 func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
