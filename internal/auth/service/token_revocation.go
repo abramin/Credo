@@ -20,70 +20,87 @@ const (
 	TokenHintAccessToken  = "access_token"
 )
 
+// tokenResolution holds the result of resolving a token to its session.
+type tokenResolution struct {
+	Session *models.Session
+	JTI     string // Only set for access tokens
+}
+
 // RevokeToken revokes an access token or refresh token, effectively logging out the user.
 // Implements FR-3: Token Revocation (Logout) from PRD-016.
 func (s *Service) RevokeToken(ctx context.Context, token string, tokenTypeHint string) error {
 	token = strings.TrimSpace(token)
 	tokenTypeHint = strings.TrimSpace(tokenTypeHint)
 
+	if err := validateRevokeInput(token, tokenTypeHint); err != nil {
+		return err
+	}
+
+	// Resolve token to session
+	resolution, err := s.resolveTokenToSession(ctx, token, tokenTypeHint)
+	if err != nil {
+		// Token not found - idempotent success (RFC 7009 Section 2.2)
+		s.logAudit(ctx, "token_revocation_noop", "reason", "token_not_found")
+		return nil
+	}
+
+	// Revoke and log
+	return s.revokeAndAudit(ctx, resolution)
+}
+
+// validateRevokeInput validates the revoke token request inputs.
+func validateRevokeInput(token, tokenTypeHint string) error {
 	if token == "" {
 		return dErrors.New(dErrors.CodeValidation, "token is required")
 	}
 	if tokenTypeHint != "" && tokenTypeHint != TokenHintAccessToken && tokenTypeHint != TokenHintRefreshToken {
 		return dErrors.New(dErrors.CodeValidation, "token_type_hint must be 'access_token' or 'refresh_token'")
 	}
+	return nil
+}
 
-	// Determine token type and extract session
-	var session *models.Session
-	var jti string
-	var err error
-
-	// Try to parse as JWT (access token)
+// resolveTokenToSession attempts to resolve a token (access or refresh) to its session.
+// Returns the session and JTI (for access tokens) or an error if not found.
+func (s *Service) resolveTokenToSession(ctx context.Context, token, tokenTypeHint string) (*tokenResolution, error) {
+	// Try access token first (if hint allows)
 	if tokenTypeHint == TokenHintAccessToken || tokenTypeHint == "" {
-		jti, session, err = s.extractSessionFromAccessToken(ctx, token)
+		jti, session, err := s.extractSessionFromAccessToken(ctx, token)
 		if err == nil {
-			outcome, err := s.revokeSessionInternal(ctx, session, jti)
-			if err != nil {
-				return dErrors.Wrap(err, dErrors.CodeInternal, "failed to revoke session")
-			}
-			if outcome == revokeSessionOutcomeAlreadyRevoked {
-				s.logAudit(ctx, "token_revocation_noop",
-					"session_id", session.ID.String(),
-					"reason", "already_revoked")
-				return nil
-			}
-			s.logAudit(ctx, "token_revoked",
-				"user_id", session.UserID.String(),
-				"session_id", session.ID.String(),
-				"client_id", session.ClientID)
-			return nil
+			return &tokenResolution{Session: session, JTI: jti}, nil
 		}
 	}
 
-	// Try as refresh token (opaque)
+	// Try refresh token (if hint allows)
 	if tokenTypeHint == TokenHintRefreshToken || tokenTypeHint == "" {
-		session, err = s.findSessionByRefreshToken(ctx, token)
+		session, err := s.findSessionByRefreshToken(ctx, token)
 		if err == nil {
-			outcome, err := s.revokeSessionInternal(ctx, session, "")
-			if err != nil {
-				return dErrors.Wrap(err, dErrors.CodeInternal, "failed to revoke session")
-			}
-			if outcome == revokeSessionOutcomeAlreadyRevoked {
-				s.logAudit(ctx, "token_revocation_noop",
-					"session_id", session.ID.String(),
-					"reason", "already_revoked")
-				return nil
-			}
-			s.logAudit(ctx, "token_revoked",
-				"user_id", session.UserID.String(),
-				"session_id", session.ID.String(),
-				"client_id", session.ClientID)
-			return nil
+			return &tokenResolution{Session: session, JTI: ""}, nil
 		}
 	}
 
-	// Token not found - idempotent success (RFC 7009 Section 2.2)
-	s.logAudit(ctx, "token_revocation_noop", "reason", "token_not_found")
+	return nil, fmt.Errorf("token not found")
+}
+
+// revokeAndAudit revokes the session and logs the appropriate audit event.
+func (s *Service) revokeAndAudit(ctx context.Context, resolution *tokenResolution) error {
+	session := resolution.Session
+
+	outcome, err := s.revokeSessionInternal(ctx, session, resolution.JTI)
+	if err != nil {
+		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to revoke session")
+	}
+
+	if outcome == revokeSessionOutcomeAlreadyRevoked {
+		s.logAudit(ctx, "token_revocation_noop",
+			"session_id", session.ID.String(),
+			"reason", "already_revoked")
+		return nil
+	}
+
+	s.logAudit(ctx, "token_revoked",
+		"user_id", session.UserID.String(),
+		"session_id", session.ID.String(),
+		"client_id", session.ClientID)
 	return nil
 }
 

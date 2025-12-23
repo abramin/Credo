@@ -12,12 +12,34 @@ import (
 	"credo/internal/auth/device"
 	"credo/internal/auth/email"
 	"credo/internal/auth/models"
+	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	devicemw "credo/pkg/platform/middleware/device"
 	metadata "credo/pkg/platform/middleware/metadata"
 )
+
+// authorizeParams holds pre-validated inputs for the authorization transaction.
+type authorizeParams struct {
+	Email             string
+	Scopes            []string
+	RedirectURI       string
+	Now               time.Time
+	DeviceID          string
+	DeviceFingerprint string
+	DeviceDisplayName string
+	Client            *tenant.Client
+	Tenant            *tenant.Tenant
+}
+
+// authorizeResult holds the outputs from a successful authorization transaction.
+type authorizeResult struct {
+	User           *models.User
+	Session        *models.Session
+	AuthCode       *models.AuthorizationCodeRecord
+	UserWasCreated bool
+}
 
 func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error) {
 	if req == nil {
@@ -26,7 +48,6 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 
 	req.Normalize()
 	if err := req.Validate(); err != nil {
-		// Validate now returns domain-errors directly
 		return nil, err
 	}
 
@@ -38,68 +59,79 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		return nil, dErrors.New(dErrors.CodeBadRequest, fmt.Sprintf("redirect_uri scheme '%s' not allowed", parsedURI.Scheme))
 	}
 
-	now := time.Now()
-	scopes := req.Scopes
-
-	userAgent := metadata.GetUserAgent(ctx)
-	deviceDisplayName := device.ParseUserAgent(userAgent)
-
-	// Always generate device ID for session tracking; DeviceBindingEnabled controls enforcement only
-	deviceID := devicemw.GetDeviceID(ctx)
-	deviceIDToSet := ""
-	if deviceID == "" {
-		deviceID = s.deviceService.GenerateDeviceID()
-		deviceIDToSet = deviceID
-	}
-
-	// Fingerprint is now pre-computed by Device middleware
-	deviceFingerprint := devicemw.GetDeviceFingerprint(ctx)
-
-	var user *models.User
-	var authCode *models.AuthorizationCodeRecord
-	var session *models.Session
-	userWasCreated := false
-
-	client, tenant, err := s.clientResolver.ResolveClient(ctx, req.ClientID)
+	// Resolve client before transaction
+	client, tnt, err := s.clientResolver.ResolveClient(ctx, req.ClientID)
 	if err != nil {
-		// RFC 6749 §4.1.2.1: invalid client_id is a bad request, not "not found"
 		if dErrors.HasCode(err, dErrors.CodeNotFound) {
 			return nil, dErrors.New(dErrors.CodeBadRequest, "invalid client_id")
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeBadRequest, "failed to resolve client")
 	}
 
-	if req.RedirectURI != "" {
-		if !slices.Contains(client.RedirectURIs, req.RedirectURI) {
-			return nil, dErrors.New(dErrors.CodeBadRequest, "redirect_uri not allowed")
-		}
+	if req.RedirectURI != "" && !slices.Contains(client.RedirectURIs, req.RedirectURI) {
+		return nil, dErrors.New(dErrors.CodeBadRequest, "redirect_uri not allowed")
 	}
 
-	// Wrap user+code+session creation in transaction for atomicity
-	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
-		// --- Step 1: Find or create user ---
-		firstName, lastName := email.DeriveNameFromEmail(req.Email)
-		newUser, err := models.NewUser(id.UserID(uuid.New()), tenant.ID, req.Email, firstName, lastName, false)
-		if err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create user")
-		}
-		user, err = stores.Users.FindOrCreateByTenantAndEmail(ctx, tenant.ID, req.Email, newUser)
-		if err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to find or create user")
-		}
-		if !user.IsActive() {
-			return dErrors.New(dErrors.CodeForbidden, "user is inactive")
-		}
-		userWasCreated = (user.ID == newUser.ID)
+	// Prepare device context
+	deviceID, deviceIDToSet := s.resolveDeviceID(ctx)
 
-		// --- Step 2: Generate authorization code ---
+	params := authorizeParams{
+		Email:             req.Email,
+		Scopes:            req.Scopes,
+		RedirectURI:       req.RedirectURI,
+		Now:               time.Now(),
+		DeviceID:          deviceID,
+		DeviceFingerprint: devicemw.GetDeviceFingerprint(ctx),
+		DeviceDisplayName: device.ParseUserAgent(metadata.GetUserAgent(ctx)),
+		Client:            client,
+		Tenant:            tnt,
+	}
+
+	// Execute transaction
+	result, err := s.authorizeInTx(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	// Emit audit events after successful transaction
+	s.emitAuthorizeAuditEvents(ctx, result, req.ClientID)
+
+	// Build response
+	return s.buildAuthorizeResponse(parsedURI, result.AuthCode, req.State, deviceIDToSet), nil
+}
+
+// resolveDeviceID extracts or generates a device ID for session tracking.
+// Returns (deviceID for session, deviceID to set in cookie).
+func (s *Service) resolveDeviceID(ctx context.Context) (string, string) {
+	deviceID := devicemw.GetDeviceID(ctx)
+	if deviceID != "" {
+		return deviceID, ""
+	}
+	newDeviceID := s.deviceService.GenerateDeviceID()
+	return newDeviceID, newDeviceID
+}
+
+// authorizeInTx executes the authorization transaction: user lookup/creation, auth code, and session.
+func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*authorizeResult, error) {
+	var result authorizeResult
+
+	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
+		// Step 1: Find or create user
+		user, wasCreated, err := s.findOrCreateUser(ctx, stores.Users, params.Tenant.ID, params.Email)
+		if err != nil {
+			return err
+		}
+		result.User = user
+		result.UserWasCreated = wasCreated
+
+		// Step 2: Generate authorization code
 		sessionID := id.SessionID(uuid.New())
-		authCode, err = models.NewAuthorizationCode(
+		authCode, err := models.NewAuthorizationCode(
 			"authz_"+uuid.New().String(),
 			sessionID,
-			req.RedirectURI,
-			now,
-			now.Add(10*time.Minute),
+			params.RedirectURI,
+			params.Now,
+			params.Now.Add(10*time.Minute),
 		)
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create authorization code")
@@ -107,32 +139,34 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		if err := stores.Codes.Create(ctx, authCode); err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to save authorization code")
 		}
+		result.AuthCode = authCode
 
-		// --- Step 3: Create session (pending consent) ---
-		session, err = models.NewSession(
-			authCode.SessionID,
+		// Step 3: Create session (pending consent)
+		session, err := models.NewSession(
+			sessionID,
 			user.ID,
-			client.ID,
-			tenant.ID,
-			scopes,
+			params.Client.ID,
+			params.Tenant.ID,
+			params.Scopes,
 			models.SessionStatusPendingConsent,
-			now,
-			now.Add(s.SessionTTL),
-			now,
+			params.Now,
+			params.Now.Add(s.SessionTTL),
+			params.Now,
 		)
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create session")
 		}
 
-		// --- Step 4: Attach device binding signals ---
-		session.DeviceID = deviceID
-		session.DeviceFingerprintHash = deviceFingerprint
-		session.DeviceDisplayName = deviceDisplayName
+		// Step 4: Attach device binding signals
+		session.DeviceID = params.DeviceID
+		session.DeviceFingerprintHash = params.DeviceFingerprint
+		session.DeviceDisplayName = params.DeviceDisplayName
 		session.ApproximateLocation = ""
 
 		if err := stores.Sessions.Create(ctx, session); err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to save session")
 		}
+		result.Session = session
 
 		return nil
 	})
@@ -140,35 +174,59 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 	if txErr != nil {
 		return nil, txErr
 	}
+	return &result, nil
+}
 
-	// Emit audit events after successful transaction
-	if userWasCreated {
+// findOrCreateUser looks up or creates a user by tenant and email.
+func (s *Service) findOrCreateUser(ctx context.Context, users UserStore, tenantID id.TenantID, userEmail string) (*models.User, bool, error) {
+	firstName, lastName := email.DeriveNameFromEmail(userEmail)
+	newUser, err := models.NewUser(id.UserID(uuid.New()), tenantID, userEmail, firstName, lastName, false)
+	if err != nil {
+		return nil, false, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create user")
+	}
+
+	user, err := users.FindOrCreateByTenantAndEmail(ctx, tenantID, userEmail, newUser)
+	if err != nil {
+		return nil, false, dErrors.Wrap(err, dErrors.CodeInternal, "failed to find or create user")
+	}
+	if !user.IsActive() {
+		return nil, false, dErrors.New(dErrors.CodeForbidden, "user is inactive")
+	}
+
+	wasCreated := user.ID == newUser.ID
+	return user, wasCreated, nil
+}
+
+// emitAuthorizeAuditEvents logs audit events after successful authorization.
+func (s *Service) emitAuthorizeAuditEvents(ctx context.Context, result *authorizeResult, clientID string) {
+	if result.UserWasCreated {
 		s.logAudit(ctx, string(audit.EventUserCreated),
-			"user_id", user.ID.String(),
-			"client_id", req.ClientID,
+			"user_id", result.User.ID.String(),
+			"client_id", clientID,
 		)
 		s.incrementUserCreated()
 	}
 
 	s.logAudit(ctx, string(audit.EventSessionCreated),
-		"user_id", user.ID.String(),
-		"session_id", session.ID.String(),
-		"client_id", req.ClientID,
+		"user_id", result.User.ID.String(),
+		"session_id", result.Session.ID.String(),
+		"client_id", clientID,
 	)
 	s.incrementActiveSession()
+}
 
+// buildAuthorizeResponse constructs the authorization response with redirect URI.
+func (s *Service) buildAuthorizeResponse(parsedURI *url.URL, authCode *models.AuthorizationCodeRecord, state string, deviceIDToSet string) *models.AuthorizationResult {
 	query := parsedURI.Query()
-	query.Set("code", authCode.Code) // OAuth 2.0: return authorization code, not session_id
-	if req.State != "" {
-		query.Set("state", req.State)
+	query.Set("code", authCode.Code)
+	if state != "" {
+		query.Set("state", state)
 	}
 	parsedURI.RawQuery = query.Encode()
-	redirectURI := parsedURI.String()
-	res := &models.AuthorizationResult{
+
+	return &models.AuthorizationResult{
 		Code:        authCode.Code,
-		RedirectURI: redirectURI,
+		RedirectURI: parsedURI.String(),
 		DeviceID:    deviceIDToSet,
 	}
-
-	return res, nil
 }

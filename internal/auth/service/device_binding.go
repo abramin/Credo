@@ -2,9 +2,20 @@ package service
 
 import (
 	"context"
+	"log/slog"
 
 	"credo/internal/auth/models"
 	device "credo/pkg/platform/middleware/device"
+)
+
+// deviceBindingState represents the relationship between session and cookie device IDs.
+type deviceBindingState int
+
+const (
+	deviceStateOK       deviceBindingState = iota // session and cookie match (or both empty)
+	deviceStateAttached                           // new device ID attached to session
+	deviceStateMissing                            // session has device ID but cookie is missing
+	deviceStateMismatch                           // session and cookie device IDs differ
 )
 
 func (s *Service) applyDeviceBinding(ctx context.Context, session *models.Session) {
@@ -13,44 +24,70 @@ func (s *Service) applyDeviceBinding(ctx context.Context, session *models.Sessio
 		return
 	}
 
+	s.applyDeviceID(ctx, session)
+	s.applyFingerprint(ctx, session)
+}
+
+// applyDeviceID handles device ID binding between session and cookie.
+func (s *Service) applyDeviceID(ctx context.Context, session *models.Session) {
 	cookieDeviceID := device.GetDeviceID(ctx)
-	if session.DeviceID == "" && cookieDeviceID != "" {
+	state := classifyDeviceState(session.DeviceID, cookieDeviceID)
+
+	switch state {
+	case deviceStateAttached:
 		session.DeviceID = cookieDeviceID
-		if s.logger != nil {
-			s.logger.InfoContext(ctx, "device_id_attached",
-				"session_id", session.ID.String(),
-				"user_id", session.UserID.String(),
-			)
-		}
+		s.logDeviceEvent(ctx, slog.LevelInfo, "device_id_attached", session)
+
+	case deviceStateMissing:
+		s.logDeviceEvent(ctx, slog.LevelWarn, "device_id_missing", session)
+
+	case deviceStateMismatch:
+		s.logDeviceEvent(ctx, slog.LevelWarn, "device_id_mismatch", session)
 	}
-	if session.DeviceID != "" && cookieDeviceID == "" {
-		if s.logger != nil {
-			s.logger.WarnContext(ctx, "device_id_missing",
-				"session_id", session.ID.String(),
-				"user_id", session.UserID.String(),
-			)
-		}
-	} else if session.DeviceID != "" && cookieDeviceID != "" && session.DeviceID != cookieDeviceID {
-		if s.logger != nil {
-			s.logger.WarnContext(ctx, "device_id_mismatch",
-				"session_id", session.ID.String(),
-				"user_id", session.UserID.String(),
-			)
-		}
+}
+
+// applyFingerprint handles fingerprint binding and drift detection.
+func (s *Service) applyFingerprint(ctx context.Context, session *models.Session) {
+	currentFingerprint := device.GetDeviceFingerprint(ctx)
+	if currentFingerprint == "" {
+		return
 	}
 
-	// Fingerprint is now pre-computed by Device middleware
-	currentFingerprint := device.GetDeviceFingerprint(ctx)
-	_, driftDetected := s.deviceService.CompareFingerprints(session.DeviceFingerprintHash, currentFingerprint)
-	if session.DeviceFingerprintHash == "" && currentFingerprint != "" {
+	// First fingerprint attachment
+	if session.DeviceFingerprintHash == "" {
 		session.DeviceFingerprintHash = currentFingerprint
-	} else if driftDetected {
-		if s.logger != nil {
-			s.logger.InfoContext(ctx, "fingerprint_drift_detected",
-				"session_id", session.ID.String(),
-				"user_id", session.UserID.String(),
-			)
-		}
+		return
+	}
+
+	// Check for drift
+	_, driftDetected := s.deviceService.CompareFingerprints(session.DeviceFingerprintHash, currentFingerprint)
+	if driftDetected {
+		s.logDeviceEvent(ctx, slog.LevelInfo, "fingerprint_drift_detected", session)
 		session.DeviceFingerprintHash = currentFingerprint
 	}
+}
+
+// classifyDeviceState determines the relationship between session and cookie device IDs.
+func classifyDeviceState(sessionDeviceID, cookieDeviceID string) deviceBindingState {
+	switch {
+	case sessionDeviceID == "" && cookieDeviceID != "":
+		return deviceStateAttached
+	case sessionDeviceID != "" && cookieDeviceID == "":
+		return deviceStateMissing
+	case sessionDeviceID != "" && cookieDeviceID != "" && sessionDeviceID != cookieDeviceID:
+		return deviceStateMismatch
+	default:
+		return deviceStateOK
+	}
+}
+
+// logDeviceEvent logs a device binding event with session context.
+func (s *Service) logDeviceEvent(ctx context.Context, level slog.Level, event string, session *models.Session) {
+	if s.logger == nil {
+		return
+	}
+	s.logger.Log(ctx, level, event,
+		"session_id", session.ID.String(),
+		"user_id", session.UserID.String(),
+	)
 }
