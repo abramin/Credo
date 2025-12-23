@@ -2,35 +2,38 @@ package quota
 
 import (
 	"context"
+	"credo/internal/ratelimit/config"
+	"credo/pkg/domain"
 	"testing"
 
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-type InMemoryQuotaStoreSuite struct {
-	suite.Suite
-	store *InMemoryQuotaStore
-	ctx   context.Context
-}
+func TestInMemoryQuotaStore(t *testing.T) {
+	store := New(config.DefaultConfig())
+	ctx := context.Background()
 
-func TestInMemoryQuotaStoreSuite(t *testing.T) {
-	suite.Run(t, new(InMemoryQuotaStoreSuite))
-}
+	res, err := store.GetQuota(ctx, domain.APIKeyID("missing"))
+	require.NoError(t, err)
+	assert.Nil(t, res)
+	// Verify existing quota is returned without mutating usage or period boundaries
+	res, err = store.IncrementUsage(ctx, domain.APIKeyID("existing"), 5)
+	require.NoError(t, err)
+	assert.NotNil(t, res)
 
-func (s *InMemoryQuotaStoreSuite) SetupTest() {
-	s.store = New()
-	s.ctx = context.Background()
-}
+	got, err := store.GetQuota(ctx, domain.APIKeyID("existing"))
+	require.NoError(t, err)
+	assert.Equal(t, res, got)
 
-func (s *InMemoryQuotaStoreSuite) TestGetQuota() {
-	// TODO: verify missing API key returns (nil, nil) to preserve "not found" contract.
-	// TODO: verify existing quota is returned without mutating usage or period boundaries.
-	s.T().Skip("TODO: add contract-focused tests for missing and existing quota records")
-}
+	// Verify GetQuota doesn't mutate the quota
+	usageBefore := got.CurrentUsage
+	periodStartBefore := got.PeriodStart
+	periodEndBefore := got.PeriodEnd
 
-func (s *InMemoryQuotaStoreSuite) TestIncrementUsage() {
-	// TODO: verify new quota is created with defaults and usage increments by count.
-	// TODO: use a fixed clock (or injected time) so period start/end assertions are deterministic.
-	// TODO: verify subsequent increments accumulate usage without resetting period.
-	s.T().Skip("TODO: add tests for default quota creation and usage increment behavior")
+	got2, err := store.GetQuota(ctx, domain.APIKeyID("existing"))
+	require.NoError(t, err)
+	assert.Equal(t, usageBefore, got2.CurrentUsage, "GetQuota should not mutate usage")
+	assert.Equal(t, periodStartBefore, got2.PeriodStart, "GetQuota should not mutate period start")
+	assert.Equal(t, periodEndBefore, got2.PeriodEnd, "GetQuota should not mutate period end")
 }

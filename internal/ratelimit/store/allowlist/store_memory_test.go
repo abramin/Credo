@@ -14,7 +14,6 @@ import (
 	id "credo/pkg/domain"
 )
 
-// TestInMemoryAllowlistStore_Add tests adding entries to the allowlist.
 func TestInMemoryAllowlistStore_Add(t *testing.T) {
 	store := New()
 	ctx := context.Background()

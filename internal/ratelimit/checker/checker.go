@@ -42,8 +42,8 @@ type QuotaStore interface {
 }
 
 type GlobalThrottleStore interface {
-	IncrementGlobal(ctx context.Context) (int, bool, error)
-	GetGlobalCount(ctx context.Context) (int, error)
+	IncrementGlobal(ctx context.Context) (count int, blocked bool, err error)
+	GetGlobalCount(ctx context.Context) (count int, err error)
 }
 
 type AuditPublisher interface {

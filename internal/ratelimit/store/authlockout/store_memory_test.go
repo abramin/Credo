@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"credo/internal/ratelimit/models"
-	requesttime "credo/pkg/platform/middleware/requesttime"
+	"credo/pkg/platform/middleware/requesttime"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -31,8 +30,8 @@ func (s *InMemoryAuthLockoutStoreSuite) TestGet() {
 
 	s.Run("missing identifier returns nil without error", func() {
 		record, err := s.store.Get(ctx, "unknown-id")
-		require.NoError(s.T(), err)
-		assert.Nil(s.T(), record)
+		s.NoError(err)
+		s.Nil(record)
 	})
 
 	s.Run("existing record is returned without mutation", func() {
@@ -42,15 +41,15 @@ func (s *InMemoryAuthLockoutStoreSuite) TestGet() {
 		identifier := "test-user"
 
 		_, err := s.store.RecordFailure(ctx, identifier)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		// Get should return the record without mutating it
 		record, err := s.store.Get(ctx, identifier)
-		require.NoError(s.T(), err)
-		require.NotNil(s.T(), record)
-		assert.Equal(s.T(), identifier, record.Identifier)
-		assert.Equal(s.T(), 1, record.FailureCount)
-		assert.Equal(s.T(), fixedTime, record.LastFailureAt)
+		s.NoError(err)
+		s.NotNil(record)
+		s.Equal(identifier, record.Identifier)
+		s.Equal(1, record.FailureCount)
+		s.Equal(fixedTime, record.LastFailureAt)
 	})
 }
 
@@ -61,15 +60,15 @@ func (s *InMemoryAuthLockoutStoreSuite) TestRecordFailure() {
 		identifier := "new-user"
 
 		record, err := s.store.RecordFailure(ctx, identifier)
-		require.NoError(s.T(), err)
-		require.NotNil(s.T(), record)
+		s.NoError(err)
+		s.NotNil(record)
 
-		assert.Equal(s.T(), identifier, record.Identifier)
-		assert.Equal(s.T(), 1, record.FailureCount)
-		assert.Equal(s.T(), 1, record.DailyFailures)
-		assert.Equal(s.T(), fixedTime, record.LastFailureAt)
-		assert.Nil(s.T(), record.LockedUntil)
-		assert.False(s.T(), record.RequiresCaptcha)
+		s.Equal(identifier, record.Identifier)
+		s.Equal(1, record.FailureCount)
+		s.Equal(1, record.DailyFailures)
+		s.Equal(fixedTime, record.LastFailureAt)
+		s.Nil(record.LockedUntil)
+		s.False(record.RequiresCaptcha)
 	})
 
 	s.Run("subsequent failures increment counters", func() {
@@ -80,17 +79,17 @@ func (s *InMemoryAuthLockoutStoreSuite) TestRecordFailure() {
 		// First failure
 		ctx1 := requesttime.WithTime(context.Background(), firstTime)
 		record1, err := s.store.RecordFailure(ctx1, identifier)
-		require.NoError(s.T(), err)
-		assert.Equal(s.T(), 1, record1.FailureCount)
-		assert.Equal(s.T(), firstTime, record1.LastFailureAt)
+		s.NoError(err)
+		s.Equal(1, record1.FailureCount)
+		s.Equal(firstTime, record1.LastFailureAt)
 
 		// Second failure - different time
 		ctx2 := requesttime.WithTime(context.Background(), secondTime)
 		record2, err := s.store.RecordFailure(ctx2, identifier)
-		require.NoError(s.T(), err)
-		assert.Equal(s.T(), 2, record2.FailureCount)
-		assert.Equal(s.T(), 2, record2.DailyFailures)
-		assert.Equal(s.T(), secondTime, record2.LastFailureAt)
+		s.NoError(err)
+		s.Equal(2, record2.FailureCount)
+		s.Equal(2, record2.DailyFailures)
+		s.Equal(secondTime, record2.LastFailureAt)
 	})
 }
 
@@ -102,26 +101,26 @@ func (s *InMemoryAuthLockoutStoreSuite) TestClear() {
 
 		// Create record
 		_, err := s.store.RecordFailure(ctx, identifier)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		// Verify it exists
 		record, err := s.store.Get(ctx, identifier)
-		require.NoError(s.T(), err)
-		require.NotNil(s.T(), record)
+		s.NoError(err)
+		s.NotNil(record)
 
 		// Clear it
 		err = s.store.Clear(ctx, identifier)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		// Verify it's gone
 		record, err = s.store.Get(ctx, identifier)
-		require.NoError(s.T(), err)
-		assert.Nil(s.T(), record)
+		s.NoError(err)
+		s.Nil(record)
 	})
 
 	s.Run("clearing missing record is no-op", func() {
 		err := s.store.Clear(ctx, "never-existed")
-		require.NoError(s.T(), err)
+		s.NoError(err)
 	})
 }
 
@@ -130,7 +129,7 @@ func (s *InMemoryAuthLockoutStoreSuite) TestIsLocked() {
 
 	s.Run("unlocked when no record exists", func() {
 		locked, lockedUntil, err := s.store.IsLocked(ctx, "unknown")
-		require.NoError(s.T(), err)
+		s.NoError(err)
 		assert.False(s.T(), locked)
 		assert.Nil(s.T(), lockedUntil)
 	})
@@ -141,18 +140,18 @@ func (s *InMemoryAuthLockoutStoreSuite) TestIsLocked() {
 
 		// Create and update record with lock
 		_, err := s.store.RecordFailure(ctx, identifier)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		record, _ := s.store.Get(ctx, identifier)
 		record.LockedUntil = &futureTime
 		err = s.store.Update(ctx, record)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		// Check lock status
 		locked, lockedUntil, err := s.store.IsLocked(ctx, identifier)
-		require.NoError(s.T(), err)
-		assert.True(s.T(), locked)
-		assert.Equal(s.T(), futureTime, *lockedUntil)
+		s.NoError(err)
+		s.True(locked)
+		s.Equal(futureTime, *lockedUntil)
 	})
 
 	s.Run("unlocked when LockedUntil is in the past", func() {
@@ -161,16 +160,16 @@ func (s *InMemoryAuthLockoutStoreSuite) TestIsLocked() {
 
 		// Create and update record with expired lock
 		_, err := s.store.RecordFailure(ctx, identifier)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		record, _ := s.store.Get(ctx, identifier)
 		record.LockedUntil = &pastTime
 		err = s.store.Update(ctx, record)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		// Check lock status - should be unlocked since lock expired
 		locked, _, err := s.store.IsLocked(ctx, identifier)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 		assert.False(s.T(), locked)
 	})
 }
@@ -183,7 +182,7 @@ func (s *InMemoryAuthLockoutStoreSuite) TestUpdate() {
 
 		// Create record
 		_, err := s.store.RecordFailure(ctx, identifier)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		// Update with new values
 		updatedRecord := &models.AuthLockout{
@@ -193,13 +192,13 @@ func (s *InMemoryAuthLockoutStoreSuite) TestUpdate() {
 			RequiresCaptcha: true,
 		}
 		err = s.store.Update(ctx, updatedRecord)
-		require.NoError(s.T(), err)
+		s.NoError(err)
 
 		// Verify update took effect
 		record, err := s.store.Get(ctx, identifier)
-		require.NoError(s.T(), err)
-		assert.Equal(s.T(), 5, record.FailureCount)
-		assert.Equal(s.T(), 10, record.DailyFailures)
-		assert.True(s.T(), record.RequiresCaptcha)
+		s.NoError(err)
+		s.Equal(5, record.FailureCount)
+		s.Equal(10, record.DailyFailures)
+		s.True(record.RequiresCaptcha)
 	})
 }

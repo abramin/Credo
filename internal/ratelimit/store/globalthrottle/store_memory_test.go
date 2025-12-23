@@ -4,31 +4,28 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-type InMemoryGlobalThrottleStoreSuite struct {
-	suite.Suite
-	store *InMemoryGlobalThrottleStore
-	ctx   context.Context
-}
+func TestInMemoryGlobalThrottleStore(t *testing.T) {
+	store := New()
+	ctx := context.Background()
 
-func TestInMemoryGlobalThrottleStoreSuite(t *testing.T) {
-	suite.Run(t, new(InMemoryGlobalThrottleStoreSuite))
-}
+	current, err := store.GetGlobalCount(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 0, current)
 
-func (s *InMemoryGlobalThrottleStoreSuite) SetupTest() {
-	s.store = New()
-	s.ctx = context.Background()
-}
+	current, blocked, err := store.IncrementGlobal(ctx)
+	require.NoError(t, err)
+	assert.False(t, blocked)
+	assert.Equal(t, 1, current)
 
-func (s *InMemoryGlobalThrottleStoreSuite) TestIncrementGlobal() {
-	// TODO: verify count increments monotonically and limitExceeded remains false for in-memory store.
-	// TODO: verify multiple increments return expected counts and do not error.
-	s.T().Skip("TODO: add contract-focused tests for global increment behavior")
-}
+	for range 10 {
+		_, _, _ = store.IncrementGlobal(ctx)
+	}
 
-func (s *InMemoryGlobalThrottleStoreSuite) TestGetGlobalCount() {
-	// TODO: verify initial count is zero and reflects increments accurately.
-	s.T().Skip("TODO: add contract-focused tests for reading global count")
+	current, err = store.GetGlobalCount(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 11, current)
 }
