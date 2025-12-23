@@ -150,6 +150,7 @@ func (h *Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
+	clientIP := metadata.GetClientIP(ctx)
 
 	var req models.TokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -159,6 +160,31 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 		)
 		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "Invalid JSON in request body"))
 		return
+	}
+
+	// Check token rate limit using client_id + IP composite key
+	if h.ratelimit != nil && req.ClientID != "" {
+		result, err := h.ratelimit.CheckAuthRateLimit(ctx, req.ClientID, clientIP)
+		if err != nil {
+			h.logger.ErrorContext(ctx, "failed to check token rate limit",
+				"error", err,
+				"request_id", requestID,
+			)
+			// Fail open - don't block token exchange if rate limiter is unavailable
+		} else if !result.Allowed {
+			h.logger.WarnContext(ctx, "token rate limit exceeded",
+				"request_id", requestID,
+				"client_id", req.ClientID,
+				"retry_after", result.RetryAfter,
+			)
+			w.Header().Set("Retry-After", strconv.Itoa(result.RetryAfter))
+			httputil.WriteJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error":       "rate_limit_exceeded",
+				"message":     "Too many token requests. Please try again later.",
+				"retry_after": result.RetryAfter,
+			})
+			return
+		}
 	}
 
 	res, err := h.auth.Token(ctx, &req)
