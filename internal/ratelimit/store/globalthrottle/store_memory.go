@@ -2,24 +2,23 @@ package globalthrottle
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// InMemoryGlobalThrottleStore implements global rate limiting with sliding windows.
-// It tracks both per-second and per-hour limits (PRD-017 FR-6).
+// InMemoryGlobalThrottleStore implements global rate limiting with atomic counters.
+// Uses tumbling windows (per-second and per-hour) for lock-free operation.
+// This provides approximate rate limiting with minimal contention.
 type InMemoryGlobalThrottleStore struct {
-	mu sync.Mutex
+	// Per-second tracking (tumbling window)
+	secondCount  atomic.Int64
+	secondBucket atomic.Int64 // Unix timestamp of current second bucket
+	perSecondLimit int
 
-	// Per-second tracking (sliding window)
-	secondWindow    []time.Time
-	perSecondLimit  int
-	secondDuration  time.Duration
-
-	// Per-hour tracking (sliding window)
-	hourWindow     []time.Time
-	perHourLimit   int
-	hourDuration   time.Duration
+	// Per-hour tracking (tumbling window)
+	hourCount  atomic.Int64
+	hourBucket atomic.Int64 // Unix timestamp of current hour bucket (truncated to hour)
+	perHourLimit int
 }
 
 // Option configures the store.
@@ -42,12 +41,8 @@ func WithPerHourLimit(limit int) Option {
 // New creates a new global throttle store with default limits.
 func New(opts ...Option) *InMemoryGlobalThrottleStore {
 	s := &InMemoryGlobalThrottleStore{
-		secondWindow:   make([]time.Time, 0),
-		perSecondLimit: 1000,          // Default: 1000 req/sec per instance
-		secondDuration: time.Second,
-		hourWindow:     make([]time.Time, 0),
-		perHourLimit:   100000,        // Default: 100k req/hour per instance
-		hourDuration:   time.Hour,
+		perSecondLimit: 1000,   // Default: 1000 req/sec per instance
+		perHourLimit:   100000, // Default: 100k req/hour per instance
 	}
 
 	for _, opt := range opts {
@@ -59,55 +54,64 @@ func New(opts ...Option) *InMemoryGlobalThrottleStore {
 
 // IncrementGlobal increments the global counter and checks if the request is blocked.
 // Returns blocked=true if either per-second or per-hour limit is exceeded.
+// Uses atomic operations for lock-free concurrency.
 func (s *InMemoryGlobalThrottleStore) IncrementGlobal(_ context.Context) (count int, blocked bool, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	now := time.Now()
+	currentSecond := now.Unix()
+	currentHour := now.Truncate(time.Hour).Unix()
 
-	// Clean up and check per-second window
-	s.secondWindow = s.cleanWindow(s.secondWindow, now, s.secondDuration)
-	if len(s.secondWindow) >= s.perSecondLimit {
-		return len(s.secondWindow), true, nil
+	// Check and potentially reset per-second counter
+	lastSecond := s.secondBucket.Load()
+	if currentSecond != lastSecond {
+		// Try to claim the new second bucket
+		if s.secondBucket.CompareAndSwap(lastSecond, currentSecond) {
+			s.secondCount.Store(0)
+		}
 	}
 
-	// Clean up and check per-hour window
-	s.hourWindow = s.cleanWindow(s.hourWindow, now, s.hourDuration)
-	if len(s.hourWindow) >= s.perHourLimit {
-		return len(s.hourWindow), true, nil
+	// Check and potentially reset per-hour counter
+	lastHour := s.hourBucket.Load()
+	if currentHour != lastHour {
+		// Try to claim the new hour bucket
+		if s.hourBucket.CompareAndSwap(lastHour, currentHour) {
+			s.hourCount.Store(0)
+		}
 	}
 
-	// Add current request to both windows
-	s.secondWindow = append(s.secondWindow, now)
-	s.hourWindow = append(s.hourWindow, now)
+	// Increment and check per-second limit
+	secCount := s.secondCount.Add(1)
+	if secCount > int64(s.perSecondLimit) {
+		// Over limit - decrement to avoid counting this request
+		s.secondCount.Add(-1)
+		return int(secCount - 1), true, nil
+	}
 
-	return len(s.secondWindow), false, nil
+	// Increment and check per-hour limit
+	hourCount := s.hourCount.Add(1)
+	if hourCount > int64(s.perHourLimit) {
+		// Over limit - decrement both counters
+		s.secondCount.Add(-1)
+		s.hourCount.Add(-1)
+		return int(hourCount - 1), true, nil
+	}
+
+	return int(secCount), false, nil
 }
 
 // GetGlobalCount returns the current count in the per-second window.
 func (s *InMemoryGlobalThrottleStore) GetGlobalCount(_ context.Context) (count int, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	now := time.Now()
-	s.secondWindow = s.cleanWindow(s.secondWindow, now, s.secondDuration)
-	return len(s.secondWindow), nil
+	currentSecond := now.Unix()
+
+	// If we're in a new second, the effective count is 0
+	if currentSecond != s.secondBucket.Load() {
+		return 0, nil
+	}
+
+	return int(s.secondCount.Load()), nil
 }
 
-// cleanWindow removes timestamps older than the window duration.
-func (s *InMemoryGlobalThrottleStore) cleanWindow(window []time.Time, now time.Time, duration time.Duration) []time.Time {
-	cutoff := now.Add(-duration)
-
-	// Find the first timestamp within the window
-	idx := 0
-	for idx < len(window) && window[idx].Before(cutoff) {
-		idx++
-	}
-
-	if idx == 0 {
-		return window
-	}
-
-	// Return slice starting from first valid timestamp
-	return window[idx:]
+// Stats returns current counters for monitoring.
+func (s *InMemoryGlobalThrottleStore) Stats() (secondCount, hourCount int64, secondBucket, hourBucket int64) {
+	return s.secondCount.Load(), s.hourCount.Load(), s.secondBucket.Load(), s.hourBucket.Load()
 }

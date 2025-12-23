@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	c "credo/internal/ratelimit/config"
@@ -10,6 +11,7 @@ import (
 )
 
 type InMemoryQuotaStore struct {
+	mu     sync.RWMutex
 	quotas map[id.APIKeyID]*models.APIKeyQuota
 	config *c.Config
 }
@@ -22,6 +24,9 @@ func New(config *c.Config) *InMemoryQuotaStore {
 }
 
 func (s *InMemoryQuotaStore) GetQuota(_ context.Context, apiKeyID id.APIKeyID) (quota *models.APIKeyQuota, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if quota, exists := s.quotas[apiKeyID]; exists {
 		return quota, nil
 	}
@@ -29,6 +34,9 @@ func (s *InMemoryQuotaStore) GetQuota(_ context.Context, apiKeyID id.APIKeyID) (
 }
 
 func (s *InMemoryQuotaStore) IncrementUsage(_ context.Context, apiKeyID id.APIKeyID, count int) (quota *models.APIKeyQuota, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	quota, exists := s.quotas[apiKeyID]
 	if !exists {
 		limits := s.config.QuotaTiers[models.QuotaTierFree]
