@@ -295,33 +295,30 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	}
 
 	var revoked []*models.Record
+	now := requesttime.Now(ctx)
+
 	// Wrap multi-purpose revoke in transaction to ensure atomicity per AGENTS.md
 	// Add user ID to context for sharded locking
 	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
 	txErr := s.tx.RunInTx(txCtx, func(txStore Store) error {
 		for _, purpose := range purposes {
 			record, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
+			if errors.Is(err, store.ErrNotFound) {
+				// Can't revoke what doesn't exist - skip silently
+				continue
+			}
 			if err != nil {
-				if errors.Is(err, store.ErrNotFound) {
-					// Can't revoke what doesn't exist - skip silently
-					continue
-				}
 				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to read consent")
 			}
-			if record.RevokedAt != nil {
+
+			// Guard: skip if not eligible for revocation (already revoked or expired)
+			if !record.CanRevoke(now) {
 				continue
 			}
-			now := requesttime.Now(ctx)
-			if record.ExpiresAt != nil && record.ExpiresAt.Before(now) {
-				// Expired consents are effectively inactive; skip to keep revoke idempotent.
-				continue
-			}
+
 			revokedRecord, err := txStore.RevokeByUserAndPurpose(ctx, userID, record.Purpose, now)
 			if err != nil {
 				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consent")
-			}
-			if revokedRecord.RevokedAt == nil {
-				revokedRecord.RevokedAt = &now
 			}
 			s.emitAudit(ctx, audit.Event{
 				UserID:    userID,
@@ -507,17 +504,31 @@ func (s *Service) logConsentCheck(ctx context.Context, level slog.Level, msg str
 }
 
 // consentCheckOutcome encapsulates the result of a consent check for unified recording.
+// Invariant: passed=true requires decision=AuditDecisionGranted; passed=false requires decision=AuditDecisionDenied
 type consentCheckOutcome struct {
 	passed   bool
 	state    string // "missing", "revoked", "expired", "active"
 	decision string // models.AuditDecisionGranted or models.AuditDecisionDenied
 }
 
+// newConsentCheckOutcome creates a consent check outcome with invariant enforcement.
+// Panics if the passed/decision combination is invalid (indicates a programming error).
+func newConsentCheckOutcome(passed bool, state string, decision string) consentCheckOutcome {
+	// Invariant: passed and decision must be consistent
+	if passed && decision != models.AuditDecisionGranted {
+		panic("consent check invariant violation: passed=true requires decision=granted")
+	}
+	if !passed && decision != models.AuditDecisionDenied {
+		panic("consent check invariant violation: passed=false requires decision=denied")
+	}
+	return consentCheckOutcome{passed: passed, state: state, decision: decision}
+}
+
 var (
-	outcomeMissing = consentCheckOutcome{passed: false, state: "missing", decision: models.AuditDecisionDenied}
-	outcomeRevoked = consentCheckOutcome{passed: false, state: "revoked", decision: models.AuditDecisionDenied}
-	outcomeExpired = consentCheckOutcome{passed: false, state: "expired", decision: models.AuditDecisionDenied}
-	outcomePassed  = consentCheckOutcome{passed: true, state: "active", decision: models.AuditDecisionGranted}
+	outcomeMissing = newConsentCheckOutcome(false, "missing", models.AuditDecisionDenied)
+	outcomeRevoked = newConsentCheckOutcome(false, "revoked", models.AuditDecisionDenied)
+	outcomeExpired = newConsentCheckOutcome(false, "expired", models.AuditDecisionDenied)
+	outcomePassed  = newConsentCheckOutcome(true, "active", models.AuditDecisionGranted)
 )
 
 // recordConsentCheckOutcome emits audit event, logs, and updates metrics for a consent check.

@@ -15,6 +15,7 @@ import (
 	"credo/pkg/platform/httputil"
 	auth "credo/pkg/platform/middleware/auth"
 	request "credo/pkg/platform/middleware/request"
+	"credo/pkg/platform/middleware/requesttime"
 )
 
 // Service defines the interface for consent operations.
@@ -108,7 +109,7 @@ func (h *Handler) HandleGrantConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, toGrantResponse(records, time.Now()))
+	httputil.WriteJSON(w, http.StatusOK, toGrantResponse(records, requesttime.Now(ctx)))
 }
 
 func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +151,7 @@ func (h *Handler) HandleRevokeConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, toRevokeResponse(records, time.Now()))
+	httputil.WriteJSON(w, http.StatusOK, toRevokeResponse(records, requesttime.Now(ctx)))
 }
 
 func (h *Handler) HandleRevokeAllConsents(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +237,7 @@ func (h *Handler) HandleGetConsents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, toListResponse(records, time.Now()))
+	httputil.WriteJSON(w, http.StatusOK, toListResponse(records, requesttime.Now(ctx)))
 }
 
 // Response mapping functions - convert domain objects to HTTP DTOs
