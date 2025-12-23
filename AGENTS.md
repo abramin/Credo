@@ -55,6 +55,11 @@ This repo uses small, focused review agents. Each agent has a narrow scope and a
 - Lifecycle safety (identity, tokens/sessions, consents/permissions) in generic terms.
 - Rejects patches that do not change unsafe structure.
 
+### 6) Complexity Review Agent
+
+- Readability
+- Cognitive complexity
+
 ## Overlap boundaries (to prevent conflicts)
 
 - **Security Agent** asks: “What can go wrong and what controls prevent it?”
@@ -79,6 +84,7 @@ This repo uses small, focused review agents. Each agent has a narrow scope and a
 3. Testing (if changing behavior, contracts, or refactoring internals)
 4. Security (if changing exposed surfaces, auth, config, deps)
 5. Performance (if changing hot paths, concurrency, caching, DB access)
+6. Complexity
 
 ## Output expectations
 
