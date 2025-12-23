@@ -73,7 +73,7 @@ func New(store Store, opts ...Option) (*Service, error) {
 }
 
 func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.AuthRateLimitResult, error) {
-	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, identifier, ip)
+	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, models.SanitizeKeySegment(identifier), models.SanitizeKeySegment(ip))
 	failureRecord, err := s.store.Get(ctx, key)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get auth lockout record")
@@ -146,7 +146,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 }
 
 func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*models.AuthLockout, error) {
-	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, identifier, ip)
+	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, models.SanitizeKeySegment(identifier), models.SanitizeKeySegment(ip))
 	current, err := s.store.RecordFailure(ctx, key)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to record auth failure")
@@ -180,7 +180,7 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 }
 
 func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
-	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, identifier, ip)
+	key := fmt.Sprintf("%s:%s:%s", keyPrefixAuth, models.SanitizeKeySegment(identifier), models.SanitizeKeySegment(ip))
 	err := s.store.Clear(ctx, key)
 	if err != nil {
 		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to clear auth failures")

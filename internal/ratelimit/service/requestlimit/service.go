@@ -146,7 +146,7 @@ func (s *Service) checkRateLimit(
 		}, nil
 	}
 
-	key := fmt.Sprintf("%s:%s:%s", keyPrefix, identifier, class)
+	key := fmt.Sprintf("%s:%s:%s", keyPrefix, models.SanitizeKeySegment(identifier), class)
 	result, err := s.buckets.Allow(ctx, key, requestsPerWindow, window)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to check rate limit")
