@@ -47,7 +47,7 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 
 	// Perform transactional updates with session-based sharding
 	txCtx := context.WithValue(ctx, txSessionKeyCtx, sessionID)
-	txErr := s.tx.RunInTx(txCtx, func(stores TxAuthStores) error {
+	txErr := s.tx.RunInTx(txCtx, func(stores txAuthStores) error {
 		// Step 1: Consume refresh token (prevents replay attacks)
 		var err error
 		refreshRecord, err = stores.RefreshTokens.ConsumeRefreshToken(ctx, req.RefreshToken, now)

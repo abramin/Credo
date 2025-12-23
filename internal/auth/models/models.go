@@ -65,25 +65,78 @@ func (s *Session) Activate() {
 	}
 }
 
+// GetDeviceBinding returns the device binding information as a value object.
+func (s *Session) GetDeviceBinding() DeviceBinding {
+	return DeviceBinding{
+		DeviceID:            s.DeviceID,
+		FingerprintHash:     s.DeviceFingerprintHash,
+		DisplayName:         s.DeviceDisplayName,
+		ApproximateLocation: s.ApproximateLocation,
+	}
+}
+
+// SetDeviceBinding updates all device binding fields from a DeviceBinding value object.
+func (s *Session) SetDeviceBinding(binding DeviceBinding) {
+	s.DeviceID = binding.DeviceID
+	s.DeviceFingerprintHash = binding.FingerprintHash
+	s.DeviceDisplayName = binding.DisplayName
+	s.ApproximateLocation = binding.ApproximateLocation
+}
+
+// AuthorizationCodeRecord is a child aggregate of Session.
+// Lifecycle: Short-lived (10 minutes), single-use.
+// Invariants:
+//   - Code cannot be empty
+//   - RedirectURI must match at token exchange
+//   - Used flag prevents replay attacks (must be set atomically with session activation)
+//   - Parent Session must exist and be in pending_consent state for exchange
 type AuthorizationCodeRecord struct {
 	ID          uuid.UUID    `json:"id"`           // Unique identifier
 	Code        string       `json:"code"`         // Format: "authz_<random>"
-	SessionID   id.SessionID `json:"session_id"`   // Links to parent Session
+	SessionID   id.SessionID `json:"session_id"`   // Links to parent Session aggregate
 	RedirectURI string       `json:"redirect_uri"` // Stored for validation at token exchange
 	ExpiresAt   time.Time    `json:"expires_at"`   // 10 minutes from creation
 	Used        bool         `json:"used"`         // Prevent replay attacks
 	CreatedAt   time.Time    `json:"created_at"`
 }
 
-// Lifetime: 30 days (configurable)
+// IsValid returns true if the authorization code can be exchanged for tokens.
+// A code is valid if it has not been used and has not expired.
+func (a *AuthorizationCodeRecord) IsValid(now time.Time) bool {
+	return !a.Used && a.ExpiresAt.After(now)
+}
+
+// IsExpired returns true if the authorization code has expired.
+func (a *AuthorizationCodeRecord) IsExpired(now time.Time) bool {
+	return now.After(a.ExpiresAt)
+}
+
+// RefreshTokenRecord is a child aggregate of Session.
+// Lifecycle: Long-lived (30 days), supports rotation.
+// Invariants:
+//   - Token cannot be empty
+//   - Used flag marks rotation (old token invalidated when new one issued)
+//   - Parent Session must be active for refresh to succeed
+//   - Replay of used token indicates potential token theft
 type RefreshTokenRecord struct {
 	ID              uuid.UUID    `json:"id"`         // Unique identifier
 	Token           string       `json:"token"`      // Format: "ref_<uuid>"
-	SessionID       id.SessionID `json:"session_id"` // Links to parent Session
+	SessionID       id.SessionID `json:"session_id"` // Links to parent Session aggregate
 	ExpiresAt       time.Time    `json:"expires_at"` // 30 days from creation
 	Used            bool         `json:"used"`       // For rotation detection
 	LastRefreshedAt *time.Time   `json:"last_refreshed_at,omitempty"`
 	CreatedAt       time.Time    `json:"created_at"`
+}
+
+// IsValid returns true if the refresh token can be used to obtain new tokens.
+// A token is valid if it has not been used (rotated) and has not expired.
+func (r *RefreshTokenRecord) IsValid(now time.Time) bool {
+	return !r.Used && r.ExpiresAt.After(now)
+}
+
+// IsExpired returns true if the refresh token has expired.
+func (r *RefreshTokenRecord) IsExpired(now time.Time) bool {
+	return now.After(r.ExpiresAt)
 }
 
 func (u *User) IsActive() bool {

@@ -133,8 +133,9 @@ type tokenArtifacts struct {
 
 type Option func(*Service)
 
-// TxAuthStores groups the stores used inside a transaction.
-type TxAuthStores struct {
+// txAuthStores groups the stores used inside a transaction.
+// This is an internal implementation detail of the auth service transaction handling.
+type txAuthStores struct {
 	Users         UserStore
 	Codes         AuthCodeStore
 	Sessions      SessionStore
@@ -151,14 +152,14 @@ const defaultTxTimeout = 5 * time.Second
 
 type shardedAuthTx struct {
 	shards  [numAuthShards]sync.Mutex
-	stores  TxAuthStores
+	stores  txAuthStores
 	timeout time.Duration
 }
 
 // RunInTx acquires a shard lock based on context and executes the transaction.
 // Falls back to shard 0 if no session key is in context.
 // Enforces a timeout to prevent runaway operations.
-func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores TxAuthStores) error) error {
+func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStores) error) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return dErrors.Wrap(err, dErrors.CodeTimeout, "transaction aborted: context cancelled")
@@ -292,7 +293,7 @@ func New(
 		codes:         codes,
 		refreshTokens: refreshTokens,
 		tx: &shardedAuthTx{
-			stores: TxAuthStores{
+			stores: txAuthStores{
 				Users:         users,
 				Codes:         codes,
 				Sessions:      sessions,

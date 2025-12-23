@@ -33,7 +33,7 @@ type tokenFlowTxResult struct {
 // to avoid holding the transaction lock during CPU-intensive JWT generation.
 func (s *Service) executeTokenFlowTx(
 	ctx context.Context,
-	stores TxAuthStores,
+	stores txAuthStores,
 	params tokenFlowTxParams,
 ) (*tokenFlowTxResult, error) {
 	mutableSession := *params.Session

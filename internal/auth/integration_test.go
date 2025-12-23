@@ -170,3 +170,78 @@ func TestConcurrentUserCreation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, len(users), "expected only one user to be created")
 }
+
+// TestConcurrentAuthorizationCodeReplay validates replay protection under concurrent load.
+// This test verifies that when the same authorization code is used concurrently by multiple
+// requests, only ONE request succeeds and all others receive invalid_grant errors.
+// This is a critical security invariant that cannot be expressed in Gherkin.
+func TestConcurrentAuthorizationCodeReplay(t *testing.T) {
+	r, _, _, _, _, _ := SetupSuite(t)
+
+	// Step 1: Get an authorization code
+	authReq := models.AuthorizationRequest{
+		Email:       "replay-test@example.com",
+		ClientID:    "client-123",
+		Scopes:      []string{"openid"},
+		RedirectURI: "https://client.app/callback",
+	}
+	payload, err := json.Marshal(authReq)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/authorize", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "authorization should succeed")
+
+	var authResp models.AuthorizationResult
+	err = json.NewDecoder(rec.Body).Decode(&authResp)
+	require.NoError(t, err)
+	require.NotEmpty(t, authResp.Code, "authorization code should be returned")
+
+	// Step 2: Attempt concurrent token exchanges with the same code
+	concurrentRequests := 10
+	successCh := make(chan bool, concurrentRequests)
+	failureCh := make(chan bool, concurrentRequests)
+
+	for range concurrentRequests {
+		go func(code string) {
+			tokenReq := models.TokenRequest{
+				GrantType:   "authorization_code",
+				Code:        code,
+				RedirectURI: "https://client.app/callback",
+				ClientID:    "client-123",
+			}
+			tokenPayload, _ := json.Marshal(tokenReq)
+
+			req := httptest.NewRequest(http.MethodPost, "/auth/token", bytes.NewReader(tokenPayload))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			if rec.Code == http.StatusOK {
+				successCh <- true
+			} else {
+				// Should be 400 Bad Request with invalid_grant
+				failureCh <- true
+			}
+		}(authResp.Code)
+	}
+
+	// Step 3: Collect results and verify exactly one success
+	successCount := 0
+	failureCount := 0
+	for i := 0; i < concurrentRequests; i++ {
+		select {
+		case <-successCh:
+			successCount++
+		case <-failureCh:
+			failureCount++
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for concurrent requests to complete")
+		}
+	}
+
+	assert.Equal(t, 1, successCount, "exactly one token exchange should succeed")
+	assert.Equal(t, concurrentRequests-1, failureCount, "all other requests should fail with invalid_grant")
+}

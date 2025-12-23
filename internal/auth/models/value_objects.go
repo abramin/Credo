@@ -82,3 +82,42 @@ const (
 	TenantStatusActive   TenantStatus = "active"
 	TenantStatusInactive TenantStatus = "inactive"
 )
+
+// DeviceBinding consolidates device-related session data.
+// This value object encapsulates the device identity and context signals
+// used for session security and user display.
+//
+// Components:
+//   - DeviceID: Primary identifier (UUID from cookie) - hard requirement for binding
+//   - FingerprintHash: Secondary signal (SHA-256 of browser|os|platform) - drift detection
+//   - DisplayName: Human-readable name for session management UI (e.g., "Chrome on macOS")
+//   - ApproximateLocation: Optional geo context (e.g., "San Francisco, US")
+type DeviceBinding struct {
+	DeviceID            string `json:"device_id,omitempty"`
+	FingerprintHash     string `json:"fingerprint_hash,omitempty"`
+	DisplayName         string `json:"display_name,omitempty"`
+	ApproximateLocation string `json:"approximate_location,omitempty"`
+}
+
+// IsEmpty returns true if no device binding information is present.
+func (d DeviceBinding) IsEmpty() bool {
+	return d.DeviceID == "" && d.FingerprintHash == "" && d.DisplayName == "" && d.ApproximateLocation == ""
+}
+
+// HasDeviceID returns true if a device ID is bound to this session.
+func (d DeviceBinding) HasDeviceID() bool {
+	return d.DeviceID != ""
+}
+
+// HasFingerprint returns true if a fingerprint hash is present.
+func (d DeviceBinding) HasFingerprint() bool {
+	return d.FingerprintHash != ""
+}
+
+// DisplayNameOrDefault returns the display name, or "Unknown device" if empty.
+func (d DeviceBinding) DisplayNameOrDefault() string {
+	if d.DisplayName == "" {
+		return "Unknown device"
+	}
+	return d.DisplayName
+}

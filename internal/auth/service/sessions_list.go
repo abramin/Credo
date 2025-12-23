@@ -41,15 +41,11 @@ func (s *Service) ListSessions(ctx context.Context, userID id.UserID, currentSes
 
 	out := make([]models.SessionSummary, 0, len(active))
 	for _, session := range active {
-		deviceName := session.DeviceDisplayName
-		if deviceName == "" {
-			deviceName = "Unknown device"
-		}
-
+		binding := session.GetDeviceBinding()
 		out = append(out, models.SessionSummary{
 			SessionID:    session.ID.String(),
-			Device:       deviceName,
-			Location:     session.ApproximateLocation,
+			Device:       binding.DisplayNameOrDefault(),
+			Location:     binding.ApproximateLocation,
 			CreatedAt:    session.CreatedAt,
 			LastActivity: session.LastSeenAt,
 			IsCurrent:    session.ID == currentSessionID,
