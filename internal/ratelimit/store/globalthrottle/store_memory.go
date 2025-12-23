@@ -11,13 +11,13 @@ import (
 // This provides approximate rate limiting with minimal contention.
 type InMemoryGlobalThrottleStore struct {
 	// Per-second tracking (tumbling window)
-	secondCount  atomic.Int64
-	secondBucket atomic.Int64 // Unix timestamp of current second bucket
+	secondCount    atomic.Int64
+	secondBucket   atomic.Int64 // Unix timestamp of current second bucket
 	perSecondLimit int
 
 	// Per-hour tracking (tumbling window)
-	hourCount  atomic.Int64
-	hourBucket atomic.Int64 // Unix timestamp of current hour bucket (truncated to hour)
+	hourCount    atomic.Int64
+	hourBucket   atomic.Int64 // Unix timestamp of current hour bucket (truncated to hour)
 	perHourLimit int
 }
 
@@ -48,8 +48,6 @@ func New(opts ...Option) *InMemoryGlobalThrottleStore {
 	for _, opt := range opts {
 		opt(s)
 	}
-}
-
 	return s
 }
 
