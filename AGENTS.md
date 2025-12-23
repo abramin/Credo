@@ -81,10 +81,10 @@ This repo uses small, focused review agents. Each agent has a narrow scope and a
 
 1. Secure-by-Design (only if changing boundaries, auth, lifecycles, primitives)
 2. DDD (if changing domain logic or service boundaries)
-3. Testing (if changing behavior, contracts, or refactoring internals)
-4. Security (if changing exposed surfaces, auth, config, deps)
-5. Performance (if changing hot paths, concurrency, caching, DB access)
-6. Complexity
+3. Security (if changing exposed surfaces, auth, config, deps)
+4. Performance (if changing hot paths, concurrency, caching, DB access)
+5. Complexity
+6. Testing (if changing behavior, contracts, or refactoring internals)
 
 ## Output expectations
 
@@ -98,7 +98,3 @@ All agents should:
 
 - Add comments only when they provide information not already obvious from names or structure.
 - Do not comment to restate self-documenting methods or code.
-
-## When to consolidate agents
-
-If you repeatedly run both Security and Secure-by-Design and they duplicate work, remove Security and keep Secure-by-Design only.

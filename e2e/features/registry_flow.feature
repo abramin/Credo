@@ -144,7 +144,7 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     Then the response status should be 400
     And the response field "error" should equal "bad_request"
 
-    @registry @regulated @data-minimization
+    @registry @regulated
   Scenario: Citizen lookup in regulated mode returns minimized data
     Given the system is running in regulated mode
     When I lookup citizen record for national_id "REGULATED123"
@@ -156,7 +156,7 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     And the response should not contain "date_of_birth"
     And the response should not contain "address"
 
-    @registry @performance @latency
+    @registry @performance
   Scenario: Cache hit has low latency
     Given I lookup citizen record for national_id "PERF123456"
     When I lookup citizen record for national_id "PERF123456" and measure latency
@@ -198,7 +198,7 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     And an audit event should be emitted with action "registry_sanctions_checked"
     And the audit event should contain decision field
 
-    @registry @error-handling @timeout
+    @registry @error-handling
   Scenario: Registry timeout returns 504
     Given the citizen registry is configured with 10 second latency
     And the request timeout is set to 100 milliseconds
@@ -206,7 +206,7 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     Then the response status should be 504
     And the response field "error" should equal "registry_timeout"
 
-    @registry @error-handling @resilience
+    @registry @error-handling
   Scenario: Cache expiry triggers fresh lookup
     Given I lookup citizen record for national_id "EXPIRE123"
     And I wait for 6 minutes

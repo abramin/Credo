@@ -106,7 +106,7 @@ Feature: Consent Management
     And the consent should have a new "expires_at" timestamp
 
   # ============================================================================
-  # Filter Tests (PRD-002 FR-3: Query Parameters)
+  # Filter Tests
   # ============================================================================
 
       @consent @filter
@@ -161,7 +161,7 @@ Feature: Consent Management
     And the response field "error" should equal "bad_request"
 
   # ============================================================================
-  # All Consent Purposes Coverage (PRD-002 TR-1)
+  # All Consent Purposes Coverage
   # ============================================================================
 
       @consent @purposes
@@ -211,7 +211,7 @@ Feature: Consent Management
     And the response should contain 0 consent records
 
   # ============================================================================
-  # GDPR Delete Tests (PRD-002 FR-2.2: Right to Erasure)
+  # GDPR Delete Tests
   # ============================================================================
 
       @consent @gdpr

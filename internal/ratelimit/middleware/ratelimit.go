@@ -74,6 +74,14 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 
 			result, err := m.limiter.CheckIPRateLimit(ctx, ip, class)
 			if err != nil {
+				// DESIGN DECISION: Fail-open on rate limit check errors.
+				// This prioritizes availability over security - requests proceed when the
+				// rate limit store is unavailable (e.g., Redis outage). The error is logged
+				// for monitoring/alerting. This is a deliberate tradeoff: during store outages,
+				// rate limiting is temporarily bypassed to avoid cascading failures.
+				//
+				// For high-security deployments requiring fail-closed behavior, see future
+				// PRD for configurable FailClosed option.
 				m.logger.Error("failed to check IP rate limit", "error", err, "ip_prefix", privacy.AnonymizeIP(ip))
 				next.ServeHTTP(w, r)
 				return
@@ -106,6 +114,7 @@ func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(htt
 
 			result, err := m.limiter.CheckBothLimits(ctx, ip, userID, class)
 			if err != nil {
+				// Fail-open: see RateLimit() for design rationale.
 				m.logger.Error("failed to check combined rate limit", "error", err, "ip_prefix", privacy.AnonymizeIP(ip), "user_id", userID)
 				next.ServeHTTP(w, r)
 				return
@@ -136,6 +145,7 @@ func (m *Middleware) GlobalThrottle() func(http.Handler) http.Handler {
 
 			allowed, err := m.limiter.CheckGlobalThrottle(ctx)
 			if err != nil {
+				// Fail-open: see RateLimit() for design rationale.
 				m.logger.Error("failed to check global throttle", "error", err)
 				next.ServeHTTP(w, r)
 				return
@@ -243,6 +253,7 @@ func (m *ClientMiddleware) RateLimitClient() func(http.Handler) http.Handler {
 			endpoint := r.URL.Path
 			result, err := m.limiter.Check(ctx, clientID, endpoint)
 			if err != nil {
+				// Fail-open: see Middleware.RateLimit() for design rationale.
 				m.logger.Error("failed to check client rate limit", "error", err)
 				next.ServeHTTP(w, r)
 				return

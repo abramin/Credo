@@ -110,7 +110,7 @@ func (s *Service) Check(ctx context.Context, clientID, endpoint string) (*models
 		clientType = "public"
 	}
 
-	key := fmt.Sprintf("%s:%s:%s", keyPrefix, clientID, endpoint)
+	key := fmt.Sprintf("%s:%s:%s", keyPrefix, models.SanitizeKeySegment(clientID), models.SanitizeKeySegment(endpoint))
 
 	result, err := s.buckets.Allow(ctx, key, limit.RequestsPerWindow, limit.Window)
 	if err != nil {

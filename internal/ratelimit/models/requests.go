@@ -1,6 +1,7 @@
 package models
 
 import (
+	"net"
 	"strings"
 	"time"
 
@@ -51,6 +52,13 @@ func (r *AddAllowlistRequest) Validate() error {
 		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
 	}
 
+	// Semantic: validate IP format when type is 'ip'
+	if entryType == AllowlistTypeIP {
+		if net.ParseIP(r.Identifier) == nil {
+			return dErrors.New(dErrors.CodeValidation, "identifier must be a valid IP address")
+		}
+	}
+
 	if r.ExpiresAt != nil && r.ExpiresAt.Before(time.Now()) {
 		return dErrors.New(dErrors.CodeValidation, "expires_at must be in the future")
 	}
@@ -93,6 +101,13 @@ func (r *RemoveAllowlistRequest) Validate() error {
 		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
 	}
 
+	// Semantic: validate IP format when type is 'ip'
+	if entryType == AllowlistTypeIP {
+		if net.ParseIP(r.Identifier) == nil {
+			return dErrors.New(dErrors.CodeValidation, "identifier must be a valid IP address")
+		}
+	}
+
 	return nil
 }
 
@@ -130,6 +145,13 @@ func (r *ResetRateLimitRequest) Validate() error {
 
 	if !r.Type.IsValid() {
 		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
+	}
+
+	// Semantic: validate IP format when type is 'ip'
+	if r.Type == AllowlistTypeIP {
+		if net.ParseIP(r.Identifier) == nil {
+			return dErrors.New(dErrors.CodeValidation, "identifier must be a valid IP address")
+		}
 	}
 
 	if r.Class != "" {

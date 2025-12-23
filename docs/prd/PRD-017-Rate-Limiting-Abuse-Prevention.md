@@ -1306,6 +1306,7 @@ curl -X POST http://localhost:8080/admin/rate-limit/allowlist \
 - CAPTCHA challenge on repeated violations
 - Machine learning-based anomaly detection
 - Cost-based rate limiting (expensive ops cost more tokens)
+- **Configurable fail-closed mode**: Add `FailClosed` option for high-security deployments where rate limiting failures should block requests rather than allow them. Current behavior (fail-open) prioritizes availability; fail-closed would prioritize security at the cost of availability during store outages. See middleware documentation for current fail-open rationale.
 
 ---
 

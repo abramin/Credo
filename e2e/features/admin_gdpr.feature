@@ -1,4 +1,4 @@
-Feature: Admin GDPR User Deletion (PRD-001B)
+Feature: Admin GDPR User Deletion
     As a system administrator
     I want to delete users and their sessions for GDPR compliance
     So that I can fulfill data erasure requests

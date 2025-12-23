@@ -42,6 +42,29 @@ type AuthLockoutConfig struct {
 	SupportURL             string        // URL for user support (included in lockout response)
 }
 
+// CalculateBackoff returns the progressive backoff delay for the given failure count.
+// Implements exponential backoff: 250ms → 500ms → 1s (capped).
+func (c *AuthLockoutConfig) CalculateBackoff(failureCount int) time.Duration {
+	if failureCount <= 0 {
+		return 0
+	}
+	base := c.ProgressiveBackoffBase
+	if base == 0 {
+		base = 250 * time.Millisecond
+	}
+	// Exponential backoff with cap at 1 second
+	delay := base * time.Duration(1<<(failureCount-1))
+	if delay > time.Second {
+		return time.Second
+	}
+	return delay
+}
+
+// ResetTime returns when the lockout window will reset based on last failure time.
+func (c *AuthLockoutConfig) ResetTime(lastFailureAt time.Time) time.Time {
+	return lastFailureAt.Add(c.WindowDuration)
+}
+
 type QuotaLimit struct {
 	MonthlyRequests int
 	OverageAllowed  bool

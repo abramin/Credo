@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"credo/internal/ratelimit/models"
 	id "credo/pkg/domain"
@@ -72,16 +73,14 @@ func New(
 }
 
 func (s *Service) AddToAllowlist(ctx context.Context, req *models.AddAllowlistRequest, adminUserID id.UserID) (*models.AllowlistEntry, error) {
+	req.Normalize()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid add allowlist request: %w", err)
 	}
 
-	entry := &models.AllowlistEntry{
-		Type:       req.Type,
-		Identifier: req.Identifier,
-		Reason:     req.Reason,
-		ExpiresAt:  req.ExpiresAt,
-		CreatedBy:  adminUserID,
+	entry, err := models.NewAllowlistEntry(req.Type, req.Identifier, req.Reason, adminUserID, req.ExpiresAt, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create allowlist entry: %w", err)
 	}
 
 	if err := s.allowlist.Add(ctx, entry); err != nil {
@@ -122,15 +121,17 @@ func (s *Service) ListAllowlist(ctx context.Context) ([]*models.AllowlistEntry, 
 }
 
 func (s *Service) ResetRateLimit(ctx context.Context, req *models.ResetRateLimitRequest) error {
+	req.Normalize()
 	if err := req.Validate(); err != nil {
 		return fmt.Errorf("invalid reset rate limit request: %w", err)
 	}
 	keys := []string{}
+	sanitizedID := models.SanitizeKeySegment(req.Identifier)
 	switch req.Type {
 	case models.AllowlistTypeIP:
-		keys = append(keys, fmt.Sprintf("rl:ip:%s", req.Identifier))
+		keys = append(keys, fmt.Sprintf("rl:ip:%s", sanitizedID))
 	case models.AllowlistTypeUserID:
-		keys = append(keys, fmt.Sprintf("rl:user:%s", req.Identifier))
+		keys = append(keys, fmt.Sprintf("rl:user:%s", sanitizedID))
 	default:
 		return fmt.Errorf("unknown identifier type: %s", req.Type)
 	}

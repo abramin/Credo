@@ -1,7 +1,7 @@
-Feature: Token lifecycle and session management (PRD-016)
+Feature: Token lifecycle and session management
     As a user
     I want secure token refresh and revocation
-    So that sessions can be rotated or revoked per PRD-016
+    So that sessions can be rotated and revoked securely
 
   Background:
     Given the ID Gateway is running
@@ -95,14 +95,14 @@ Feature: Token lifecycle and session management (PRD-016)
     And the response field "error" should equal "unauthorized"
 
     # ============================================================
-    # PRD-026A FR-4.5.4: Client/User Status Validation on Refresh
+    # Client/User Status Validation on Refresh
     # NOTE: These scenarios document expected behavior. Full E2E testing
     # requires admin APIs to modify client/user status. Unit tests in
     # service/token_refresh_test.go provide coverage for these cases.
     # ============================================================
 
-    @token @refresh @prd-026a @simulation
-  Scenario: Refresh token rejected when client is inactive (PRD-026A FR-4.5.4)
+    @token @refresh @simulation
+  Scenario: Refresh token rejected when client is inactive
     # This scenario documents the expected behavior:
     # 1. User completes OAuth2 authorization
     # 2. Client is marked as inactive (via admin API - not yet available in E2E)
@@ -112,8 +112,8 @@ Feature: Token lifecycle and session management (PRD-016)
     And log "COVERAGE: Unit tested in service/token_refresh_test.go (client inactive - PRD-026A FR-4.5.4)"
     And log "E2E: Requires admin API to modify client status"
 
-    @token @refresh @prd-026a @simulation
-  Scenario: Refresh token rejected when user is inactive (PRD-026A FR-4.5.4)
+    @token @refresh @simulation
+  Scenario: Refresh token rejected when user is inactive
     # This scenario documents the expected behavior:
     # 1. User completes OAuth2 authorization
     # 2. User account is marked as inactive (via admin API - not yet available in E2E)

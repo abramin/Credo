@@ -4,6 +4,7 @@ import (
 	"context"
 	"credo/internal/ratelimit/config"
 	"credo/pkg/domain"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,4 +44,33 @@ func TestInMemoryQuotaStore(t *testing.T) {
 		assert.Equal(t, periodStartBefore, got2.PeriodStart, "GetQuota should not mutate period start")
 		assert.Equal(t, periodEndBefore, got2.PeriodEnd, "GetQuota should not mutate period end")
 	})
+}
+
+func TestInMemoryQuotaStore_Concurrent(t *testing.T) {
+	store := New(config.DefaultConfig())
+	ctx := context.Background()
+	apiKeyID := domain.APIKeyID("concurrent-test")
+
+	const goroutines = 100
+	const incrementsPerGoroutine = 10
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < incrementsPerGoroutine; j++ {
+				_, err := store.IncrementUsage(ctx, apiKeyID, 1)
+				assert.NoError(t, err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	quota, err := store.GetQuota(ctx, apiKeyID)
+	require.NoError(t, err)
+	assert.Equal(t, goroutines*incrementsPerGoroutine, quota.CurrentUsage,
+		"concurrent increments should result in exact total")
 }
