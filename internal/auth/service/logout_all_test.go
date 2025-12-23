@@ -47,8 +47,6 @@ func (s *ServiceSuite) TestLogoutAll() {
 	}
 
 	s.T().Run("Given user with multiple sessions When logout_all except_current=true Then revoke all except current", func(t *testing.T) {
-		// Expect: List sessions, revoke all except current, return count
-
 		s.mockSessionStore.EXPECT().ListByUser(gomock.Any(), userID).Return(sessions, nil)
 		// Should revoke 2 sessions (not the current one)
 		s.mockSessionStore.EXPECT().RevokeSession(gomock.Any(), sessions[1].ID).Return(nil)

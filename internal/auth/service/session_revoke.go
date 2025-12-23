@@ -9,7 +9,6 @@ import (
 	"credo/pkg/platform/audit"
 )
 
-// RevokeSession implements PRD-016 FR-5: revoke a specific session owned by the user.
 func (s *Service) RevokeSession(ctx context.Context, userID id.UserID, sessionID id.SessionID) error {
 	if userID.IsNil() {
 		return dErrors.New(dErrors.CodeUnauthorized, "user ID required")

@@ -20,9 +20,6 @@ import (
 // - validation errors: Tests input validation error codes (fast feedback)
 // - session not found: Tests error propagation from store
 // - different user forbidden: Tests multi-user authorization check (unique)
-//
-// REMOVED per testing.md (duplicate of e2e/features/auth_token_lifecycle.feature):
-// - "active session owned by user revoked" - covered by "Revoke session by session_id"
 func (s *ServiceSuite) TestService_RevokeSession() {
 	ctx := context.Background()
 

@@ -6,11 +6,11 @@ import (
 
 	authdevice "credo/internal/auth/device"
 	"credo/internal/auth/models"
-	devicemw "credo/pkg/platform/middleware/device"
-	metadata "credo/pkg/platform/middleware/metadata"
 	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	devicemw "credo/pkg/platform/middleware/device"
+	metadata "credo/pkg/platform/middleware/metadata"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -33,12 +33,12 @@ func (s *ServiceSuite) TestAuthorize() {
 	clientID := id.ClientID(uuid.New())
 
 	mockClient := &tenant.Client{
-		ID:             clientID,
-		TenantID:       tenantID,
-		OAuthClientID:  "client-123",
-		Name:           "Test Client",
-		Status:         "active",
-		RedirectURIs:   []string{"https://client.app/callback"},
+		ID:            clientID,
+		TenantID:      tenantID,
+		OAuthClientID: "client-123",
+		Name:          "Test Client",
+		Status:        "active",
+		RedirectURIs:  []string{"https://client.app/callback"},
 	}
 
 	mockTenant := &tenant.Tenant{
@@ -149,9 +149,7 @@ func (s *ServiceSuite) TestAuthorize() {
 
 // TestAuthorizeClientValidation tests that authorize rejects requests
 // when the client is inactive (PRD-026A FR-4.5.3).
-//
-// REMOVED per testing.md (duplicate of e2e/features/auth_security.feature):
-// - "unknown client_id rejected" - covered by "Unknown client_id is rejected"
+
 func (s *ServiceSuite) TestAuthorizeClientValidation() {
 	s.T().Run("inactive client rejected", func(t *testing.T) {
 		req := models.AuthorizationRequest{
@@ -178,19 +176,17 @@ func (s *ServiceSuite) TestAuthorizeClientValidation() {
 
 // TestAuthorizeRedirectURIValidation tests that authorize rejects redirect URIs
 // not registered on the client (PRD-026A FR-8).
-// This test is expected to FAIL until the validation is implemented.
 func (s *ServiceSuite) TestAuthorizeRedirectURIValidation() {
 	tenantID := id.TenantID(uuid.New())
 	clientID := id.ClientID(uuid.New())
 
-	// Client with specific registered redirect URIs
 	mockClient := &tenant.Client{
-		ID:             clientID,
-		TenantID:       tenantID,
-		OAuthClientID:  "client-123",
-		Name:           "Test Client",
-		Status:         "active",
-		RedirectURIs:   []string{"https://allowed.example.com/callback"},
+		ID:            clientID,
+		TenantID:      tenantID,
+		OAuthClientID: "client-123",
+		Name:          "Test Client",
+		Status:        "active",
+		RedirectURIs:  []string{"https://allowed.example.com/callback"},
 	}
 
 	mockTenant := &tenant.Tenant{
