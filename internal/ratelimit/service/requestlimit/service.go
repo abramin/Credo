@@ -14,8 +14,6 @@ import (
 	"credo/pkg/platform/privacy"
 )
 
-const keyPrefixUser = "user"
-const keyPrefixIP = "ip"
 
 type BucketStore interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
