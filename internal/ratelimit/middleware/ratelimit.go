@@ -1,10 +1,14 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"credo/internal/ratelimit/models"
@@ -28,7 +32,6 @@ type Middleware struct {
 	disabled bool
 }
 
-// Option configures the rate limit middleware.
 type Option func(*Middleware)
 
 // WithDisabled disables rate limiting entirely (for testing/demo mode).
@@ -83,7 +86,6 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 	}
 }
 
-// RateLimitAuthenticated returns middleware that enforces both IP and user rate limits.
 func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -124,27 +126,37 @@ func (m *Middleware) RateLimitAuth() func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 			ip := metadata.GetClientIP(ctx)
+			identifier := ""
+			if r.Method == http.MethodPost && r.Body != nil && r.ContentLength != 0 {
+				bodyBytes, err := io.ReadAll(r.Body)
+				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				if err == nil && len(bodyBytes) > 0 {
+					var payload struct {
+						Email    string `json:"email"`
+						Username string `json:"username"`
+					}
+					if jsonErr := json.Unmarshal(bodyBytes, &payload); jsonErr == nil {
+						identifier = strings.TrimSpace(payload.Email)
+						if identifier == "" {
+							identifier = strings.TrimSpace(payload.Username)
+						}
+					}
+				}
+			}
 
-			// 2. Extract identifier (email/username) from request body if applicable
-
-			result, err := m.limiter.CheckAuthRateLimit(ctx, "", ip)
+			result, err := m.limiter.CheckAuthRateLimit(ctx, identifier, ip)
 			if err != nil {
 				m.logger.Error("failed to check auth rate limit", "error", err, "ip_prefix", privacy.AnonymizeIP(ip))
-				// 4. Apply progressive backoff delay if configured
-				// 5. If locked out, return 429 with lockout info
-				// 6. Else call next handler
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			addRateLimitHeaders(w, result)
+			addRateLimitHeaders(w, &result.RateLimitResult)
 
 			if !result.Allowed {
 				writeAuthLockout(w, result)
 				return
 			}
-
-			_ = ip
 
 			next.ServeHTTP(w, r)
 		})
@@ -152,37 +164,33 @@ func (m *Middleware) RateLimitAuth() func(http.Handler) http.Handler {
 }
 
 // GlobalThrottle returns middleware for global DDoS protection.
-//
-// TODO: Implement this middleware
-// 1. Call limiter.CheckGlobalThrottle
-// 2. If throttled, return 503 Service Unavailable
-// 3. Else call next handler
 func (m *Middleware) GlobalThrottle() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if m.disabled {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			ctx := r.Context()
 
-			// TODO: Implement global throttle
-			// allowed, err := m.limiter.CheckGlobalThrottle(ctx)
-			// if err != nil { ... log and allow through ... }
-			//
-			// if !allowed {
-			//     writeServiceOverloaded(w)
-			//     return
-			// }
+			allowed, err := m.limiter.CheckGlobalThrottle(ctx)
+			if err != nil {
+				m.logger.Error("failed to check global throttle", "error", err)
+				next.ServeHTTP(w, r)
+				return
+			}
 
-			_ = ctx
+			if !allowed {
+				writeServiceOverloaded(w)
+				return
+			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-// addRateLimitHeaders adds X-RateLimit-* headers to the response.
-// // Headers:
-// - X-RateLimit-Limit: {limit}
-// - X-RateLimit-Remaining: {remaining}
-// - X-RateLimit-Reset: {unix timestamp}
 func addRateLimitHeaders(w http.ResponseWriter, result *models.RateLimitResult) {
 	if result == nil {
 		return
@@ -209,6 +217,20 @@ func writeUserRateLimitExceeded(w http.ResponseWriter, result *models.RateLimitR
 		QuotaLimit:     result.Limit,
 		QuotaRemaining: result.Remaining,
 		QuotaReset:     result.ResetAt,
+	})
+}
+
+func writeAuthLockout(w http.ResponseWriter, result *models.AuthRateLimitResult) {
+	if result == nil {
+		return
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(result.RetryAfter))
+	httputil.WriteJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":            "rate_limit_exceeded",
+		"message":          "Too many authentication attempts. Please try again later.",
+		"retry_after":      result.RetryAfter,
+		"requires_captcha": result.RequiresCaptcha,
+		"failure_count":    result.FailureCount,
 	})
 }
 

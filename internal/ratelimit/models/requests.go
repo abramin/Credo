@@ -8,17 +8,17 @@ import (
 )
 
 type AddAllowlistRequest struct {
-	Type       string     `json:"type"` // "ip" or "user_id"
-	Identifier string     `json:"identifier"`
-	Reason     string     `json:"reason"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	Type       AllowlistEntryType `json:"type"`
+	Identifier string             `json:"identifier"`
+	Reason     string             `json:"reason"`
+	ExpiresAt  *time.Time         `json:"expires_at,omitempty"`
 }
 
 func (r *AddAllowlistRequest) Normalize() {
 	if r == nil {
 		return
 	}
-	r.Type = strings.TrimSpace(strings.ToLower(r.Type))
+	r.Type = AllowlistEntryType(strings.TrimSpace(strings.ToLower(string(r.Type))))
 	r.Identifier = strings.TrimSpace(r.Identifier)
 	r.Reason = strings.TrimSpace(r.Reason)
 }
@@ -29,7 +29,6 @@ func (r *AddAllowlistRequest) Validate() error {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
-	// Phase 1: Size checks
 	if len(r.Identifier) > 255 {
 		return dErrors.New(dErrors.CodeValidation, "identifier must be 255 characters or less")
 	}
@@ -37,7 +36,6 @@ func (r *AddAllowlistRequest) Validate() error {
 		return dErrors.New(dErrors.CodeValidation, "reason must be 500 characters or less")
 	}
 
-	// Phase 2: Required fields
 	if r.Type == "" {
 		return dErrors.New(dErrors.CodeValidation, "type is required")
 	}
@@ -48,13 +46,11 @@ func (r *AddAllowlistRequest) Validate() error {
 		return dErrors.New(dErrors.CodeValidation, "reason is required")
 	}
 
-	// Phase 3: Syntax validation
 	entryType := AllowlistEntryType(r.Type)
 	if !entryType.IsValid() {
 		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
 	}
 
-	// Phase 4: Semantic validation
 	if r.ExpiresAt != nil && r.ExpiresAt.Before(time.Now()) {
 		return dErrors.New(dErrors.CodeValidation, "expires_at must be in the future")
 	}
@@ -63,29 +59,28 @@ func (r *AddAllowlistRequest) Validate() error {
 }
 
 type RemoveAllowlistRequest struct {
-	Type       string `json:"type"` // "ip" or "user_id"
-	Identifier string `json:"identifier"`
+	Type       AllowlistEntryType `json:"type"`
+	Identifier string             `json:"identifier"`
 }
 
 func (r *RemoveAllowlistRequest) Normalize() {
 	if r == nil {
 		return
 	}
-	r.Type = strings.TrimSpace(strings.ToLower(r.Type))
+	r.Type = AllowlistEntryType(strings.TrimSpace(strings.ToLower(string(r.Type))))
 	r.Identifier = strings.TrimSpace(r.Identifier)
 }
 
+// Follows validation order: Size -> Required -> Syntax -> Semantic.
 func (r *RemoveAllowlistRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
-	// Phase 1: Size checks
 	if len(r.Identifier) > 255 {
 		return dErrors.New(dErrors.CodeValidation, "identifier must be 255 characters or less")
 	}
 
-	// Phase 2: Required fields
 	if r.Type == "" {
 		return dErrors.New(dErrors.CodeValidation, "type is required")
 	}
@@ -93,7 +88,6 @@ func (r *RemoveAllowlistRequest) Validate() error {
 		return dErrors.New(dErrors.CodeValidation, "identifier is required")
 	}
 
-	// Phase 3: Syntax validation
 	entryType := AllowlistEntryType(r.Type)
 	if !entryType.IsValid() {
 		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
@@ -103,31 +97,30 @@ func (r *RemoveAllowlistRequest) Validate() error {
 }
 
 type ResetRateLimitRequest struct {
-	Type       string `json:"type"` // "ip" or "user_id"
-	Identifier string `json:"identifier"`
-	Class      string `json:"class,omitempty"` // optional: specific endpoint class to reset
+	Type       AllowlistEntryType `json:"type"`
+	Identifier string             `json:"identifier"`
+	Class      EndpointClass      `json:"class,omitempty"` // optional: specific endpoint class to reset
 }
 
 func (r *ResetRateLimitRequest) Normalize() {
 	if r == nil {
 		return
 	}
-	r.Type = strings.TrimSpace(strings.ToLower(r.Type))
+	r.Type = AllowlistEntryType(strings.TrimSpace(strings.ToLower(string(r.Type))))
 	r.Identifier = strings.TrimSpace(r.Identifier)
-	r.Class = strings.TrimSpace(strings.ToLower(r.Class))
+	r.Class = EndpointClass(strings.TrimSpace(strings.ToLower(string(r.Class))))
 }
 
+// Follows validation order: Size -> Required -> Syntax -> Semantic.
 func (r *ResetRateLimitRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
-	// Phase 1: Size checks
 	if len(r.Identifier) > 255 {
 		return dErrors.New(dErrors.CodeValidation, "identifier must be 255 characters or less")
 	}
 
-	// Phase 2: Required fields
 	if r.Type == "" {
 		return dErrors.New(dErrors.CodeValidation, "type is required")
 	}
@@ -135,16 +128,12 @@ func (r *ResetRateLimitRequest) Validate() error {
 		return dErrors.New(dErrors.CodeValidation, "identifier is required")
 	}
 
-	// Phase 3: Syntax validation
-	entryType := AllowlistEntryType(r.Type)
-	if !entryType.IsValid() {
+	if !r.Type.IsValid() {
 		return dErrors.New(dErrors.CodeValidation, "type must be 'ip' or 'user_id'")
 	}
 
-	// Validate class if provided
 	if r.Class != "" {
-		class := EndpointClass(r.Class)
-		if !class.IsValid() {
+		if !r.Class.IsValid() {
 			return dErrors.New(dErrors.CodeValidation, "class must be 'auth', 'sensitive', 'read', or 'write'")
 		}
 	}

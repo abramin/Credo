@@ -59,26 +59,33 @@ func (s *AdminServiceSuite) TearDownTest() {
 
 func (s *AdminServiceSuite) TestNew() {
 	s.Run("nil allowlist store returns error", func() {
-		// Test: New(nil, validBuckets) returns error
-		// Expected: error message "allowlist store is required"
-		s.T().Skip("TODO: Implement")
+		_, err := New(nil, s.mockBuckets)
+		s.Error(err)
+		s.Contains(err.Error(), "allowlist store is required")
 	})
 
 	s.Run("nil buckets store returns error", func() {
-		// Test: New(validAllowlist, nil) returns error
-		// Expected: error message "buckets store is required"
-		s.T().Skip("TODO: Implement")
+		_, err := New(s.mockAllowlist, nil)
+		s.Error(err)
+		s.Contains(err.Error(), "buckets store is required")
 	})
 
 	s.Run("valid stores returns configured service", func() {
-		// Test: New(validAllowlist, validBuckets) returns *Service
-		// Expected: non-nil service, nil error
-		s.T().Skip("TODO: Implement")
+		svc, err := New(s.mockAllowlist, s.mockBuckets)
+		s.NoError(err)
+		s.NotNil(svc)
 	})
 
 	s.Run("with options applies options", func() {
-		// Test: New(stores, WithLogger(logger), WithAuditPublisher(pub)) applies options
-		// Expected: service.logger and service.auditPublisher are set
-		s.T().Skip("TODO: Implement")
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		svc, err := New(
+			s.mockAllowlist,
+			s.mockBuckets,
+			WithLogger(logger),
+			WithAuditPublisher(s.mockAuditPublisher),
+		)
+		s.NoError(err)
+		s.Equal(logger, svc.logger)
+		s.Equal(s.mockAuditPublisher, svc.auditPublisher)
 	})
 }
