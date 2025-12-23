@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,8 +14,8 @@ import (
 	authAdapters "credo/internal/auth/adapters"
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
-	authPorts "credo/internal/auth/ports"
 	authmetrics "credo/internal/auth/metrics"
+	authPorts "credo/internal/auth/ports"
 	authService "credo/internal/auth/service"
 	authCodeStore "credo/internal/auth/store/authorization-code"
 	refreshTokenStore "credo/internal/auth/store/refresh-token"
@@ -35,6 +36,7 @@ import (
 	rateLimitModels "credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/service/authlockout"
 	rateLimitChecker "credo/internal/ratelimit/service/checker"
+	rateLimitClientLimit "credo/internal/ratelimit/service/clientlimit"
 	"credo/internal/ratelimit/service/globalthrottle"
 	"credo/internal/ratelimit/service/quota"
 	"credo/internal/ratelimit/service/requestlimit"
@@ -98,18 +100,36 @@ type tenantModule struct {
 	Clients *clientstore.InMemory
 }
 
+type tenantClientLookup struct {
+	tenantSvc *tenantService.Service
+}
+
+func (t *tenantClientLookup) IsConfidentialClient(ctx context.Context, clientID string) (bool, error) {
+	client, _, err := t.tenantSvc.ResolveClient(ctx, clientID)
+	if err != nil {
+		return false, err
+	}
+	return client.IsConfidential(), nil
+}
+
 func main() {
 	infra, err := buildInfra()
 	if err != nil {
 		panic(err)
 	}
 
-	checkerSvc, allowlistStore, err := buildRateLimitServices(infra.Log)
+	checkerSvc, allowlistStore, rateLimitCfg, err := buildRateLimitServices(infra.Log)
 	if err != nil {
 		infra.Log.Error("failed to initialize rate limit services", "error", err)
 		os.Exit(1)
 	}
-	rateLimitMiddleware := rateLimitMW.New(checkerSvc, infra.Log, rateLimitMW.WithDisabled(infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting))
+	fallbackLimiter := rateLimitMW.NewFallbackLimiter(rateLimitCfg, allowlistStore, infra.Log)
+	rateLimitMiddleware := rateLimitMW.New(
+		checkerSvc,
+		infra.Log,
+		rateLimitMW.WithDisabled(infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting),
+		rateLimitMW.WithFallbackLimiter(fallbackLimiter),
+	)
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
@@ -117,6 +137,11 @@ func main() {
 	authMod, err := buildAuthModule(appCtx, infra, tenantMod.Service, checkerSvc)
 	if err != nil {
 		infra.Log.Error("failed to initialize auth module", "error", err)
+		os.Exit(1)
+	}
+	clientRateLimitMiddleware, err := buildClientRateLimitMiddleware(infra.Log, tenantMod.Service, rateLimitCfg, infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting)
+	if err != nil {
+		infra.Log.Error("failed to initialize client rate limit middleware", "error", err)
 		os.Exit(1)
 	}
 	consentMod := buildConsentModule(infra)
@@ -129,7 +154,7 @@ func main() {
 	}()
 
 	r := setupRouter(infra)
-	registerRoutes(r, infra, authMod, consentMod, tenantMod, rateLimitMiddleware)
+	registerRoutes(r, infra, authMod, consentMod, tenantMod, rateLimitMiddleware, clientRateLimitMiddleware)
 
 	mainSrv := httpserver.New(infra.Cfg.Addr, r)
 	startServer(mainSrv, infra.Log, "main API")
@@ -144,7 +169,7 @@ func main() {
 	waitForShutdown([]*http.Server{mainSrv, adminSrv}, infra.Log, cancelApp)
 }
 
-func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rwallowlistStore.InMemoryAllowlistStore, error) {
+func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rwallowlistStore.InMemoryAllowlistStore, *rateLimitConfig.Config, error) {
 	cfg := rateLimitConfig.DefaultConfig()
 
 	// Create stores
@@ -157,10 +182,11 @@ func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rw
 	// Create focused services
 	requestSvc, err := requestlimit.New(bucketStore, allowlistStore,
 		requestlimit.WithLogger(logger),
+		requestlimit.WithConfig(cfg),
 	)
 	if err != nil {
 		logger.Error("failed to create request limit service", "error", err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	authLockoutSvc, err := authlockout.New(authLockoutSt,
@@ -168,7 +194,7 @@ func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rw
 	)
 	if err != nil {
 		logger.Error("failed to create auth lockout service", "error", err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	quotaSvc, err := quota.New(quotaSt,
@@ -176,7 +202,7 @@ func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rw
 	)
 	if err != nil {
 		logger.Error("failed to create quota service", "error", err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	globalThrottleSvc, err := globalthrottle.New(globalThrottleSt,
@@ -184,7 +210,7 @@ func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rw
 	)
 	if err != nil {
 		logger.Error("failed to create global throttle service", "error", err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Create facade
@@ -197,13 +223,37 @@ func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rw
 	)
 	if err != nil {
 		logger.Error("failed to create rate limit checker service", "error", err)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Note: Admin service would be created here if needed for rate limit admin handlers
 	// adminSvc, err := rateLimitAdmin.New(allowlistStore, bucketStore, rateLimitAdmin.WithLogger(logger))
 
-	return checkerSvc, allowlistStore, nil
+	return checkerSvc, allowlistStore, cfg, nil
+}
+
+func buildClientRateLimitMiddleware(logger *slog.Logger, tenantSvc *tenantService.Service, cfg *rateLimitConfig.Config, disabled bool) (*rateLimitMW.ClientMiddleware, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("rate limit config is required")
+	}
+	clientLookup := &tenantClientLookup{tenantSvc: tenantSvc}
+	clientBucketStore := rwbucketStore.New()
+	clientLimiter, err := rateLimitClientLimit.New(
+		clientBucketStore,
+		clientLookup,
+		rateLimitClientLimit.WithLogger(logger),
+		rateLimitClientLimit.WithConfig(&cfg.ClientLimits),
+	)
+	if err != nil {
+		return nil, err
+	}
+	fallback := rateLimitMW.NewFallbackClientLimiter(&cfg.ClientLimits)
+	return rateLimitMW.NewClientMiddleware(
+		clientLimiter,
+		logger,
+		disabled,
+		rateLimitMW.WithClientFallbackLimiter(fallback),
+	), nil
 }
 
 func buildInfra() (*infraBundle, error) {
@@ -404,7 +454,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 }
 
 // registerRoutes wires HTTP handlers to the shared router
-func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, rateLimitMiddleware *rateLimitMW.Middleware) {
+func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, rateLimitMiddleware *rateLimitMW.Middleware, clientRateLimitMiddleware *rateLimitMW.ClientMiddleware) {
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
@@ -421,6 +471,9 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 	// Auth public endpoints - ClassAuth (10 req/min)
 	r.Group(func(r chi.Router) {
 		r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassAuth))
+		if clientRateLimitMiddleware != nil {
+			r.Use(clientRateLimitMiddleware.RateLimitClient())
+		}
 		r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
 		r.Post("/auth/token", authMod.Handler.HandleToken)
 		r.Post("/auth/revoke", authMod.Handler.HandleRevoke)

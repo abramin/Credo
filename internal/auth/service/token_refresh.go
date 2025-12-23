@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"credo/pkg/platform/audit"
 	"credo/internal/auth/models"
-	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit"
 )
 
 func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error) {
@@ -30,24 +29,14 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 	}
 
 	// Validate client and user status before issuing new tokens (PRD-026A FR-4.5.4)
-	tc, err := s.resolveTokenContext(ctx, session, req.ClientID)
+	tc, artifacts, err := s.prepareTokenFlow(ctx, session, req.ClientID, &sessionID, TokenFlowRefresh)
 	if err != nil {
-		return nil, s.handleTokenError(ctx, err, req.ClientID, &sessionID, TokenFlowRefresh)
-	}
-
-	if !tc.Client.IsActive() {
-		return nil, dErrors.New(dErrors.CodeForbidden, "client is not active")
-	}
-
-	// Generate tokens BEFORE entering transaction to avoid holding mutex during JWT generation
-	artifacts, err := s.generateTokenArtifacts(ctx, session)
-	if err != nil {
-		return nil, s.handleTokenError(ctx, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate tokens"), req.ClientID, &sessionID, TokenFlowRefresh)
+		return nil, err
 	}
 
 	// Perform transactional updates with session-based sharding
 	txCtx := context.WithValue(ctx, txSessionKeyCtx, sessionID)
-	txErr := s.tx.RunInTx(txCtx, func(stores TxAuthStores) error {
+	txErr := s.tx.RunInTx(txCtx, func(stores txAuthStores) error {
 		// Step 1: Consume refresh token (prevents replay attacks)
 		var err error
 		refreshRecord, err = stores.RefreshTokens.ConsumeRefreshToken(ctx, req.RefreshToken, now)

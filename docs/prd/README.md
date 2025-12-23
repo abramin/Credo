@@ -1,8 +1,8 @@
 # Product Requirements Documents (PRDs)
 
 **Credo Implementation Specifications**
-**Version:** 2.3
-**Last Updated:** 2025-12-18
+**Version:** 2.5
+**Last Updated:** 2025-12-23
 
 This directory contains technical product requirements for implementing Credo system. Each PRD is written for developers and provides detailed specifications, API contracts, data models, and acceptance criteria.
 
@@ -36,10 +36,11 @@ Credo is a **regulated identity and authorization system** that:
 | [PRD-001B](./PRD-001B-Admin-User-Deletion.md)             | Admin - User Deletion               | 🟢 Done        | 1h        | PRD-001      |
 | [PRD-016](./PRD-016-Token-Lifecycle-Revocation.md) 🆕     | Token Lifecycle & Revocation        | ⚠️ Mostly Done | 6-8h      | PRD-001      |
 | [PRD-026A](./PRD-026A-Tenant-Client-Management.md) 🆕     | Tenant & Client Management (MVP)    | 🟢 Done        | 8-10h     | PRD-001, 016 |
+| [PRD-026B](./PRD-026B-Tenant-Client-Lifecycle.md) 🆕      | Tenant & Client Lifecycle           | 🔵 Not Started | 2-3h      | PRD-026A     |
 | [PRD-017](./PRD-017-Rate-Limiting-Abuse-Prevention.md) 🆕 | Rate Limiting & Abuse Prevention    | 🔵 Not Started | 8-10h     | PRD-001, 016 |
 | [PRD-002](./PRD-002-Consent-Management.md)                | Consent Management System           | 🟢 Done        | 5-7h      | PRD-001      |
 
-**Phase 0 Total:** ~32-39 hours (4-5 days)
+**Phase 0 Total:** ~34-42 hours (4-5 days)
 
 ---
 
@@ -519,6 +520,7 @@ Run with: `make test-e2e`
 
 | Version | Date       | Changes                                                                                   |
 | ------- | ---------- | ----------------------------------------------------------------------------------------- |
+| 2.5     | 2025-12-23 | Added PRD-026B (Tenant & Client Lifecycle) to Phase 0                                     |
 | 2.4     | 2025-12-21 | Added Storage Evolution Philosophy section (in-memory first, transition triggers)          |
 | 2.3     | 2025-12-17 | Added Phase 7: Differentiation Pack (PRD-029 through PRD-033)                             |
 | 2.2     | 2025-12-17 | Moved PRD-028 from Phase 0 to Phase 2 (performance after functionality)                   |

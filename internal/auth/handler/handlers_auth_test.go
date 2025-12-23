@@ -51,12 +51,14 @@ func (s *AuthHandlerSuite) TestHandler_Authorize() {
 		State:       "test-state",
 	}
 
-	s.T().Run("forwards authorize request to service when scopes omitted", func(t *testing.T) {
+	s.T().Run("forwards authorize request to service with default scope when scopes omitted", func(t *testing.T) {
 		mockService, router := s.newHandler(t, nil)
 		requestBody := `{"email":"user@example.com","client_id":"test-client-id","redirect_uri":"https://example.com/redirect"}`
+		// Handler normalizes the request, adding default "openid" scope when omitted
 		expectedReq := &models.AuthorizationRequest{
 			Email:       "user@example.com",
 			ClientID:    "test-client-id",
+			Scopes:      []string{"openid"},
 			RedirectURI: "https://example.com/redirect",
 			State:       "",
 		}

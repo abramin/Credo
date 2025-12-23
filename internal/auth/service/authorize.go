@@ -121,7 +121,7 @@ func (s *Service) resolveDeviceID(ctx context.Context) (string, string) {
 func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*authorizeResult, error) {
 	var result authorizeResult
 
-	txErr := s.tx.RunInTx(ctx, func(stores TxAuthStores) error {
+	txErr := s.tx.RunInTx(ctx, func(stores txAuthStores) error {
 		// Step 1: Find or create user
 		user, wasCreated, err := s.findOrCreateUser(ctx, stores.Users, params.Tenant.ID, params.Email)
 		if err != nil {
@@ -164,10 +164,12 @@ func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*a
 		}
 
 		// Step 4: Attach device binding signals
-		session.DeviceID = params.DeviceID
-		session.DeviceFingerprintHash = params.DeviceFingerprint
-		session.DeviceDisplayName = params.DeviceDisplayName
-		session.ApproximateLocation = ""
+		session.SetDeviceBinding(models.DeviceBinding{
+			DeviceID:            params.DeviceID,
+			FingerprintHash:     params.DeviceFingerprint,
+			DisplayName:         params.DeviceDisplayName,
+			ApproximateLocation: "",
+		})
 
 		if err := stores.Sessions.Create(ctx, session); err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to save session")

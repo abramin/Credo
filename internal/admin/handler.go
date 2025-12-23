@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -44,8 +43,7 @@ func (h *Handler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 			"error", err,
 			"request_id", requestID,
 		)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "failed to get stats"})
+		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get stats"})
 		return
 	}
 
@@ -67,8 +65,7 @@ func (h *Handler) HandleGetAllUsers(w http.ResponseWriter, r *http.Request) {
 			"error", err,
 			"request_id", requestID,
 		)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "failed to get users"})
+		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get users"})
 		return
 	}
 
@@ -99,8 +96,7 @@ func (h *Handler) HandleGetRecentAuditEvents(w http.ResponseWriter, r *http.Requ
 			"error", err,
 			"request_id", requestID,
 		)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "failed to get audit events"})
+		httputil.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get audit events"})
 		return
 	}
 

@@ -90,7 +90,6 @@ func (s *Service) Increment(ctx context.Context, apiKeyID id.APIKeyID, count int
 	return quota, nil
 }
 
-// Reset resets the quota usage for an API key (PRD-017 FR-5)
 func (s *Service) Reset(ctx context.Context, apiKeyID id.APIKeyID) error {
 	if apiKeyID.IsNil() {
 		return dErrors.New(dErrors.CodeBadRequest, "api_key_id is required")
@@ -107,7 +106,6 @@ func (s *Service) Reset(ctx context.Context, apiKeyID id.APIKeyID) error {
 	return nil
 }
 
-// List returns all quota records (PRD-017 FR-5)
 func (s *Service) List(ctx context.Context) ([]*models.APIKeyQuota, error) {
 	quotas, err := s.store.ListQuotas(ctx)
 	if err != nil {
@@ -116,7 +114,6 @@ func (s *Service) List(ctx context.Context) ([]*models.APIKeyQuota, error) {
 	return quotas, nil
 }
 
-// UpdateTier changes the tier for an API key (PRD-017 FR-5)
 func (s *Service) UpdateTier(ctx context.Context, apiKeyID id.APIKeyID, tier models.QuotaTier) error {
 	if apiKeyID.IsNil() {
 		return dErrors.New(dErrors.CodeBadRequest, "api_key_id is required")

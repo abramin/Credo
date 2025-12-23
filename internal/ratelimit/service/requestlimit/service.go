@@ -16,7 +16,6 @@ import (
 	"credo/pkg/platform/privacy"
 )
 
-
 type BucketStore interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
 	AllowN(ctx context.Context, key string, cost, limit int, window time.Duration) (*models.RateLimitResult, error)

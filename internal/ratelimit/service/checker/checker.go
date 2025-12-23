@@ -66,22 +66,18 @@ func New(
 	return svc, nil
 }
 
-// CheckIPRateLimit delegates to requestlimit.Service.
 func (s *Service) CheckIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	return s.requests.CheckIP(ctx, ip, class)
 }
 
-// CheckUserRateLimit delegates to requestlimit.Service.
 func (s *Service) CheckUserRateLimit(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	return s.requests.CheckUser(ctx, userID, class)
 }
 
-// CheckBothLimits delegates to requestlimit.Service.
 func (s *Service) CheckBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	return s.requests.CheckBoth(ctx, ip, userID, class)
 }
 
-// CheckAuthRateLimit checks auth lockout first, then falls through to IP rate limiting as secondary defense.
 func (s *Service) CheckAuthRateLimit(ctx context.Context, identifier, ip string) (*models.AuthRateLimitResult, error) {
 	result, err := s.authLockout.Check(ctx, identifier, ip)
 	if err != nil {
@@ -111,27 +107,22 @@ func (s *Service) CheckAuthRateLimit(ctx context.Context, identifier, ip string)
 	return result, nil
 }
 
-// RecordAuthFailure delegates to authlockout.Service.
 func (s *Service) RecordAuthFailure(ctx context.Context, identifier, ip string) (*models.AuthLockout, error) {
 	return s.authLockout.RecordFailure(ctx, identifier, ip)
 }
 
-// ClearAuthFailures delegates to authlockout.Service.
 func (s *Service) ClearAuthFailures(ctx context.Context, identifier, ip string) error {
 	return s.authLockout.Clear(ctx, identifier, ip)
 }
 
-// GetProgressiveBackoff delegates to authlockout.Service.
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
 	return s.authLockout.GetProgressiveBackoff(failureCount)
 }
 
-// CheckAPIKeyQuota delegates to quota.Service.
 func (s *Service) CheckAPIKeyQuota(ctx context.Context, apiKeyID id.APIKeyID) (*models.APIKeyQuota, error) {
 	return s.quotas.Check(ctx, apiKeyID)
 }
 
-// CheckGlobalThrottle delegates to globalthrottle.Service.
 func (s *Service) CheckGlobalThrottle(ctx context.Context) (bool, error) {
 	return s.globalThrottle.Check(ctx)
 }

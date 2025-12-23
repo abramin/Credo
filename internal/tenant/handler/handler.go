@@ -2,17 +2,16 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
-	request "credo/pkg/platform/middleware/request"
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
+	request "credo/pkg/platform/middleware/request"
 )
 
 // Service defines the interface for tenant operations.
@@ -55,21 +54,11 @@ func (h *Handler) HandleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
 
-	var req *models.CreateTenantRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid json"))
+	req, ok := httputil.DecodeAndPrepare[models.CreateTenantRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
-	req.Normalize()
-	if err := req.Validate(); err != nil {
-		h.logger.WarnContext(ctx, "invalid authorize request",
-			"error", err,
-			"request_id", requestID,
-		)
-		httputil.WriteError(w, err)
-		return
-	}
 	tenant, err := h.service.CreateTenant(ctx, req.Name)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "create tenant failed", "error", err, "request_id", requestID)
@@ -111,13 +100,12 @@ func (h *Handler) HandleCreateClient(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
 
-	var req models.CreateClientRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid json"))
+	req, ok := httputil.DecodeAndPrepare[models.CreateClientRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
-	client, secret, err := h.service.CreateClient(ctx, &req)
+	client, secret, err := h.service.CreateClient(ctx, req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "create client failed", "error", err, "request_id", requestID)
 		httputil.WriteError(w, err)
@@ -173,15 +161,14 @@ func (h *Handler) HandleUpdateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req models.UpdateClientRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, dErrors.New(dErrors.CodeBadRequest, "invalid json"))
+	req, ok := httputil.DecodeAndPrepare[models.UpdateClientRequest](w, r, h.logger, ctx, requestID)
+	if !ok {
 		return
 	}
 
 	// Platform admin: can update any client
 	// When tenant admin auth is added, use UpdateClientForTenant instead
-	client, secret, err := h.service.UpdateClient(ctx, clientID, &req)
+	client, secret, err := h.service.UpdateClient(ctx, clientID, req)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "update client failed", "error", err, "request_id", requestID, "client_id", clientID)
 		httputil.WriteError(w, err)
