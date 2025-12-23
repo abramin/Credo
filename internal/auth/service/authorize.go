@@ -85,6 +85,15 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		Tenant:            tnt,
 	}
 
+	// validate scopes
+	if len(client.AllowedScopes) > 0 {
+		for _, scope := range params.Scopes {
+			if !slices.Contains(client.AllowedScopes, scope) {
+				return nil, dErrors.New(dErrors.CodeBadRequest, fmt.Sprintf("requested scope '%s' not allowed for client", scope))
+			}
+		}
+	}
+
 	// Execute transaction
 	result, err := s.authorizeInTx(ctx, params)
 	if err != nil {
