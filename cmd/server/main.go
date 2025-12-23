@@ -29,12 +29,19 @@ import (
 	"credo/internal/platform/config"
 	"credo/internal/platform/httpserver"
 	"credo/internal/platform/logger"
-	rateLimitChecker "credo/internal/ratelimit/checker"
+	rateLimitConfig "credo/internal/ratelimit/config"
 	rateLimitMW "credo/internal/ratelimit/middleware"
 	rateLimitModels "credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/service/authlockout"
+	rateLimitChecker "credo/internal/ratelimit/service/checker"
+	"credo/internal/ratelimit/service/globalthrottle"
+	"credo/internal/ratelimit/service/quota"
+	"credo/internal/ratelimit/service/requestlimit"
 	rwallowlistStore "credo/internal/ratelimit/store/allowlist"
 	authlockoutStore "credo/internal/ratelimit/store/authlockout"
 	rwbucketStore "credo/internal/ratelimit/store/bucket"
+	globalthrottleStore "credo/internal/ratelimit/store/globalthrottle"
+	quotaStore "credo/internal/ratelimit/store/quota"
 	"credo/internal/seeder"
 	tenantHandler "credo/internal/tenant/handler"
 	tenantmetrics "credo/internal/tenant/metrics"
@@ -137,15 +144,54 @@ func main() {
 }
 
 func buildRateLimitServices(logger *slog.Logger) (*rateLimitChecker.Service, *rwallowlistStore.InMemoryAllowlistStore, error) {
+	cfg := rateLimitConfig.DefaultConfig()
+
+	// Create stores
 	bucketStore := rwbucketStore.New()
 	allowlistStore := rwallowlistStore.New()
-	authLockout := authlockoutStore.New()
+	authLockoutSt := authlockoutStore.New()
+	quotaSt := quotaStore.New(cfg)
+	globalThrottleSt := globalthrottleStore.New()
 
-	// Checker service (hot path - rate limit checks)
+	// Create focused services
+	requestSvc, err := requestlimit.New(bucketStore, allowlistStore,
+		requestlimit.WithLogger(logger),
+	)
+	if err != nil {
+		logger.Error("failed to create request limit service", "error", err)
+		return nil, nil, err
+	}
+
+	authLockoutSvc, err := authlockout.New(authLockoutSt,
+		authlockout.WithLogger(logger),
+	)
+	if err != nil {
+		logger.Error("failed to create auth lockout service", "error", err)
+		return nil, nil, err
+	}
+
+	quotaSvc, err := quota.New(quotaSt,
+		quota.WithLogger(logger),
+	)
+	if err != nil {
+		logger.Error("failed to create quota service", "error", err)
+		return nil, nil, err
+	}
+
+	globalThrottleSvc, err := globalthrottle.New(globalThrottleSt,
+		globalthrottle.WithLogger(logger),
+	)
+	if err != nil {
+		logger.Error("failed to create global throttle service", "error", err)
+		return nil, nil, err
+	}
+
+	// Create facade
 	checkerSvc, err := rateLimitChecker.New(
-		bucketStore,
-		allowlistStore,
-		authLockout,
+		requestSvc,
+		authLockoutSvc,
+		quotaSvc,
+		globalThrottleSvc,
 		rateLimitChecker.WithLogger(logger),
 	)
 	if err != nil {

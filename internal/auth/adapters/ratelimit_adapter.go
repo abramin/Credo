@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"credo/internal/auth/ports"
-	"credo/internal/ratelimit/checker"
+	"credo/internal/ratelimit/service/checker"
 )
 
 // RateLimitAdapter is an in-process adapter that implements ports.RateLimitPort

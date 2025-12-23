@@ -1,9 +1,16 @@
 package admin
 
+//go:generate mockgen -source=admin.go -destination=mocks/mocks.go -package=mocks AllowlistStore,BucketStore,AuditPublisher
+
 import (
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
+	"credo/internal/ratelimit/admin/mocks"
 )
 
 // =============================================================================
@@ -15,10 +22,11 @@ import (
 
 type AdminServiceSuite struct {
 	suite.Suite
-	// service *Service - will hold the service under test
-	// mockAllowlist *MockAllowlistStore
-	// mockBuckets *MockBucketStore
-	// mockAuditPublisher *MockAuditPublisher
+	ctrl               *gomock.Controller
+	mockAllowlist      *mocks.MockAllowlistStore
+	mockBuckets        *mocks.MockBucketStore
+	mockAuditPublisher *mocks.MockAuditPublisher
+	service            *Service
 }
 
 func TestAdminServiceSuite(t *testing.T) {
@@ -26,15 +34,21 @@ func TestAdminServiceSuite(t *testing.T) {
 }
 
 func (s *AdminServiceSuite) SetupTest() {
-	// TODO: Initialize mocks and create service instance
-	// s.mockAllowlist = NewMockAllowlistStore()
-	// s.mockBuckets = NewMockBucketStore()
-	// s.mockAuditPublisher = NewMockAuditPublisher()
-	// s.service, _ = New(s.mockAllowlist, s.mockBuckets)
+	s.ctrl = gomock.NewController(s.T())
+	s.mockAllowlist = mocks.NewMockAllowlistStore(s.ctrl)
+	s.mockBuckets = mocks.NewMockBucketStore(s.ctrl)
+	s.mockAuditPublisher = mocks.NewMockAuditPublisher(s.ctrl)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s.service, _ = New(
+		s.mockAllowlist,
+		s.mockBuckets,
+		WithLogger(logger),
+		WithAuditPublisher(s.mockAuditPublisher),
+	)
 }
 
 func (s *AdminServiceSuite) TearDownTest() {
-	// TODO: Clean up if needed
+	s.ctrl.Finish()
 }
 
 // =============================================================================
