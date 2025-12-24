@@ -41,6 +41,22 @@ type AuditPublisher interface {
 	Emit(ctx context.Context, base audit.Event) error
 }
 
+// ID validation helpers reduce repetition in service methods.
+
+func requireClientID(clientID id.ClientID) error {
+	if clientID.IsNil() {
+		return dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	}
+	return nil
+}
+
+func requireTenantID(tenantID id.TenantID) error {
+	if tenantID.IsNil() {
+		return dErrors.New(dErrors.CodeBadRequest, "tenant ID required")
+	}
+	return nil
+}
+
 // Error wrapping helpers translate sentinel errors to domain errors.
 
 func wrapClientErr(err error, action string) error {

@@ -4,13 +4,10 @@ import (
 	"context"
 	"sync"
 
-	id "credo/pkg/domain"
-
 	"credo/internal/tenant/models"
+	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
 )
-
-var ErrNotFound = sentinel.ErrNotFound
 
 type InMemory struct {
 	mu          sync.RWMutex
@@ -50,7 +47,7 @@ func (s *InMemory) FindByID(_ context.Context, clientID id.ClientID) (*models.Cl
 	if c, ok := s.clients[clientID]; ok {
 		return c, nil
 	}
-	return nil, ErrNotFound
+	return nil, sentinel.ErrNotFound
 }
 
 func (s *InMemory) FindByTenantAndID(_ context.Context, tenantID id.TenantID, clientID id.ClientID) (*models.Client, error) {
@@ -61,7 +58,7 @@ func (s *InMemory) FindByTenantAndID(_ context.Context, tenantID id.TenantID, cl
 			return c, nil
 		}
 	}
-	return nil, ErrNotFound
+	return nil, sentinel.ErrNotFound
 }
 
 func (s *InMemory) FindByOAuthClientID(_ context.Context, oauthClientID string) (*models.Client, error) {
@@ -70,7 +67,7 @@ func (s *InMemory) FindByOAuthClientID(_ context.Context, oauthClientID string) 
 	if c, ok := s.byCode[oauthClientID]; ok {
 		return c, nil
 	}
-	return nil, ErrNotFound
+	return nil, sentinel.ErrNotFound
 }
 
 func (s *InMemory) CountByTenant(_ context.Context, tenantID id.TenantID) (int, error) {

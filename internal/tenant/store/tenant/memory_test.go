@@ -86,7 +86,7 @@ func TestFindByID_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := store.FindByID(ctx, id.TenantID(uuid.New()))
-	require.ErrorIs(t, err, ErrNotFound)
+	require.ErrorIs(t, err, sentinel.ErrNotFound)
 }
 
 func TestFindByName_CaseInsensitive(t *testing.T) {

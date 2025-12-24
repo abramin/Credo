@@ -55,8 +55,8 @@ func (s *TenantService) CreateTenant(ctx context.Context, name string) (*models.
 }
 
 func (s *TenantService) GetTenant(ctx context.Context, tenantID id.TenantID) (*models.Tenant, error) {
-	if tenantID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "tenant ID required")
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
 	}
 	tenant, err := s.tenants.FindByID(ctx, tenantID)
 	if err != nil {
@@ -68,8 +68,8 @@ func (s *TenantService) GetTenant(ctx context.Context, tenantID id.TenantID) (*m
 // DeactivateTenant transitions a tenant to inactive status.
 // Returns the updated tenant or an error if tenant is not found or already inactive.
 func (s *TenantService) DeactivateTenant(ctx context.Context, tenantID id.TenantID) (*models.Tenant, error) {
-	if tenantID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "tenant ID required")
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
 	}
 	tenant, err := s.tenants.FindByID(ctx, tenantID)
 	if err != nil {
@@ -95,8 +95,8 @@ func (s *TenantService) DeactivateTenant(ctx context.Context, tenantID id.Tenant
 // ReactivateTenant transitions a tenant to active status.
 // Returns the updated tenant or an error if tenant is not found or already active.
 func (s *TenantService) ReactivateTenant(ctx context.Context, tenantID id.TenantID) (*models.Tenant, error) {
-	if tenantID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "tenant ID required")
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
 	}
 	tenant, err := s.tenants.FindByID(ctx, tenantID)
 	if err != nil {

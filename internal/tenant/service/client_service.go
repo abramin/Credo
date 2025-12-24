@@ -85,8 +85,8 @@ func (s *ClientService) CreateClient(ctx context.Context, cmd *CreateClientComma
 
 // GetClient returns a registered client by id.
 func (s *ClientService) GetClient(ctx context.Context, clientID id.ClientID) (*models.Client, error) {
-	if clientID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, err
 	}
 	client, err := s.clients.FindByID(ctx, clientID)
 	if err != nil {
@@ -97,11 +97,11 @@ func (s *ClientService) GetClient(ctx context.Context, clientID id.ClientID) (*m
 
 // GetClientForTenant enforces tenant scoping when retrieving a client.
 func (s *ClientService) GetClientForTenant(ctx context.Context, tenantID id.TenantID, clientID id.ClientID) (*models.Client, error) {
-	if tenantID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "tenant ID required")
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, err
 	}
-	if clientID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, err
 	}
 	client, err := s.clients.FindByTenantAndID(ctx, tenantID, clientID)
 	if err != nil {
@@ -113,8 +113,8 @@ func (s *ClientService) GetClientForTenant(ctx context.Context, tenantID id.Tena
 // UpdateClient updates mutable fields and optionally rotates the secret.
 // Returns the updated client and the rotated secret (empty if not rotated).
 func (s *ClientService) UpdateClient(ctx context.Context, clientID id.ClientID, cmd *UpdateClientCommand) (*models.Client, string, error) {
-	if clientID.IsNil() {
-		return nil, "", dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, "", err
 	}
 	client, err := s.clients.FindByID(ctx, clientID)
 	if err != nil {
@@ -126,11 +126,11 @@ func (s *ClientService) UpdateClient(ctx context.Context, clientID id.ClientID, 
 // UpdateClientForTenant enforces tenant scoping when updating a client.
 // Returns the updated client and the rotated secret (empty if not rotated).
 func (s *ClientService) UpdateClientForTenant(ctx context.Context, tenantID id.TenantID, clientID id.ClientID, cmd *UpdateClientCommand) (*models.Client, string, error) {
-	if tenantID.IsNil() {
-		return nil, "", dErrors.New(dErrors.CodeBadRequest, "tenant ID required")
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, "", err
 	}
-	if clientID.IsNil() {
-		return nil, "", dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, "", err
 	}
 	client, err := s.clients.FindByTenantAndID(ctx, tenantID, clientID)
 	if err != nil {
@@ -142,8 +142,8 @@ func (s *ClientService) UpdateClientForTenant(ctx context.Context, tenantID id.T
 // DeactivateClient transitions a client to inactive status.
 // Returns the updated client or an error if client is not found or already inactive.
 func (s *ClientService) DeactivateClient(ctx context.Context, clientID id.ClientID) (*models.Client, error) {
-	if clientID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, err
 	}
 	client, err := s.clients.FindByID(ctx, clientID)
 	if err != nil {
@@ -171,8 +171,8 @@ func (s *ClientService) DeactivateClient(ctx context.Context, clientID id.Client
 // ReactivateClient transitions a client to active status.
 // Returns the updated client or an error if client is not found or already active.
 func (s *ClientService) ReactivateClient(ctx context.Context, clientID id.ClientID) (*models.Client, error) {
-	if clientID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, err
 	}
 	client, err := s.clients.FindByID(ctx, clientID)
 	if err != nil {
@@ -201,8 +201,8 @@ func (s *ClientService) ReactivateClient(ctx context.Context, clientID id.Client
 // Returns the updated client and the new cleartext secret.
 // Returns an error if the client is public (has no secret to rotate).
 func (s *ClientService) RotateClientSecret(ctx context.Context, clientID id.ClientID) (*models.Client, string, error) {
-	if clientID.IsNil() {
-		return nil, "", dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, "", err
 	}
 	client, err := s.clients.FindByID(ctx, clientID)
 	if err != nil {
@@ -213,11 +213,11 @@ func (s *ClientService) RotateClientSecret(ctx context.Context, clientID id.Clie
 
 // RotateClientSecretForTenant enforces tenant scoping when rotating a client secret.
 func (s *ClientService) RotateClientSecretForTenant(ctx context.Context, tenantID id.TenantID, clientID id.ClientID) (*models.Client, string, error) {
-	if tenantID.IsNil() {
-		return nil, "", dErrors.New(dErrors.CodeBadRequest, "tenant ID required")
+	if err := requireTenantID(tenantID); err != nil {
+		return nil, "", err
 	}
-	if clientID.IsNil() {
-		return nil, "", dErrors.New(dErrors.CodeBadRequest, "client ID required")
+	if err := requireClientID(clientID); err != nil {
+		return nil, "", err
 	}
 	client, err := s.clients.FindByTenantAndID(ctx, tenantID, clientID)
 	if err != nil {
