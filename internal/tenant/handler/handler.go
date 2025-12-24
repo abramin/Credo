@@ -77,7 +77,7 @@ func (h *Handler) HandleCreateTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusCreated, &models.TenantCreateResponse{
+	httputil.WriteJSON(w, http.StatusCreated, &TenantCreateResponse{
 		TenantID: tenant.ID.String(),
 		Tenant:   toTenantResponse(tenant),
 	})
@@ -305,8 +305,8 @@ func (h *Handler) HandleRotateClientSecret(w http.ResponseWriter, r *http.Reques
 
 // Response mapping functions - convert domain objects to HTTP DTOs
 
-func toTenantResponse(t *models.Tenant) *models.TenantResponse {
-	return &models.TenantResponse{
+func toTenantResponse(t *models.Tenant) *TenantResponse {
+	return &TenantResponse{
 		ID:        t.ID.String(),
 		Name:      t.Name,
 		Status:    t.Status,
@@ -315,8 +315,8 @@ func toTenantResponse(t *models.Tenant) *models.TenantResponse {
 	}
 }
 
-func toTenantDetailsResponse(td *models.TenantDetails) *models.TenantDetailsResponse {
-	return &models.TenantDetailsResponse{
+func toTenantDetailsResponse(td *models.TenantDetails) *TenantDetailsResponse {
+	return &TenantDetailsResponse{
 		ID:          td.ID.String(),
 		Name:        td.Name,
 		Status:      td.Status,
@@ -327,8 +327,8 @@ func toTenantDetailsResponse(td *models.TenantDetails) *models.TenantDetailsResp
 	}
 }
 
-func toClientResponse(client *models.Client, secret string) *models.ClientResponse {
-	return &models.ClientResponse{
+func toClientResponse(client *models.Client, secret string) *ClientResponse {
+	return &ClientResponse{
 		ID:            client.ID.String(),
 		TenantID:      client.TenantID.String(),
 		Name:          client.Name,
