@@ -83,6 +83,8 @@ Artifacts - Follow-ups and next phase:
 
 Stakeholder narrative:
 
+- [Credo - Building the Identity Fortress](./assets/docs/Credo_Building_the_Identity_Fortress.pdf)
+
 - Problem: MVP needed secure auth, consent, and tenant foundations with admin controls and abuse prevention.
 - Approach: Implemented OIDC-lite auth + sessions, token lifecycle with rotation and logout-all, consent CQRS, tenant/client admin APIs with lifecycle management, and rate limiting middleware.
 - Result: Core identity flows operational with audit coverage. 6 of 7 PRDs complete (PRD-001, PRD-001B, PRD-016, PRD-026A, PRD-026B complete; PRD-017 in-memory MVP done, PRD-002 implementation required with TR-6 deferred). Infrastructure ready for Phase 1.

@@ -1,14 +1,17 @@
-# Credo 
+# Credo
+
 <img width="160" height="160" alt="credo" src="https://github.com/user-attachments/assets/cc9f2d5a-6b70-4f92-a9e7-8f3ab1315181" />
 
 _Modular identity and evidence platform covering auth, consent, registry evidence, VCs, policy, and audit._
 
 ## Attack Lab (OAuth Security)
+
 - Live: https://abramin.github.io/Credo/lab/
 - Repo: [lab/](lab/) (Alpine.js static modules: Control Panel, Dual Perspective, Request Forge)
 - Auto-deployed on pushes to `main` via GitHub Pages.
 
 ## What is it?
+
 - OIDC-lite auth: users, sessions, token issuance/refresh/revocation, device binding, admin deletion.
 - Consent: purpose-based grant/revoke/list with enforcement hooks.
 - Evidence: registry lookups (citizen, sanctions) and verifiable credential issuance/verification.
@@ -17,13 +20,16 @@ _Modular identity and evidence platform covering auth, consent, registry evidenc
 - Ops: metrics, logging, HTTP server/middleware, demo wiring.
 
 ## Docs
+
 - [Product requirements](docs/prd/README.md)
 - [Architecture](docs/architecture.md)
 - [OpenAPI](https://abramin.github.io/Credo/openapi)
 - [Frontend demos](frontend/README.md)
 
 ## Status (PRDs)
+
 Progress: `5/33` complete.
+
 - ✅ PRD-001 Auth & Session Management
 - ✅ PRD-001B Admin User Deletion
 - ✅ PRD-002 Consent Management (TR-6 projections deferred post-Postgres)
@@ -31,15 +37,27 @@ Progress: `5/33` complete.
 - ✅ PRD-026A Tenant & Client Management
 - ➡️ Full index: see [PRD index](docs/prd/README.md)
 
+## Project plan
+
+![Credo project implementation Gantt chart](assets/images/credo-gantt.png)
+
+- Phase 0 (Foundation) is done after a 4–7 week ramp, establishing the base platform pieces.
+- Phases 1–3 (Core Identity, Operational Baseline, Production Hardening) extend the critical path for roughly 8–17 weeks, culminating in the MVP milestone (~week 15) and a production baseline (~week 20).
+- Phases 4–7 layer optional product packs over weeks 20–35: base pack, decentralized identity features, integrations pack, and a differentiation layer, each with their own estimation ranges for sizing uncertainty.
+
 ## Quick start
+
 ### Docker (backend + demos)
+
 ```bash
 docker compose up --build
 # Demo UI:     http://localhost:3000
 # API:         http://localhost:8080
 # Swagger UI:  http://localhost:8081
 ```
+
 Demo mode (all in-memory):
+
 ```bash
 docker compose --env-file .env.demo \
   -f docker-compose.yml -f docker-compose.demo.yml up --build
@@ -47,6 +65,7 @@ docker compose --env-file .env.demo \
 ```
 
 ### Local dev
+
 ```bash
 # Backend
 go run ./cmd/server
@@ -57,6 +76,7 @@ python3 -m http.server 8000  # http://localhost:8000
 ```
 
 ## Demos
+
 - Hosted: https://abramin.github.io/Credo/
 - Local OAuth2 suite:
   - Home: http://localhost:3000/demo/index.html
@@ -66,11 +86,13 @@ python3 -m http.server 8000  # http://localhost:8000
   - Admin: /demo/admin.html
 
 ## Testing
+
 - Unit/integration: `go test ./...`
 - E2E (godog): `go test -v ./e2e -- -godog.tags=@normal`
 - Latest E2E results: https://abramin.github.io/Credo/e2e/
 
 ## API quick reference
+
 - `POST /auth/authorize` – issue authorization code
 - `POST /auth/token` – exchange code/refresh token
 - `GET /auth/userinfo` – current user profile
