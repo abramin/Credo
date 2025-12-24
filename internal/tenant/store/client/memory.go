@@ -13,15 +13,17 @@ import (
 var ErrNotFound = sentinel.ErrNotFound
 
 type InMemory struct {
-	mu      sync.RWMutex
-	clients map[id.ClientID]*models.Client
-	byCode  map[string]*models.Client
+	mu          sync.RWMutex
+	clients     map[id.ClientID]*models.Client
+	byCode      map[string]*models.Client
+	tenantCount map[id.TenantID]int // secondary index for O(1) CountByTenant
 }
 
 func NewInMemory() *InMemory {
 	return &InMemory{
-		clients: make(map[id.ClientID]*models.Client),
-		byCode:  make(map[string]*models.Client),
+		clients:     make(map[id.ClientID]*models.Client),
+		byCode:      make(map[string]*models.Client),
+		tenantCount: make(map[id.TenantID]int),
 	}
 }
 
@@ -30,6 +32,7 @@ func (s *InMemory) Create(_ context.Context, c *models.Client) error {
 	defer s.mu.Unlock()
 	s.clients[c.ID] = c
 	s.byCode[c.OAuthClientID] = c
+	s.tenantCount[c.TenantID]++
 	return nil
 }
 
@@ -73,11 +76,5 @@ func (s *InMemory) FindByOAuthClientID(_ context.Context, oauthClientID string) 
 func (s *InMemory) CountByTenant(_ context.Context, tenantID id.TenantID) (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	count := 0
-	for _, c := range s.clients {
-		if c.TenantID == tenantID {
-			count++
-		}
-	}
-	return count, nil
+	return s.tenantCount[tenantID], nil
 }

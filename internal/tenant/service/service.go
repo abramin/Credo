@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 
 	tenantmetrics "credo/internal/tenant/metrics"
 	"credo/internal/tenant/models"
@@ -113,17 +114,31 @@ func (s *Service) GetTenant(ctx context.Context, tenantID id.TenantID) (*models.
 		return nil, wrapTenantErr(err, "failed to load tenant")
 	}
 
-	clientCount, err := s.clients.CountByTenant(ctx, tenantID)
-	if err != nil {
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to count clients")
+	var clientCount, userCount int
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		var err error
+		clientCount, err = s.clients.CountByTenant(ctx, tenantID)
+		if err != nil {
+			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to count clients")
+		}
+		return nil
+	})
+
+	if s.userCounter != nil {
+		g.Go(func() error {
+			var err error
+			userCount, err = s.userCounter.CountByTenant(ctx, tenantID)
+			if err != nil {
+				return dErrors.Wrap(err, dErrors.CodeInternal, "failed to count users")
+			}
+			return nil
+		})
 	}
 
-	userCount := 0
-	if s.userCounter != nil {
-		userCount, err = s.userCounter.CountByTenant(ctx, tenantID)
-		if err != nil {
-			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to count users")
-		}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
 	return &models.TenantDetails{
@@ -473,6 +488,9 @@ func (s *Service) applyClientUpdate(ctx context.Context, client *models.Client, 
 
 // ResolveClient maps client_id -> client and tenant as a single choke point.
 func (s *Service) ResolveClient(ctx context.Context, clientID string) (*models.Client, *models.Tenant, error) {
+	start := time.Now()
+	defer s.observeResolveClient(start)
+
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		return nil, nil, dErrors.New(dErrors.CodeValidation, "client_id is required")
@@ -494,6 +512,12 @@ func (s *Service) ResolveClient(ctx context.Context, clientID string) (*models.C
 		return nil, nil, dErrors.New(dErrors.CodeInvalidClient, "tenant is inactive")
 	}
 	return client, tenant, nil
+}
+
+func (s *Service) observeResolveClient(start time.Time) {
+	if s.metrics != nil {
+		s.metrics.ObserveResolveClient(start)
+	}
 }
 
 func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
