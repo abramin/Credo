@@ -466,6 +466,67 @@ paths:
                     error_description: client is already active
         "500":
           $ref: "#/components/responses/InternalError"
+  /admin/clients/{id}/rotate-secret:
+    post:
+      summary: Rotate client secret
+      description: |
+        Generates a new client secret for a confidential client. The previous
+        secret is immediately invalidated. The new secret is returned only in
+        this response - store it securely as it cannot be retrieved again.
+
+        This operation is not available for public clients.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Client identifier (internal UUID, not the client_id)
+      responses:
+        "200":
+          description: Client secret rotated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientResponse"
+              examples:
+                default:
+                  value:
+                    id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                    tenant_id: 550e8400-e29b-41d4-a716-446655440000
+                    name: Backend Service
+                    client_id: clt_abc123xyz
+                    client_secret: sec_new-rotated-secret-value
+                    redirect_uris:
+                      - https://api.example.com/callback
+                    allowed_grants:
+                      - authorization_code
+                      - refresh_token
+                    allowed_scopes:
+                      - openid
+                      - profile
+                    status: active
+                    public_client: false
+        "400":
+          description: Cannot rotate secret for public client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                public_client:
+                  value:
+                    error: bad_request
+                    error_description: cannot rotate secret for public client
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -652,6 +713,11 @@ components:
           type: string
           enum: [active, inactive]
           description: Client status
+        public_client:
+          type: boolean
+          description: |
+            True if this is a public client (no secret, cannot use client_credentials).
+            False for confidential clients.
     ErrorResponse:
       type: object
       required: [error]

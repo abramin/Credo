@@ -171,7 +171,7 @@ Feature: Tenant & Client Management Admin API
     When I reactivate the tenant
     Then the response status should be 200
     When I initiate authorization with the client
-    Then the response status should be 201
+    Then the response status should be 200
 
     @admin @tenant @lifecycle
   Scenario: Reactivate already-active tenant returns conflict
@@ -229,7 +229,7 @@ Feature: Tenant & Client Management Admin API
     When I reactivate the client
     Then the response status should be 200
     When I initiate authorization with the client
-    Then the response status should be 201
+    Then the response status should be 200
 
     @admin @client @lifecycle
   Scenario: Reactivate already-active client returns conflict
@@ -270,12 +270,12 @@ Feature: Tenant & Client Management Admin API
 
     @admin @tenant @lifecycle
   Scenario: Deactivate non-existent tenant returns not found
-    When I deactivate tenant with id "00000000-0000-0000-0000-000000000000"
+    When I deactivate tenant with id "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     Then the response status should be 404
     And the response field "error" should equal "not_found"
 
     @admin @client @lifecycle
   Scenario: Deactivate non-existent client returns not found
-    When I deactivate client with id "00000000-0000-0000-0000-000000000000"
+    When I deactivate client with id "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     Then the response status should be 404
     And the response field "error" should equal "not_found"

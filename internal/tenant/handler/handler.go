@@ -342,10 +342,11 @@ func toClientResponse(client *models.Client, secret string) *ClientResponse {
 		TenantID:      client.TenantID.String(),
 		Name:          client.Name,
 		OAuthClientID: client.OAuthClientID,
-		ClientSecret:  secret,
+		ClientSecret:  secret, // Empty string omitted due to omitempty tag
 		RedirectURIs:  client.RedirectURIs,
 		AllowedGrants: client.AllowedGrants,
 		AllowedScopes: client.AllowedScopes,
 		Status:        client.Status.String(),
+		PublicClient:  !client.IsConfidential(),
 	}
 }

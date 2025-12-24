@@ -34,9 +34,10 @@ type ClientResponse struct {
 	TenantID      string   `json:"tenant_id"`
 	Name          string   `json:"name"`
 	OAuthClientID string   `json:"client_id"`
-	ClientSecret  string   `json:"client_secret"`
+	ClientSecret  string   `json:"client_secret,omitempty"` // Only included on create/rotate
 	RedirectURIs  []string `json:"redirect_uris"`
 	AllowedGrants []string `json:"allowed_grants"`
 	AllowedScopes []string `json:"allowed_scopes"`
 	Status        string   `json:"status"`
+	PublicClient  bool     `json:"public_client"`
 }
