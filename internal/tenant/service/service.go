@@ -205,8 +205,12 @@ func (s *Service) CreateClient(ctx context.Context, req *models.CreateClientRequ
 		return nil, "", err
 	}
 
-	if _, err := s.tenants.FindByID(ctx, tenantID); err != nil {
+	tenant, err := s.tenants.FindByID(ctx, tenantID)
+	if err != nil {
 		return nil, "", wrapTenantErr(err, "failed to load tenant")
+	}
+	if !tenant.IsActive() {
+		return nil, "", dErrors.New(dErrors.CodeValidation, "cannot create client under inactive tenant")
 	}
 
 	secret, secretHash, err := generateSecret(req.Public)
@@ -363,6 +367,18 @@ func (s *Service) applyClientUpdate(ctx context.Context, client *models.Client, 
 		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid update request")
 	}
 
+	// Apply secret rotation BEFORE grant validation so that confidentiality
+	// checks reflect the post-rotation state. This prevents a public client
+	// from gaining client_credentials by combining RotateSecret with grant update.
+	rotatedSecret := ""
+	if req.RotateSecret {
+		var err error
+		rotatedSecret, client.ClientSecretHash, err = generateSecret(false)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
 	// Validate grant changes against client confidentiality.
 	// Public clients cannot use client_credentials grant.
 	if req.AllowedGrants != nil && !client.IsConfidential() {
@@ -384,15 +400,6 @@ func (s *Service) applyClientUpdate(ctx context.Context, client *models.Client, 
 	}
 	if req.AllowedScopes != nil {
 		client.AllowedScopes = *req.AllowedScopes
-	}
-
-	rotatedSecret := ""
-	if req.RotateSecret {
-		var err error
-		rotatedSecret, client.ClientSecretHash, err = generateSecret(false)
-		if err != nil {
-			return nil, "", err
-		}
 	}
 
 	client.UpdatedAt = time.Now()

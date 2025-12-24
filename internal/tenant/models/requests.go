@@ -1,7 +1,6 @@
 package models
 
 import (
-	"fmt"
 	"net/url"
 	"slices"
 	"strings"
@@ -117,7 +116,7 @@ var allowedGrants = map[string]struct{}{
 
 func validateGrant(grant string) error {
 	if _, ok := allowedGrants[grant]; !ok {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("unsupported grant: %s", grant))
+		return dErrors.New(dErrors.CodeValidation, "unsupported grant type")
 	}
 	return nil
 }
@@ -132,7 +131,7 @@ var allowedScopes = map[string]struct{}{
 
 func validateScope(scope string) error {
 	if _, ok := allowedScopes[scope]; !ok {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("unsupported scope: %s", scope))
+		return dErrors.New(dErrors.CodeValidation, "unsupported scope")
 	}
 	return nil
 }
