@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,8 @@ import (
 
 // This file contains pure domain models for authentication: entities
 // that should not depend on transport or HTTP-specific concerns.
+
+const authorizationCodePrefix = "authz_"
 
 type User struct {
 	ID        id.UserID   `json:"id"`
@@ -95,7 +98,7 @@ func (s *Session) SetDeviceBinding(binding DeviceBinding) {
 //   - Parent Session must exist and be in pending_consent state for exchange
 type AuthorizationCodeRecord struct {
 	ID          uuid.UUID    `json:"id"`           // Unique identifier
-	Code        string       `json:"code"`         // Format: "authz_<random>"
+	Code        string       `json:"code"`         // Format: "authz_<random>" (prefix added at creation)
 	SessionID   id.SessionID `json:"session_id"`   // Links to parent Session aggregate
 	RedirectURI string       `json:"redirect_uri"` // Stored for validation at token exchange
 	ExpiresAt   time.Time    `json:"expires_at"`   // 10 minutes from creation
@@ -188,6 +191,10 @@ func NewAuthorizationCode(code string, sessionID id.SessionID, redirectURI strin
 	if code == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "authorization code cannot be empty")
 	}
+	code = strings.TrimPrefix(code, authorizationCodePrefix)
+	if code == "" {
+		return nil, dErrors.New(dErrors.CodeInvariantViolation, "authorization code cannot be empty")
+	}
 	if redirectURI == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "redirect URI cannot be empty")
 	}
@@ -199,7 +206,7 @@ func NewAuthorizationCode(code string, sessionID id.SessionID, redirectURI strin
 	}
 	return &AuthorizationCodeRecord{
 		ID:          uuid.New(),
-		Code:        code,
+		Code:        authorizationCodePrefix + code,
 		SessionID:   sessionID,
 		RedirectURI: redirectURI,
 		ExpiresAt:   expiresAt,

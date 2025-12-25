@@ -70,7 +70,6 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		return nil, dErrors.New(dErrors.CodeBadRequest, "redirect_uri not allowed")
 	}
 
-	// Prepare device context
 	deviceID, deviceIDToSet := s.resolveDeviceID(ctx)
 
 	params := authorizeParams{
@@ -85,7 +84,6 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		Tenant:            tnt,
 	}
 
-	// validate scopes
 	if len(client.AllowedScopes) > 0 {
 		for _, scope := range params.Scopes {
 			if !slices.Contains(client.AllowedScopes, scope) {
@@ -94,16 +92,12 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		}
 	}
 
-	// Execute transaction
 	result, err := s.authorizeInTx(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Emit audit events after successful transaction
 	s.emitAuthorizeAuditEvents(ctx, result, req.ClientID)
-
-	// Build response
 	return s.buildAuthorizeResponse(parsedURI, result.AuthCode, req.State, deviceIDToSet), nil
 }
 
@@ -133,7 +127,7 @@ func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*a
 		// Step 2: Generate authorization code
 		sessionID := id.SessionID(uuid.New())
 		authCode, err := models.NewAuthorizationCode(
-			"authz_"+uuid.New().String(),
+			uuid.New().String(),
 			sessionID,
 			params.RedirectURI,
 			params.Now,
