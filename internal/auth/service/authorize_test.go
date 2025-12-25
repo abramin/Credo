@@ -142,6 +142,28 @@ func (s *ServiceSuite) TestAuthorize() {
 	})
 }
 
+func (s *ServiceSuite) expectAuthorizeSuccess(
+	req models.AuthorizationRequest,
+	client *tenant.Client,
+	tenant *tenant.Tenant,
+	user *models.User,
+) {
+	s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(client, tenant, nil)
+	s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenant.ID, req.Email, gomock.Any()).Return(user, nil)
+	s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+	s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+}
+
+func newActiveUser(tenantID id.TenantID, email string) *models.User {
+	return &models.User{
+		ID:       id.UserID(uuid.New()),
+		TenantID: tenantID,
+		Email:    email,
+		Status:   models.UserStatusActive,
+	}
+}
+
 // TestAuthorizeClientValidation tests that authorize rejects requests
 // when the client is inactive (PRD-026A FR-4.5.3).
 
@@ -219,18 +241,8 @@ func (s *ServiceSuite) TestAuthorizeRedirectURIValidation() {
 		}
 		ctx := context.Background()
 
-		existingUser := &models.User{
-			ID:       id.UserID(uuid.New()),
-			TenantID: tenantID,
-			Email:    req.Email,
-			Status:   models.UserStatusActive,
-		}
-
-		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
-		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
-		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+		existingUser := newActiveUser(tenantID, req.Email)
+		s.expectAuthorizeSuccess(req, mockClient, mockTenant, existingUser)
 
 		result, err := s.service.Authorize(ctx, &req)
 		s.NoError(err, "expected success when redirect_uri is in client.RedirectURIs")
@@ -290,18 +302,8 @@ func (s *ServiceSuite) TestAuthorizeScopeEnforcement() {
 		}
 		ctx := context.Background()
 
-		existingUser := &models.User{
-			ID:       id.UserID(uuid.New()),
-			TenantID: tenantID,
-			Email:    req.Email,
-			Status:   models.UserStatusActive,
-		}
-
-		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
-		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
-		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+		existingUser := newActiveUser(tenantID, req.Email)
+		s.expectAuthorizeSuccess(req, mockClient, mockTenant, existingUser)
 
 		result, err := s.service.Authorize(ctx, &req)
 		s.NoError(err, "expected success when scopes are within client.AllowedScopes")
@@ -328,18 +330,8 @@ func (s *ServiceSuite) TestAuthorizeScopeEnforcement() {
 		}
 		ctx := context.Background()
 
-		existingUser := &models.User{
-			ID:       id.UserID(uuid.New()),
-			TenantID: tenantID,
-			Email:    req.Email,
-			Status:   models.UserStatusActive,
-		}
-
-		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(clientNoRestrictions, mockTenant, nil)
-		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
-		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+		existingUser := newActiveUser(tenantID, req.Email)
+		s.expectAuthorizeSuccess(req, clientNoRestrictions, mockTenant, existingUser)
 
 		result, err := s.service.Authorize(ctx, &req)
 		s.NoError(err, "expected success when client has no scope restrictions")
