@@ -21,6 +21,8 @@ type AuthorizationRequest struct {
 	State       string   `json:"state"`
 }
 
+// Trims and deduplicates fields in the authorization request.
+// Sets default scope if none provided.
 func (r *AuthorizationRequest) Normalize() {
 	if r == nil {
 		return
@@ -38,6 +40,7 @@ func (r *AuthorizationRequest) Normalize() {
 }
 
 // Validate validates the authorization request following strict validation order:
+// size -> required fields -> syntax -> semantics
 func (r *AuthorizationRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")

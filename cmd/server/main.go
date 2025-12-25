@@ -161,7 +161,7 @@ func main() {
 
 	var adminSrv *http.Server
 	if infra.Cfg.Security.AdminAPIToken != "" {
-		adminRouter := setupAdminRouter(infra.Log, authMod.AdminSvc, tenantMod.Handler, infra.Cfg)
+		adminRouter := setupAdminRouter(infra.Log, authMod.AdminSvc, tenantMod.Handler, infra.Cfg, rateLimitMiddleware)
 		adminSrv = httpserver.New(":8081", adminRouter)
 		startServer(adminSrv, infra.Log, "admin")
 	}
@@ -512,7 +512,7 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 }
 
 // setupAdminRouter creates a router for the admin server
-func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *tenantHandler.Handler, cfg *config.Server) *chi.Mux {
+func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *tenantHandler.Handler, cfg *config.Server, rateLimitMw *rateLimitMW.Middleware) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Common middleware for all routes
@@ -540,9 +540,10 @@ func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *
 		_ = json.NewEncoder(w).Encode(resp)
 	})
 
-	// All admin routes require authentication
+	// All admin routes require authentication and rate limiting
 	adminHandler := admin.New(adminSvc, log)
 	r.Group(func(r chi.Router) {
+		r.Use(rateLimitMw.RateLimit(rateLimitModels.ClassAdmin)) // Rate limit before auth to prevent brute-force
 		r.Use(adminmw.RequireAdminToken(cfg.Security.AdminAPIToken, log))
 		adminHandler.Register(r)
 		tenantHandler.Register(r)
