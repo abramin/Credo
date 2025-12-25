@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -15,15 +14,11 @@ import (
 	"credo/internal/auth/metrics"
 	"credo/internal/auth/models"
 	"credo/internal/auth/store/revocation"
-	sessionStore "credo/internal/auth/store/session"
 	jwttoken "credo/internal/jwt_token"
 	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/platform/attrs"
 	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
-	"credo/pkg/platform/sentinel"
 	platformsync "credo/pkg/platform/sync"
 )
 
@@ -100,7 +95,7 @@ type Service struct {
 	sessions       SessionStore
 	codes          AuthCodeStore
 	refreshTokens  RefreshTokenStore
-	tx             AuthStoreTx
+	tx             *shardedAuthTx
 	deviceService  *device.Service
 	trl            TokenRevocationList
 	logger         *slog.Logger
@@ -143,14 +138,7 @@ type tokenArtifacts struct {
 
 type Option func(*Service)
 
-// AuthStoreTx provides a transactional boundary for auth-related store mutations.
-// Implementations may wrap a database transaction or, in-memory, a sharded lock.
-type AuthStoreTx interface {
-	RunInTx(ctx context.Context, fn func(stores txAuthStores) error) error
-}
-
 // txAuthStores groups the stores used inside a transaction.
-// This is an internal implementation detail of the auth service transaction handling.
 type txAuthStores struct {
 	Users         UserStore
 	Codes         AuthCodeStore
@@ -239,7 +227,7 @@ func WithJWTService(jwtService TokenGenerator) Option {
 	}
 }
 
-func WithAuthStoreTx(tx AuthStoreTx) Option {
+func WithAuthStoreTx(tx *shardedAuthTx) Option {
 	return func(s *Service) {
 		s.tx = tx
 	}
@@ -327,81 +315,6 @@ func New(
 	return svc, nil
 }
 
-func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
-	// Add request_id from context if available
-	requestID := request.GetRequestID(ctx)
-	if requestID != "" {
-		attributes = append(attributes, "request_id", requestID)
-	}
-	args := append(attributes, "event", event, "log_type", "audit")
-	if s.logger != nil {
-		s.logger.InfoContext(ctx, event, args...)
-	}
-	if s.auditPublisher == nil {
-		return
-	}
-	userIDStr := attrs.ExtractString(attributes, "user_id")
-	userID, _ := id.ParseUserID(userIDStr) // Best-effort for audit - ignore parse errors
-
-	// PRD-001B: Extract email for audit enrichment
-	email := attrs.ExtractString(attributes, "email")
-
-	err := s.auditPublisher.Emit(ctx, audit.Event{
-		UserID:    userID,
-		Subject:   userIDStr,
-		Action:    event,
-		Email:     email,
-		RequestID: requestID,
-	})
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to emit audit event", "error", err)
-	}
-}
-
-func (s *Service) authFailure(ctx context.Context, reason string, isError bool, attributes ...any) {
-	s.logAuthFailure(ctx, reason, isError, attributes...)
-	if s.metrics != nil {
-		s.metrics.IncrementAuthFailures()
-	}
-}
-
-func (s *Service) logAuthFailure(ctx context.Context, reason string, isError bool, attributes ...any) {
-	// Add request_id from context if available
-	if requestID := request.GetRequestID(ctx); requestID != "" {
-		attributes = append(attributes, "request_id", requestID)
-	}
-	args := append(attributes, "event", audit.EventAuthFailed, "reason", reason, "log_type", "standard")
-	if s.logger == nil {
-		return
-	}
-	if isError {
-		s.logger.ErrorContext(ctx, string(audit.EventAuthFailed), args...)
-		return
-	}
-	s.logger.WarnContext(ctx, string(audit.EventAuthFailed), args...)
-}
-
-// incrementUserCreated increments the users created metric if metrics are enabled
-func (s *Service) incrementUserCreated() {
-	if s.metrics != nil {
-		s.metrics.IncrementUsersCreated()
-	}
-}
-
-// incrementActiveSession increments the active sessions metric if metrics are enabled
-func (s *Service) incrementActiveSession() {
-	if s.metrics != nil {
-		s.metrics.IncrementActiveSessions(1)
-	}
-}
-
-// incrementTokenRequests increments the token requests metric if metrics are enabled
-func (s *Service) incrementTokenRequests() {
-	if s.metrics != nil {
-		s.metrics.IncrementTokenRequests()
-	}
-}
-
 func (s *Service) isRedirectSchemeAllowed(uri *url.URL) bool {
 	for _, scheme := range s.AllowedRedirectSchemes {
 		if strings.EqualFold(uri.Scheme, scheme) {
@@ -409,65 +322,6 @@ func (s *Service) isRedirectSchemeAllowed(uri *url.URL) bool {
 		}
 	}
 	return false
-}
-
-// tokenErrorMapping defines how a sentinel error maps to a domain error.
-type tokenErrorMapping struct {
-	sentinel   error
-	code       dErrors.Code
-	codeMsg    string // message for TokenFlowCode (empty = use err.Error())
-	refreshMsg string // message for TokenFlowRefresh (empty = use err.Error())
-	logReason  string
-}
-
-// tokenErrorMappings defines error translations in priority order.
-// First match wins; more specific errors should come first.
-// Note: Domain-errors from validation are passed through directly (see handleTokenError).
-var tokenErrorMappings = []tokenErrorMapping{
-	{sentinel.ErrNotFound, dErrors.CodeInvalidGrant, "invalid authorization code", "invalid refresh token", "not_found"},
-	{sentinel.ErrExpired, dErrors.CodeInvalidGrant, "authorization code expired", "refresh token expired", "expired"},
-	{sentinel.ErrAlreadyUsed, dErrors.CodeInvalidGrant, "authorization code already used", "invalid refresh token", "already_used"},
-	{sessionStore.ErrSessionRevoked, dErrors.CodeInvalidGrant, "session has been revoked", "session has been revoked", "session_revoked"},
-	{sentinel.ErrInvalidState, dErrors.CodeInvalidGrant, "session not active", "session not active", "invalid_state"},
-}
-
-// handleTokenError translates dependency errors into domain errors.
-// Uses tokenErrorMappings to determine error code and user-facing message based on flow type.
-func (s *Service) handleTokenError(ctx context.Context, err error, clientID string, recordID *string, flow TokenFlow) error {
-	if err == nil {
-		return nil
-	}
-
-	attrs := []any{"client_id", clientID}
-	if recordID != nil {
-		attrs = append(attrs, "record_id", *recordID)
-	}
-
-	// Pass through existing domain errors
-	var de *dErrors.Error
-	if errors.As(err, &de) {
-		s.authFailure(ctx, string(de.Code), false, attrs...)
-		return err
-	}
-
-	// Check mappings in order
-	for _, m := range tokenErrorMappings {
-		if errors.Is(err, m.sentinel) {
-			msg := m.codeMsg
-			if flow == TokenFlowRefresh {
-				msg = m.refreshMsg
-			}
-			if msg == "" {
-				msg = err.Error()
-			}
-			s.authFailure(ctx, m.logReason, false, attrs...)
-			return dErrors.Wrap(err, m.code, msg)
-		}
-	}
-
-	// Default: internal error
-	s.authFailure(ctx, "internal_error", true, attrs...)
-	return dErrors.Wrap(err, dErrors.CodeInternal, "token handling failed")
 }
 
 func (s *Service) generateTokenArtifacts(ctx context.Context, session *models.Session) (*tokenArtifacts, error) {
