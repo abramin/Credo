@@ -59,6 +59,7 @@ import (
 	metadata "credo/pkg/platform/middleware/metadata"
 	request "credo/pkg/platform/middleware/request"
 	requesttime "credo/pkg/platform/middleware/requesttime"
+	"credo/pkg/platform/validation"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -441,6 +442,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 	r.Use(request.Logger(infra.Log))
 	r.Use(request.Timeout(30 * time.Second)) // TODO: make configurable
 	r.Use(request.ContentTypeJSON)
+	r.Use(request.BodyLimit(validation.MaxBodySize))
 	r.Use(request.LatencyMiddleware(infra.RequestMetrics))
 
 	// Add Prometheus metrics endpoint (no auth required)
@@ -522,6 +524,7 @@ func setupAdminRouter(log *slog.Logger, adminSvc *admin.Service, tenantHandler *
 	r.Use(request.Logger(log))
 	r.Use(request.Timeout(30 * time.Second))
 	r.Use(request.ContentTypeJSON)
+	r.Use(request.BodyLimit(validation.MaxBodySize))
 
 	// Health check and metrics
 	r.Handle("/metrics", promhttp.Handler())
