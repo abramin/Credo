@@ -17,17 +17,12 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-// TestAuthorize tests the OAuth 2.0 authorization code flow (PRD-001 FR-1)
+// TestAuthorize tests the OAuth 2.0 authorization code flow
 //
-// AGENTS.MD JUSTIFICATION (per testing.md doctrine):
 // These unit tests verify behaviors NOT covered by Gherkin:
 // - Device binding with fingerprint hashing (needs device setup not available in e2e)
 // - Input validation error mapping (fast feedback)
 // - Store error propagation to domain errors
-//
-// REMOVED per testing.md (duplicate of e2e/features/auth_normal_flow.feature):
-// - "happy path - user not found, creates user" - covered by "Complete OAuth2 authorization code flow"
-// - "happy path - user exists" - covered by "Complete OAuth2 authorization code flow"
 func (s *ServiceSuite) TestAuthorize() {
 	tenantID := id.TenantID(uuid.New())
 	clientID := id.ClientID(uuid.New())
@@ -209,8 +204,6 @@ func (s *ServiceSuite) TestAuthorizeRedirectURIValidation() {
 		// Expect failure BEFORE user lookup - redirect_uri validation should happen early
 		result, err := s.service.Authorize(ctx, &req)
 
-		// This test documents the expected behavior per PRD-026A FR-8:
-		// "Redirect URI Matching: Exact match against registered URIs"
 		s.Error(err, "expected error when redirect_uri is not in client.RedirectURIs")
 		s.Nil(result)
 		s.True(dErrors.HasCode(err, dErrors.CodeBadRequest), "expected bad_request error code")

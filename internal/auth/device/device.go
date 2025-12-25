@@ -2,6 +2,7 @@ package device
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -63,7 +64,8 @@ func (s *Service) CompareFingerprints(stored, current string) (matched bool, dri
 	if !s.enabled {
 		return true, false
 	}
-	matched = stored == current
+	// Use constant-time comparison to prevent timing attacks that could reveal fingerprint structure
+	matched = subtle.ConstantTimeCompare([]byte(stored), []byte(current)) == 1
 	driftDetected = !matched
 	return matched, driftDetected
 }
