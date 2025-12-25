@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,7 +24,16 @@ import (
 	"credo/pkg/platform/audit"
 	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/sentinel"
+	platformsync "credo/pkg/platform/sync"
 )
+
+// TokenRevocationList manages revoked access tokens by JTI.
+// Production systems should use Redis for distributed revocation.
+type TokenRevocationList interface {
+	RevokeToken(ctx context.Context, jti string, ttl time.Duration) error
+	IsRevoked(ctx context.Context, jti string) (bool, error)
+	RevokeSessionTokens(ctx context.Context, sessionID string, jtis []string, ttl time.Duration) error
+}
 
 // UserStore defines the persistence interface for user data.
 // Error Contract: All Find methods return store.ErrNotFound when the entity doesn't exist.
@@ -82,6 +90,8 @@ type AuditPublisher interface {
 }
 
 type ClientResolver interface {
+	// ResolveClient maps client_id -> client and tenant as a single choke point.
+	// If the client or tenant is inactive, returns an invalid_client error.
 	ResolveClient(ctx context.Context, clientID string) (*tenant.Client, *tenant.Tenant, error)
 }
 
@@ -92,7 +102,7 @@ type Service struct {
 	refreshTokens  RefreshTokenStore
 	tx             AuthStoreTx
 	deviceService  *device.Service
-	trl            revocation.TokenRevocationList
+	trl            TokenRevocationList
 	logger         *slog.Logger
 	auditPublisher AuditPublisher
 	jwt            TokenGenerator
@@ -133,6 +143,12 @@ type tokenArtifacts struct {
 
 type Option func(*Service)
 
+// AuthStoreTx provides a transactional boundary for auth-related store mutations.
+// Implementations may wrap a database transaction or, in-memory, a sharded lock.
+type AuthStoreTx interface {
+	RunInTx(ctx context.Context, fn func(stores txAuthStores) error) error
+}
+
 // txAuthStores groups the stores used inside a transaction.
 // This is an internal implementation detail of the auth service transaction handling.
 type txAuthStores struct {
@@ -142,16 +158,13 @@ type txAuthStores struct {
 	RefreshTokens RefreshTokenStore
 }
 
-// shardedAuthTx provides fine-grained locking using sharded mutexes.
-// Instead of a single global lock, operations are distributed across N shards
-// based on a hash of the resource key, reducing contention under concurrent load.
-const numAuthShards = 32
-
 // defaultTxTimeout is the maximum duration for a transaction before it's aborted.
 const defaultTxTimeout = 5 * time.Second
 
+// shardedAuthTx provides fine-grained locking using sharded mutexes.
+// Uses platform ShardedMutex for lock distribution, with auth-specific timeout handling.
 type shardedAuthTx struct {
-	shards  [numAuthShards]sync.Mutex
+	mu      *platformsync.ShardedMutex
 	stores  txAuthStores
 	timeout time.Duration
 }
@@ -176,9 +189,10 @@ func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStores
 		defer cancel()
 	}
 
-	shard := t.selectShard(ctx)
-	t.shards[shard].Lock()
-	defer t.shards[shard].Unlock()
+	// Get session key for shard selection
+	key := t.shardKey(ctx)
+	t.mu.Lock(key)
+	defer t.mu.Unlock(key)
 
 	// Check again after acquiring lock
 	if err := ctx.Err(); err != nil {
@@ -188,22 +202,12 @@ func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStores
 	return fn(t.stores)
 }
 
-// selectShard picks a shard based on session ID from context, or defaults to shard 0.
-func (t *shardedAuthTx) selectShard(ctx context.Context) int {
-	// Try to get session ID from context for consistent sharding
-	if sessionID, ok := ctx.Value(txSessionKeyCtx).(string); ok && sessionID != "" {
-		return int(hashString(sessionID) % numAuthShards)
+// shardKey extracts the session ID from context for consistent sharding.
+func (t *shardedAuthTx) shardKey(ctx context.Context) string {
+	if sessionID, ok := ctx.Value(txSessionKeyCtx).(string); ok {
+		return sessionID
 	}
-	return 0
-}
-
-// hashString provides a simple hash for shard selection.
-func hashString(s string) uint32 {
-	var h uint32
-	for i := 0; i < len(s); i++ {
-		h = h*31 + uint32(s[i])
-	}
-	return h
+	return ""
 }
 
 // txSessionKey is the context key for session-based sharding.
@@ -247,7 +251,7 @@ func WithDeviceBindingEnabled(enabled bool) Option {
 	}
 }
 
-func WithTRL(trl revocation.TokenRevocationList) Option {
+func WithTRL(trl TokenRevocationList) Option {
 	return func(s *Service) {
 		s.trl = trl
 	}
@@ -293,6 +297,7 @@ func New(
 		codes:         codes,
 		refreshTokens: refreshTokens,
 		tx: &shardedAuthTx{
+			mu: platformsync.NewShardedMutex(),
 			stores: txAuthStores{
 				Users:         users,
 				Codes:         codes,
