@@ -350,58 +350,93 @@ func withCircuitBreaker[T any](
 ) (result T, degraded bool, err error) {
 	result, err = primary()
 	if err != nil {
-		useFallback, change := breaker.RecordFailure()
-		if change.Opened && logger != nil {
-			logger.Warn("circuit breaker opened",
-				"breaker", breaker.Name(),
-				"reason", "failure_threshold_reached",
-			)
-		}
-		if useFallback && fallback != nil {
-			if logger != nil {
-				logger.Info("using fallback rate limiter",
-					"breaker", breaker.Name(),
-					"reason", "circuit_open",
-				)
-			}
-			fallbackResult, fallbackErr := fallback()
-			if fallbackErr != nil {
-				if logger != nil {
-					logger.Error("fallback "+fallbackName+" failed", "error", fallbackErr)
-				}
-				return result, false, err
-			}
-			return fallbackResult, true, err
-		}
-		return result, false, err
+		return handlePrimaryFailure(breaker, logger, result, err, fallback, fallbackName)
+	}
+	return handlePrimarySuccess(breaker, logger, result, fallback, fallbackName)
+}
+
+// handlePrimaryFailure processes circuit breaker state after primary check fails.
+func handlePrimaryFailure[T any](
+	breaker *CircuitBreaker,
+	logger *slog.Logger,
+	result T,
+	primaryErr error,
+	fallback func() (T, error),
+	fallbackName string,
+) (T, bool, error) {
+	useFallback, change := breaker.RecordFailure()
+	logCircuitOpened(logger, breaker, change)
+
+	if !useFallback || fallback == nil {
+		return result, false, primaryErr
 	}
 
-	// Primary succeeded - check if circuit is still open (needs more successes to close)
+	logFallbackUsage(logger, breaker, "circuit_open")
+	return tryFallback(logger, result, primaryErr, fallback, fallbackName)
+}
+
+// handlePrimarySuccess processes circuit breaker state after primary check succeeds.
+func handlePrimarySuccess[T any](
+	breaker *CircuitBreaker,
+	logger *slog.Logger,
+	result T,
+	fallback func() (T, error),
+	fallbackName string,
+) (T, bool, error) {
 	usePrimary, change := breaker.RecordSuccess()
+	logCircuitClosed(logger, breaker, change)
+
+	if usePrimary || fallback == nil {
+		return result, false, nil
+	}
+
+	logFallbackUsage(logger, breaker, "circuit_half_open")
+	return tryFallback(logger, result, nil, fallback, fallbackName)
+}
+
+// tryFallback attempts the fallback function, returning primary result on fallback failure.
+func tryFallback[T any](
+	logger *slog.Logger,
+	primaryResult T,
+	primaryErr error,
+	fallback func() (T, error),
+	fallbackName string,
+) (T, bool, error) {
+	fallbackResult, fallbackErr := fallback()
+	if fallbackErr != nil {
+		if logger != nil {
+			logger.Error("fallback "+fallbackName+" failed", "error", fallbackErr)
+		}
+		return primaryResult, false, primaryErr
+	}
+	return fallbackResult, true, primaryErr
+}
+
+func logCircuitOpened(logger *slog.Logger, breaker *CircuitBreaker, change StateChange) {
+	if change.Opened && logger != nil {
+		logger.Warn("circuit breaker opened",
+			"breaker", breaker.Name(),
+			"reason", "failure_threshold_reached",
+		)
+	}
+}
+
+func logCircuitClosed(logger *slog.Logger, breaker *CircuitBreaker, change StateChange) {
 	if change.Closed && logger != nil {
 		logger.Info("circuit breaker closed",
 			"breaker", breaker.Name(),
 			"reason", "recovery_complete",
 		)
 	}
-	if !usePrimary && fallback != nil {
-		if logger != nil {
-			logger.Debug("using fallback during recovery",
-				"breaker", breaker.Name(),
-				"reason", "circuit_half_open",
-			)
-		}
-		fallbackResult, fallbackErr := fallback()
-		if fallbackErr != nil {
-			if logger != nil {
-				logger.Error("fallback "+fallbackName+" failed", "error", fallbackErr)
-			}
-			return result, false, nil
-		}
-		return fallbackResult, true, nil
-	}
+}
 
-	return result, false, nil
+func logFallbackUsage(logger *slog.Logger, breaker *CircuitBreaker, reason string) {
+	if logger != nil {
+		logger.Info("using fallback rate limiter",
+			"breaker", breaker.Name(),
+			"reason", reason,
+		)
+	}
 }
 
 func (m *Middleware) checkIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, bool, error) {

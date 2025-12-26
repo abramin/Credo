@@ -147,13 +147,14 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to record auth failure")
 	}
 
-	needsUpdate := false
 	now := requesttime.Now(ctx)
 
-	// Check if hard lock threshold reached
-	if current.ShouldHardLock(s.config.HardLockThreshold) {
+	// Compute state transitions upfront for clarity
+	shouldHardLock := current.ShouldHardLock(s.config.HardLockThreshold)
+	shouldRequireCaptcha := current.ShouldRequireCaptcha(s.config.CaptchaAfterLockouts) && !current.RequiresCaptcha
+
+	if shouldHardLock {
 		current.ApplyHardLock(s.config.HardLockDuration, now)
-		needsUpdate = true
 		ports.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_triggered",
 			"identifier", identifier,
 			"ip", privacy.AnonymizeIP(ip),
@@ -161,13 +162,11 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 		)
 	}
 
-	// Require CAPTCHA after consecutive lockouts within 24 hours
-	if current.ShouldRequireCaptcha(s.config.CaptchaAfterLockouts) && !current.RequiresCaptcha {
+	if shouldRequireCaptcha {
 		current.MarkRequiresCaptcha()
-		needsUpdate = true
 	}
 
-	if needsUpdate {
+	if shouldHardLock || shouldRequireCaptcha {
 		if err = s.store.Update(ctx, current); err != nil {
 			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update auth lockout record")
 		}
