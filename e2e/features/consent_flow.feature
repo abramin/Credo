@@ -63,13 +63,13 @@ Feature: Consent Management
   Scenario: Grant consent with empty purposes array
     When I POST to "/auth/consent" with empty purposes array
     Then the response status should be 400
-    And the response field "error" should equal "bad_request"
+    And the response field "error" should equal "validation_error"
 
       @consent @validation
   Scenario: Grant consent with invalid purpose
     When I grant consent for purposes "invalid_purpose"
     Then the response status should be 400
-    And the response field "error" should equal "bad_request"
+    And the response field "error" should equal "validation_error"
 
       @consent @validation
   Scenario: Revoke consent without authentication
@@ -81,7 +81,7 @@ Feature: Consent Management
   Scenario: Revoke consent with invalid purpose
     When I revoke consent for purposes "invalid_purpose"
     Then the response status should be 400
-    And the response field "error" should equal "bad_request"
+    And the response field "error" should equal "validation_error"
 
       @consent @validation
   Scenario: List consents without authentication
@@ -152,13 +152,13 @@ Feature: Consent Management
   Scenario: Filter with invalid status returns error
     When I list my consents filtered by status "invalid_status"
     Then the response status should be 400
-    And the response field "error" should equal "bad_request"
+    And the response field "error" should equal "validation_error"
 
       @consent @filter @validation
   Scenario: Filter with invalid purpose returns error
     When I list my consents filtered by purpose "invalid_purpose"
     Then the response status should be 400
-    And the response field "error" should equal "bad_request"
+    And the response field "error" should equal "validation_error"
 
   # ============================================================================
   # All Consent Purposes Coverage
