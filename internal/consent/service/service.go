@@ -429,14 +429,14 @@ func (s *Service) incrementConsentCheckFailed(purpose models.Purpose) {
 // incrementActiveConsents updates the active consents gauge when it increases.
 func (s *Service) incrementActiveConsents(count float64) {
 	if s.metrics != nil {
-		s.metrics.IncrementActiveConsentsPerUser(count)
+		s.metrics.IncrementActiveConsents(count)
 	}
 }
 
 // decrementActiveConsents updates the active consents gauge when it decreases.
 func (s *Service) decrementActiveConsents(count float64) {
 	if s.metrics != nil {
-		s.metrics.DecrementActiveConsentsPerUser(count)
+		s.metrics.DecrementActiveConsents(count)
 	}
 }
 
