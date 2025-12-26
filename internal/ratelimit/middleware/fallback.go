@@ -44,27 +44,12 @@ func (f *fallbackLimiter) CheckIPRateLimit(ctx context.Context, ip string, class
 	return f.requests.CheckIP(ctx, ip, class)
 }
 
-func (f *fallbackLimiter) CheckUserRateLimit(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	return f.requests.CheckUser(ctx, userID, class)
-}
-
 func (f *fallbackLimiter) CheckBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	return f.requests.CheckBoth(ctx, ip, userID, class)
 }
 
-func (f *fallbackLimiter) CheckAuthRateLimit(ctx context.Context, identifier, ip string) (*models.AuthRateLimitResult, error) {
-	result, err := f.requests.CheckIP(ctx, ip, models.ClassAuth)
-	if err != nil {
-		return nil, err
-	}
-	return &models.AuthRateLimitResult{
-		RateLimitResult: *result,
-		RequiresCaptcha: false,
-		FailureCount:    0,
-	}, nil
-}
-
 func (f *fallbackLimiter) CheckGlobalThrottle(ctx context.Context) (bool, error) {
+	// Fallback allows all traffic for global throttle during degraded mode
 	return true, nil
 }
 

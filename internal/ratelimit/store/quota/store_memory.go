@@ -3,11 +3,11 @@ package quota
 import (
 	"context"
 	"sync"
-	"time"
 
 	c "credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
 	id "credo/pkg/domain"
+	"credo/pkg/platform/middleware/requesttime"
 )
 
 type InMemoryQuotaStore struct {
@@ -33,12 +33,13 @@ func (s *InMemoryQuotaStore) GetQuota(_ context.Context, apiKeyID id.APIKeyID) (
 	return nil, nil
 }
 
-func (s *InMemoryQuotaStore) IncrementUsage(_ context.Context, apiKeyID id.APIKeyID, count int) (quota *models.APIKeyQuota, err error) {
+func (s *InMemoryQuotaStore) IncrementUsage(ctx context.Context, apiKeyID id.APIKeyID, count int) (quota *models.APIKeyQuota, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	quota, exists := s.quotas[apiKeyID]
 	if !exists {
+		now := requesttime.Now(ctx)
 		limits := s.config.QuotaTiers[models.QuotaTierFree]
 		quota = &models.APIKeyQuota{
 			APIKeyID:       apiKeyID,
@@ -46,8 +47,8 @@ func (s *InMemoryQuotaStore) IncrementUsage(_ context.Context, apiKeyID id.APIKe
 			MonthlyLimit:   limits.MonthlyRequests,
 			CurrentUsage:   0,
 			OverageAllowed: limits.OverageAllowed,
-			PeriodStart:    time.Now(),
-			PeriodEnd:      time.Now().AddDate(0, 1, 0),
+			PeriodStart:    now,
+			PeriodEnd:      now.AddDate(0, 1, 0),
 		}
 		s.quotas[apiKeyID] = quota
 	}
@@ -56,14 +57,15 @@ func (s *InMemoryQuotaStore) IncrementUsage(_ context.Context, apiKeyID id.APIKe
 }
 
 // ResetQuota resets the usage counter for an API key (PRD-017 FR-5)
-func (s *InMemoryQuotaStore) ResetQuota(_ context.Context, apiKeyID id.APIKeyID) error {
+func (s *InMemoryQuotaStore) ResetQuota(ctx context.Context, apiKeyID id.APIKeyID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if quota, exists := s.quotas[apiKeyID]; exists {
+		now := requesttime.Now(ctx)
 		quota.CurrentUsage = 0
-		quota.PeriodStart = time.Now()
-		quota.PeriodEnd = time.Now().AddDate(0, 1, 0)
+		quota.PeriodStart = now
+		quota.PeriodEnd = now.AddDate(0, 1, 0)
 	}
 	return nil
 }
@@ -81,13 +83,14 @@ func (s *InMemoryQuotaStore) ListQuotas(_ context.Context) ([]*models.APIKeyQuot
 }
 
 // UpdateTier changes the tier for an API key (PRD-017 FR-5)
-func (s *InMemoryQuotaStore) UpdateTier(_ context.Context, apiKeyID id.APIKeyID, tier models.QuotaTier) error {
+func (s *InMemoryQuotaStore) UpdateTier(ctx context.Context, apiKeyID id.APIKeyID, tier models.QuotaTier) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	quota, exists := s.quotas[apiKeyID]
 	if !exists {
 		// Create new quota with the specified tier
+		now := requesttime.Now(ctx)
 		limits := s.config.QuotaTiers[tier]
 		quota = &models.APIKeyQuota{
 			APIKeyID:       apiKeyID,
@@ -95,8 +98,8 @@ func (s *InMemoryQuotaStore) UpdateTier(_ context.Context, apiKeyID id.APIKeyID,
 			MonthlyLimit:   limits.MonthlyRequests,
 			CurrentUsage:   0,
 			OverageAllowed: limits.OverageAllowed,
-			PeriodStart:    time.Now(),
-			PeriodEnd:      time.Now().AddDate(0, 1, 0),
+			PeriodStart:    now,
+			PeriodEnd:      now.AddDate(0, 1, 0),
 		}
 		s.quotas[apiKeyID] = quota
 		return nil

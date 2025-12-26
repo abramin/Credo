@@ -6,26 +6,26 @@ import (
 	"log/slog"
 
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/ports"
 	id "credo/pkg/domain"
-	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/middleware/requesttime"
 )
 
+// AllowlistStore is the subset of ports.AllowlistStore needed by admin (excludes IsAllowlisted).
 type AllowlistStore interface {
 	Add(ctx context.Context, entry *models.AllowlistEntry) error
 	Remove(ctx context.Context, entryType models.AllowlistEntryType, identifier string) error
 	List(ctx context.Context) ([]*models.AllowlistEntry, error)
 }
 
+// BucketStore is a subset of ports.BucketStore (only Reset and GetCurrentCount needed).
 type BucketStore interface {
 	Reset(ctx context.Context, key string) error
 	GetCurrentCount(ctx context.Context, key string) (int, error)
 }
 
-type AuditPublisher interface {
-	Emit(ctx context.Context, event audit.Event) error
-}
+// AuditPublisher is an alias to the shared interface.
+type AuditPublisher = ports.AuditPublisher
 
 type Service struct {
 	allowlist      AllowlistStore
@@ -87,7 +87,7 @@ func (s *Service) AddToAllowlist(ctx context.Context, req *models.AddAllowlistRe
 		return nil, fmt.Errorf("failed to add to allowlist: %w", err)
 	}
 
-	s.logAudit(ctx, "rate_limit_allowlist_added",
+	ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_allowlist_added",
 		"identifier", entry.Identifier,
 		"type", entry.Type,
 		"expires_at", entry.ExpiresAt,
@@ -105,7 +105,7 @@ func (s *Service) RemoveFromAllowlist(ctx context.Context, req *models.RemoveAll
 		return fmt.Errorf("failed to remove from allowlist: %w", err)
 	}
 
-	s.logAudit(ctx, "rate_limit_allowlist_removed",
+	ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_allowlist_removed",
 		"identifier", req.Identifier,
 		"type", req.Type,
 	)
@@ -156,28 +156,10 @@ func (s *Service) ResetRateLimit(ctx context.Context, req *models.ResetRateLimit
 		}
 	}
 
-	s.logAudit(ctx, "rate_limit_reset",
+	ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_reset",
 		"identifier", req.Identifier,
 		"type", req.Type,
 		"class", req.Class,
 	)
 	return nil
-}
-
-func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
-	if requestID := request.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
-	}
-	args := append(attrs, "event", event, "log_type", "audit")
-	if s.logger != nil {
-		s.logger.InfoContext(ctx, event, args...)
-	}
-	if s.auditPublisher == nil {
-		return
-	}
-	if err := s.auditPublisher.Emit(ctx, audit.Event{
-		Action: event,
-	}); err != nil && s.logger != nil {
-		s.logger.WarnContext(ctx, "failed to emit audit event", "event", event, "error", err)
-	}
 }

@@ -13,11 +13,11 @@ import (
 	"credo/pkg/platform/privacy"
 )
 
+// RateLimiter defines the interface for the rate limiting middleware.
+// This is a minimal interface containing only the methods the middleware actually uses.
 type RateLimiter interface {
 	CheckIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error)
-	CheckUserRateLimit(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error)
 	CheckBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error)
-	CheckAuthRateLimit(ctx context.Context, identifier, ip string) (*models.AuthRateLimitResult, error)
 	CheckGlobalThrottle(ctx context.Context) (bool, error)
 }
 
@@ -71,8 +71,8 @@ func New(limiter RateLimiter, logger *slog.Logger, opts ...Option) *Middleware {
 	m := &Middleware{
 		limiter:         limiter,
 		logger:          logger,
-		ipBreaker:       newCircuitBreaker(),
-		combinedBreaker: newCircuitBreaker(),
+		ipBreaker:       newCircuitBreaker("ip"),
+		combinedBreaker: newCircuitBreaker("combined"),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -267,7 +267,7 @@ func NewClientMiddleware(limiter ClientRateLimiter, logger *slog.Logger, disable
 		limiter:        limiter,
 		logger:         logger,
 		disabled:       disabled,
-		circuitBreaker: newCircuitBreaker(),
+		circuitBreaker: newCircuitBreaker("client"),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -340,6 +340,7 @@ func writeFailClosedError(w http.ResponseWriter) {
 
 // withCircuitBreaker wraps a rate limit check with circuit breaker logic.
 // It handles primary check, fallback on failure, and circuit state transitions.
+// Logs state transitions and fallback usage for observability.
 func withCircuitBreaker[T any](
 	breaker *CircuitBreaker,
 	logger *slog.Logger,
@@ -349,7 +350,20 @@ func withCircuitBreaker[T any](
 ) (result T, degraded bool, err error) {
 	result, err = primary()
 	if err != nil {
-		if breaker.RecordFailure() && fallback != nil {
+		useFallback, change := breaker.RecordFailure()
+		if change.Opened && logger != nil {
+			logger.Warn("circuit breaker opened",
+				"breaker", breaker.Name(),
+				"reason", "failure_threshold_reached",
+			)
+		}
+		if useFallback && fallback != nil {
+			if logger != nil {
+				logger.Info("using fallback rate limiter",
+					"breaker", breaker.Name(),
+					"reason", "circuit_open",
+				)
+			}
 			fallbackResult, fallbackErr := fallback()
 			if fallbackErr != nil {
 				if logger != nil {
@@ -363,7 +377,20 @@ func withCircuitBreaker[T any](
 	}
 
 	// Primary succeeded - check if circuit is still open (needs more successes to close)
-	if !breaker.RecordSuccess() && fallback != nil {
+	usePrimary, change := breaker.RecordSuccess()
+	if change.Closed && logger != nil {
+		logger.Info("circuit breaker closed",
+			"breaker", breaker.Name(),
+			"reason", "recovery_complete",
+		)
+	}
+	if !usePrimary && fallback != nil {
+		if logger != nil {
+			logger.Debug("using fallback during recovery",
+				"breaker", breaker.Name(),
+				"reason", "circuit_half_open",
+			)
+		}
 		fallbackResult, fallbackErr := fallback()
 		if fallbackErr != nil {
 			if logger != nil {

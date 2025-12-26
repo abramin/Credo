@@ -8,13 +8,13 @@ import (
 
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
 	requesttime "credo/pkg/platform/middleware/requesttime"
 	"credo/pkg/platform/privacy"
 )
 
+// Store is a subset of ports.AuthLockoutStore (excludes cleanup methods).
 type Store interface {
 	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
 	Get(ctx context.Context, identifier string) (*models.AuthLockout, error)
@@ -23,9 +23,8 @@ type Store interface {
 	Update(ctx context.Context, record *models.AuthLockout) error
 }
 
-type AuditPublisher interface {
-	Emit(ctx context.Context, event audit.Event) error
-}
+// AuditPublisher is an alias to the shared interface.
+type AuditPublisher = ports.AuditPublisher
 
 type Service struct {
 	store          Store
@@ -91,7 +90,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	// Check if currently hard-locked (FR-2b: "hard lock for 15 minutes")
 	if record.IsLockedAt(now) {
 		retryAfter := max(int(record.LockedUntil.Sub(now).Seconds()), 0)
-		s.logAudit(ctx, "auth_lockout_triggered",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_triggered",
 			"identifier", identifier,
 			"ip", privacy.AnonymizeIP(ip),
 			"locked_until", record.LockedUntil,
@@ -155,7 +154,7 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 	if current.ShouldHardLock(s.config.HardLockThreshold) {
 		current.ApplyHardLock(s.config.HardLockDuration, now)
 		needsUpdate = true
-		s.logAudit(ctx, "auth_lockout_triggered",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_triggered",
 			"identifier", identifier,
 			"ip", privacy.AnonymizeIP(ip),
 			"locked_until", current.LockedUntil,
@@ -184,7 +183,7 @@ func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to clear auth failures")
 	}
 
-	s.logAudit(ctx, "auth_lockout_cleared",
+	ports.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_cleared",
 		"identifier", identifier,
 		"ip", privacy.AnonymizeIP(ip),
 	)
@@ -194,22 +193,4 @@ func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
 	return s.config.CalculateBackoff(failureCount)
-}
-
-func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
-	if requestID := request.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
-	}
-	args := append(attrs, "event", event, "log_type", "audit")
-	if s.logger != nil {
-		s.logger.InfoContext(ctx, event, args...)
-	}
-	if s.auditPublisher == nil {
-		return
-	}
-	if err := s.auditPublisher.Emit(ctx, audit.Event{
-		Action: event,
-	}); err != nil && s.logger != nil {
-		s.logger.WarnContext(ctx, "failed to emit audit event", "event", event, "error", err)
-	}
 }

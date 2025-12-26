@@ -15,6 +15,8 @@ type CleanupResult struct {
 	Duration           time.Duration // Time taken for cleanup run
 }
 
+// AuthLockoutStore defines the subset of store operations needed for cleanup.
+// This is kept local because it's a narrow interface specific to cleanup needs.
 type AuthLockoutStore interface {
 	ResetFailureCount(ctx context.Context) (failuresReset int, err error)
 	ResetDailyFailures(ctx context.Context) (failuresReset int, err error)

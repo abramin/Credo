@@ -9,23 +9,21 @@ import (
 
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/middleware/requesttime"
 )
 
+// BucketStore is a subset of ports.BucketStore (only Allow needed).
 type BucketStore interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
 }
 
-type ClientLookup interface {
-	IsConfidentialClient(ctx context.Context, clientID string) (bool, error)
-}
-
-type AuditPublisher interface {
-	Emit(ctx context.Context, event audit.Event) error
-}
+// Type aliases for shared interfaces.
+type (
+	ClientLookup   = ports.ClientLookup
+	AuditPublisher = ports.AuditPublisher
+)
 
 type Service struct {
 	buckets        BucketStore
@@ -117,7 +115,7 @@ func (s *Service) Check(ctx context.Context, clientID, endpoint string) (*models
 	}
 
 	if !result.Allowed {
-		s.logAudit(ctx, "client_rate_limit_exceeded",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "client_rate_limit_exceeded",
 			"client_id", anonymizeClientID(clientID),
 			"client_type", clientType,
 			"endpoint", endpoint,
@@ -127,22 +125,6 @@ func (s *Service) Check(ctx context.Context, clientID, endpoint string) (*models
 	}
 
 	return result, nil
-}
-
-func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
-	if requestID := request.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
-	}
-	args := append(attrs, "event", event, "log_type", "audit")
-	if s.logger != nil {
-		s.logger.InfoContext(ctx, event, args...)
-	}
-	if s.auditPublisher == nil {
-		return
-	}
-	_ = s.auditPublisher.Emit(ctx, audit.Event{
-		Action: event,
-	})
 }
 
 func anonymizeClientID(clientID string) string {
