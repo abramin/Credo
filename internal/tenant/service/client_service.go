@@ -39,6 +39,9 @@ func NewClientService(clients ClientStore, tenants TenantStore, opts ...Option) 
 // CreateClient registers a client under a tenant.
 // Returns the created client and the cleartext secret (only available at creation time).
 func (s *ClientService) CreateClient(ctx context.Context, cmd *CreateClientCommand) (*models.Client, string, error) {
+	start := time.Now()
+	defer s.observeCreateClient(start)
+
 	if err := cmd.Validate(); err != nil {
 		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid client request")
 	}
@@ -363,6 +366,12 @@ func applyFieldUpdates(client *models.Client, cmd *UpdateClientCommand) {
 func (s *ClientService) observeResolveClient(start time.Time) {
 	if s.metrics != nil {
 		s.metrics.ObserveResolveClient(start)
+	}
+}
+
+func (s *ClientService) observeCreateClient(start time.Time) {
+	if s.metrics != nil {
+		s.metrics.ObserveCreateClient(start)
 	}
 }
 

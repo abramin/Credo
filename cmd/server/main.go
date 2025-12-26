@@ -388,12 +388,15 @@ func buildConsentModule(infra *infraBundle) *consentModule {
 func buildTenantModule(infra *infraBundle) *tenantModule {
 	tenants := tenantstore.NewInMemory()
 	clients := clientstore.NewInMemory()
-	service := tenantService.New(
+	service, err := tenantService.New(
 		tenants,
 		clients,
 		nil,
 		tenantService.WithMetrics(infra.TenantMetrics),
 	)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create tenant service: %v", err))
+	}
 
 	return &tenantModule{
 		Service: service,

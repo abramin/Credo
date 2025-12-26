@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -20,18 +21,30 @@ type Service struct {
 	userCounter UserCounter
 }
 
-func New(tenants TenantStore, clients ClientStore, users UserCounter, opts ...Option) *Service {
+// New creates a new Service with the given stores and options.
+// Returns an error if required dependencies (tenants, clients) are nil.
+// The users counter is optional and may be nil.
+func New(tenants TenantStore, clients ClientStore, users UserCounter, opts ...Option) (*Service, error) {
+	if tenants == nil {
+		return nil, fmt.Errorf("tenant store is required")
+	}
+	if clients == nil {
+		return nil, fmt.Errorf("client store is required")
+	}
 	return &Service{
 		TenantService: NewTenantService(tenants, opts...),
 		ClientService: NewClientService(clients, tenants, opts...),
 		clients:       clients,
 		userCounter:   users,
-	}
+	}, nil
 }
 
 // GetTenant returns tenant details with user and client counts.
 // This method composes data from multiple stores.
 func (s *Service) GetTenant(ctx context.Context, tenantID id.TenantID) (*models.TenantDetails, error) {
+	start := time.Now()
+	defer s.observeGetTenant(start)
+
 	tenant, err := s.TenantService.GetTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
@@ -77,4 +90,10 @@ func (s *Service) GetTenant(ctx context.Context, tenantID id.TenantID) (*models.
 		UserCount:   userCount,
 		ClientCount: clientCount,
 	}, nil
+}
+
+func (s *Service) observeGetTenant(start time.Time) {
+	if s.TenantService.metrics != nil {
+		s.TenantService.metrics.ObserveGetTenant(start)
+	}
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/url"
 	"strings"
 
 	"credo/internal/tenant/models"
@@ -56,6 +57,7 @@ func (r *CreateClientRequest) Normalize() {
 }
 
 // Validate validates the create client request following strict validation order.
+// Follows 4-phase validation: size → required → syntax → semantic (semantic done in service).
 func (r *CreateClientRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
@@ -84,6 +86,13 @@ func (r *CreateClientRequest) Validate() error {
 	}
 	if len(r.RedirectURIs) == 0 {
 		return dErrors.New(dErrors.CodeValidation, "at least one redirect_uri is required")
+	}
+
+	// Phase 3: Syntax validation (format checks)
+	for _, uri := range r.RedirectURIs {
+		if _, err := url.Parse(uri); err != nil {
+			return dErrors.New(dErrors.CodeValidation, "invalid redirect_uri format")
+		}
 	}
 
 	return nil
@@ -131,6 +140,7 @@ func (r *UpdateClientRequest) Normalize() {
 }
 
 // Validate validates the update client request following strict validation order.
+// Follows 4-phase validation: size → required → syntax → semantic (semantic done in service).
 func (r *UpdateClientRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
@@ -156,6 +166,17 @@ func (r *UpdateClientRequest) Validate() error {
 		}
 		if err := validation.CheckEachStringLength("scope", *r.AllowedScopes, validation.MaxScopeLength); err != nil {
 			return err
+		}
+	}
+
+	// Phase 2: Required fields - none for update (all fields optional)
+
+	// Phase 3: Syntax validation (format checks)
+	if r.RedirectURIs != nil {
+		for _, uri := range *r.RedirectURIs {
+			if _, err := url.Parse(uri); err != nil {
+				return dErrors.New(dErrors.CodeValidation, "invalid redirect_uri format")
+			}
 		}
 	}
 

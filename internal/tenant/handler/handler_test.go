@@ -30,7 +30,8 @@ type HandlerSuite struct {
 func (s *HandlerSuite) SetupTest() {
 	tenants := tenantstore.NewInMemory()
 	clients := clientstore.NewInMemory()
-	svc := service.New(tenants, clients, nil)
+	svc, err := service.New(tenants, clients, nil)
+	s.Require().NoError(err)
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
 	h := New(svc, logger)

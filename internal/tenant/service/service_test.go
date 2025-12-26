@@ -28,7 +28,9 @@ type ServiceSuite struct {
 func (s *ServiceSuite) SetupTest() {
 	s.tenantStore = tenantstore.NewInMemory()
 	s.clientStore = clientstore.NewInMemory()
-	s.service = New(s.tenantStore, s.clientStore, nil)
+	svc, err := New(s.tenantStore, s.clientStore, nil)
+	s.Require().NoError(err)
+	s.service = svc
 }
 
 func TestServiceSuite(t *testing.T) {

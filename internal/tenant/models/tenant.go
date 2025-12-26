@@ -21,9 +21,9 @@ func (t *Tenant) IsActive() bool {
 
 // Deactivate transitions the tenant to inactive status.
 // Updates the timestamp to track when the transition occurred.
-// Returns an error if the tenant is already inactive.
+// Returns an error if the transition is not allowed.
 func (t *Tenant) Deactivate(now time.Time) error {
-	if !t.IsActive() {
+	if !t.Status.CanTransitionTo(TenantStatusInactive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "tenant is already inactive")
 	}
 	t.Status = TenantStatusInactive
@@ -33,9 +33,9 @@ func (t *Tenant) Deactivate(now time.Time) error {
 
 // Reactivate transitions the tenant to active status.
 // Updates the timestamp to track when the transition occurred.
-// Returns an error if the tenant is already active.
+// Returns an error if the transition is not allowed.
 func (t *Tenant) Reactivate(now time.Time) error {
-	if t.IsActive() {
+	if !t.Status.CanTransitionTo(TenantStatusActive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "tenant is already active")
 	}
 	t.Status = TenantStatusActive
