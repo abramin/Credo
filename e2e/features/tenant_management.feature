@@ -478,3 +478,51 @@ Feature: Tenant & Client Management Admin API
     When I initiate authorization with the client
     Then the response status should be 400
     And the response field "error" should equal "invalid_client"
+
+    # ============================================================
+    # INACTIVE TENANT CLIENT CREATION
+    # ============================================================
+
+    @admin @client @lifecycle
+  Scenario: Create client under inactive tenant fails
+    Given I create a tenant with name "Inactive Tenant Client Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I deactivate the tenant
+    And the response status should be 200
+    When I create a client "Orphan Client" under the tenant
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    # ============================================================
+    # NAME LENGTH BOUNDARY TESTS
+    # ============================================================
+
+    @admin @tenant @validation
+  Scenario: Tenant name at max length succeeds
+    When I create a tenant with name of exactly 128 characters
+    Then the response status should be 201
+    And I save the tenant ID from the response
+
+    @admin @tenant @validation
+  Scenario: Tenant name exceeds max length fails
+    When I create a tenant with name of exactly 129 characters
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    @admin @client @validation
+  Scenario: Client name at max length succeeds
+    Given I create a tenant with name "Client Name Length Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a client with name of exactly 128 characters under the tenant
+    Then the response status should be 201
+
+    @admin @client @validation
+  Scenario: Client name exceeds max length fails
+    Given I create a tenant with name "Client Name Overflow Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a client with name of exactly 129 characters under the tenant
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"

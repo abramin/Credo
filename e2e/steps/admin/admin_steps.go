@@ -99,6 +99,10 @@ func RegisterSteps(ctx *godog.ScenarioContext, tc TestContext) {
 	// Secret rotation validation
 	ctx.Step(`^I authenticate with the old client secret$`, steps.authenticateWithOldClientSecret)
 	ctx.Step(`^the authentication should fail$`, steps.authenticationShouldFail)
+
+	// Name length boundary tests
+	ctx.Step(`^I create a tenant with name of exactly (\d+) characters$`, steps.createTenantWithExactLength)
+	ctx.Step(`^I create a client with name of exactly (\d+) characters under the tenant$`, steps.createClientWithExactLength)
 }
 
 type adminSteps struct {
@@ -601,4 +605,55 @@ func (s *adminSteps) authenticationShouldFail(ctx context.Context) error {
 		return fmt.Errorf("expected authentication to fail, but got status %d", status)
 	}
 	return nil
+}
+
+// Name length boundary tests
+
+func (s *adminSteps) createTenantWithExactLength(ctx context.Context, length int) error {
+	// Generate a name of exactly the specified length
+	// Use a base prefix and pad with 'x' characters
+	name := generateStringOfLength("TenantLen", length)
+	body := map[string]interface{}{
+		"name": name,
+	}
+	return s.tc.POSTWithHeaders("/admin/tenants", body, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+func (s *adminSteps) createClientWithExactLength(ctx context.Context, length int) error {
+	tenantID := s.tc.GetTenantID()
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID not set")
+	}
+	// Generate a client name of exactly the specified length
+	name := generateStringOfLength("ClientLen", length)
+	body := map[string]interface{}{
+		"tenant_id":      tenantID,
+		"name":           name,
+		"redirect_uris":  []string{"http://localhost:3000/callback"},
+		"allowed_grants": []string{"authorization_code", "refresh_token"},
+		"allowed_scopes": []string{"openid", "profile", "email"},
+		"public_client":  false,
+	}
+	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+// generateStringOfLength creates a string of exactly the specified length
+func generateStringOfLength(prefix string, length int) string {
+	if length <= 0 {
+		return ""
+	}
+	if len(prefix) >= length {
+		return prefix[:length]
+	}
+	// Pad with 'x' characters to reach exact length
+	padding := length - len(prefix)
+	result := prefix
+	for i := 0; i < padding; i++ {
+		result += "x"
+	}
+	return result
 }
