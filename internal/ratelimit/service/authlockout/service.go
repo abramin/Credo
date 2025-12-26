@@ -1,3 +1,25 @@
+// Package authlockout prevents brute-force authentication attacks (PRD-017 FR-2b).
+//
+// This service tracks failed login attempts per username+IP combination and
+// enforces progressive penalties:
+//   - Sliding window: 5 attempts per 15 minutes
+//   - Hard lock: 15 minutes after 10 daily failures
+//   - CAPTCHA requirement: after 3 consecutive lockouts in 24 hours
+//
+// Usage:
+//
+//	svc, _ := authlockout.New(store)
+//	result, _ := svc.Check(ctx, username, clientIP)
+//	if !result.Allowed {
+//	    // Return 429 with Retry-After header
+//	}
+//	// After failed login:
+//	svc.RecordFailure(ctx, username, clientIP)
+//	// After successful login:
+//	svc.Clear(ctx, username, clientIP)
+//
+// The composite key (username:IP) prevents cross-IP attacks while allowing
+// legitimate multi-device access.
 package authlockout
 
 import (
@@ -14,7 +36,8 @@ import (
 	"credo/pkg/platform/privacy"
 )
 
-// Store is a subset of ports.AuthLockoutStore (excludes cleanup methods).
+// Store is the persistence interface for auth lockout records.
+// A subset of ports.AuthLockoutStore (excludes cleanup worker methods).
 type Store interface {
 	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
 	Get(ctx context.Context, identifier string) (*models.AuthLockout, error)
@@ -26,6 +49,8 @@ type Store interface {
 // AuditPublisher is an alias to the shared interface.
 type AuditPublisher = ports.AuditPublisher
 
+// Service tracks authentication failures and enforces lockout policies.
+// Thread-safe for concurrent use by auth handlers.
 type Service struct {
 	store          Store
 	auditPublisher AuditPublisher
@@ -33,26 +58,31 @@ type Service struct {
 	config         *config.AuthLockoutConfig
 }
 
+// Option configures a Service instance.
 type Option func(*Service)
 
+// WithLogger sets the structured logger for audit and debug logging.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {
 		s.logger = logger
 	}
 }
 
+// WithAuditPublisher sets the audit event publisher for security logging.
 func WithAuditPublisher(publisher AuditPublisher) Option {
 	return func(s *Service) {
 		s.auditPublisher = publisher
 	}
 }
 
+// WithConfig overrides the default lockout configuration.
 func WithConfig(cfg *config.AuthLockoutConfig) Option {
 	return func(s *Service) {
 		s.config = cfg
 	}
 }
 
+// New creates an auth lockout service with the given store and options.
 func New(store Store, opts ...Option) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("auth lockout store is required")
@@ -71,6 +101,15 @@ func New(store Store, opts ...Option) (*Service, error) {
 	return svc, nil
 }
 
+// Check determines if an authentication attempt should be allowed.
+// Call this BEFORE validating credentials to enforce rate limits.
+//
+// Returns:
+//   - Allowed=true with progressive backoff delay (RetryAfter in milliseconds)
+//   - Allowed=false if hard locked or sliding window exceeded
+//   - RequiresCaptcha=true after 3 consecutive lockouts in 24 hours
+//
+// Uses constant-time behavior to prevent timing-based user enumeration.
 func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.AuthRateLimitResult, error) {
 	key := models.NewAuthLockoutKey(identifier, ip).String()
 	failureRecord, err := s.store.Get(ctx, key)
@@ -140,6 +179,14 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	}, nil
 }
 
+// RecordFailure increments failure counters after a failed authentication attempt.
+// Call this AFTER credential validation fails.
+//
+// Side effects:
+//   - Increments window and daily failure counts
+//   - Applies hard lock if daily threshold (10 failures) is reached
+//   - Sets CAPTCHA requirement after 3 consecutive lockouts in 24 hours
+//   - Emits audit event when hard lock is triggered
 func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*models.AuthLockout, error) {
 	key := models.NewAuthLockoutKey(identifier, ip).String()
 	current, err := s.store.RecordFailure(ctx, key)
@@ -175,6 +222,9 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 	return current, nil
 }
 
+// Clear resets the lockout record after successful authentication.
+// Call this after the user successfully logs in to reset their failure window.
+// Does NOT reset daily failure counts or CAPTCHA requirements (those reset via cleanup worker).
 func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 	key := models.NewAuthLockoutKey(identifier, ip).String()
 	err := s.store.Clear(ctx, key)
@@ -190,6 +240,8 @@ func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 	return nil
 }
 
+// GetProgressiveBackoff calculates the delay before the next attempt.
+// Implements exponential backoff: 250ms → 500ms → 1s (PRD-017 FR-2b).
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
 	return s.config.CalculateBackoff(failureCount)
 }

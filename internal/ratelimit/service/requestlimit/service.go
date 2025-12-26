@@ -1,3 +1,19 @@
+// Package requestlimit provides per-IP and per-user rate limiting.
+//
+// This is the primary rate limiting service used by middleware to enforce
+// request quotas on API endpoints. It implements sliding window rate limiting
+// with configurable limits per endpoint class.
+//
+// Usage:
+//
+//	svc, _ := requestlimit.New(bucketStore, allowlistStore)
+//	result, _ := svc.CheckIP(ctx, clientIP, models.ClassAuth)
+//	if !result.Allowed {
+//	    // Return 429 Too Many Requests
+//	}
+//
+// The service checks allowlist entries before applying rate limits,
+// allowing admins to exempt specific IPs or users from limiting.
 package requestlimit
 
 import (
@@ -23,6 +39,8 @@ type (
 	AuditPublisher = ports.AuditPublisher
 )
 
+// Service enforces per-IP and per-user rate limits using sliding window counters.
+// Thread-safe for concurrent use by HTTP middleware.
 type Service struct {
 	buckets        BucketStore
 	allowlist      AllowlistStore
@@ -32,32 +50,39 @@ type Service struct {
 	metrics        *metrics.Metrics
 }
 
+// Option configures a Service instance.
 type Option func(*Service)
 
+// WithLogger sets the structured logger for audit and debug logging.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {
 		s.logger = logger
 	}
 }
 
+// WithAuditPublisher sets the audit event publisher for security logging.
 func WithAuditPublisher(publisher AuditPublisher) Option {
 	return func(s *Service) {
 		s.auditPublisher = publisher
 	}
 }
 
+// WithConfig overrides the default rate limit configuration.
 func WithConfig(cfg *config.Config) Option {
 	return func(s *Service) {
 		s.config = cfg
 	}
 }
 
+// WithMetrics sets the metrics recorder for observability.
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(s *Service) {
 		s.metrics = m
 	}
 }
 
+// New creates a rate limiting service with the given stores and options.
+// Returns an error if required stores are nil.
 func New(
 	buckets BucketStore,
 	allowlist AllowlistStore,
@@ -83,6 +108,9 @@ func New(
 	return svc, nil
 }
 
+// CheckIP enforces per-IP rate limits for unauthenticated requests.
+// Used by middleware.RateLimit for endpoints that don't require authentication.
+// Returns Allowed=false if the IP has exceeded its quota for the endpoint class.
 func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	requestsPerWindow, window, ok := s.config.GetIPLimit(class)
 	if !ok {
@@ -103,6 +131,9 @@ func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointC
 	return s.checkRateLimit(ctx, ip, class, models.KeyPrefixIP, requestsPerWindow, window, privacy.AnonymizeIP(ip))
 }
 
+// CheckUser enforces per-user rate limits.
+// Used when you want to limit by user identity only, ignoring IP.
+// Returns Allowed=false if the user has exceeded their quota for the endpoint class.
 func (s *Service) CheckUser(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	requestsPerWindow, window, ok := s.config.GetUserLimit(class)
 	if !ok {
@@ -205,6 +236,16 @@ func (s *Service) checkSingleLimit(ctx context.Context, p limitParams, class mod
 	return res, nil
 }
 
+// CheckBoth enforces both IP and user rate limits for authenticated requests.
+// Used by middleware.RateLimitAuthenticated for protected endpoints.
+//
+// Behavior:
+//   - Checks allowlist first; if either IP or user is allowlisted, request is bypassed
+//   - Applies IP limit first; if exceeded, returns immediately (fail fast)
+//   - Applies user limit second
+//   - Returns the more restrictive result (lower remaining count wins)
+//
+// This is the primary entry point for authenticated request rate limiting.
 func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	now := requesttime.Now(ctx)
 

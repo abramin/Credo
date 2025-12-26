@@ -1,3 +1,16 @@
+// Package quota manages monthly API key usage limits for partner integrations.
+//
+// Partner API keys have tiered monthly quotas (Free, Starter, Business, Enterprise).
+// Quotas reset on the first day of each calendar month.
+//
+// Usage:
+//
+//	svc, _ := quota.New(store)
+//	quota, _ := svc.Check(ctx, apiKeyID)
+//	if quota.IsOverQuota() && !quota.OverageAllowed {
+//	    // Return 429 Quota Exceeded
+//	}
+//	svc.Increment(ctx, apiKeyID, 1)  // Track usage
 package quota
 
 import (
@@ -17,26 +30,31 @@ type (
 	AuditPublisher = ports.AuditPublisher
 )
 
+// Service manages API key quota tracking and enforcement.
 type Service struct {
 	store          Store
 	auditPublisher AuditPublisher
 	logger         *slog.Logger
 }
 
+// Option configures a Service instance.
 type Option func(*Service)
 
+// WithLogger sets the structured logger for audit and debug logging.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {
 		s.logger = logger
 	}
 }
 
+// WithAuditPublisher sets the audit event publisher for security logging.
 func WithAuditPublisher(publisher AuditPublisher) Option {
 	return func(s *Service) {
 		s.auditPublisher = publisher
 	}
 }
 
+// New creates a quota service with the given store and options.
 func New(store Store, opts ...Option) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("quota store is required")
@@ -53,6 +71,8 @@ func New(store Store, opts ...Option) (*Service, error) {
 	return svc, nil
 }
 
+// Check retrieves the current quota for an API key.
+// Returns CodeNotFound if the API key has no quota record.
 func (s *Service) Check(ctx context.Context, apiKeyID id.APIKeyID) (*models.APIKeyQuota, error) {
 	quota, err := s.store.GetQuota(ctx, apiKeyID)
 	if err != nil {
@@ -64,6 +84,8 @@ func (s *Service) Check(ctx context.Context, apiKeyID id.APIKeyID) (*models.APIK
 	return quota, nil
 }
 
+// Increment adds to the usage counter for an API key.
+// Emits an audit event when quota is exceeded (for billing/monitoring).
 func (s *Service) Increment(ctx context.Context, apiKeyID id.APIKeyID, count int) (*models.APIKeyQuota, error) {
 	quota, err := s.store.IncrementUsage(ctx, apiKeyID, count)
 	if err != nil {
@@ -82,6 +104,8 @@ func (s *Service) Increment(ctx context.Context, apiKeyID id.APIKeyID, count int
 	return quota, nil
 }
 
+// Reset clears the usage counter for an API key (admin operation).
+// Typically used for customer service or billing adjustments.
 func (s *Service) Reset(ctx context.Context, apiKeyID id.APIKeyID) error {
 	if apiKeyID.IsNil() {
 		return dErrors.New(dErrors.CodeBadRequest, "api_key_id is required")
@@ -98,6 +122,7 @@ func (s *Service) Reset(ctx context.Context, apiKeyID id.APIKeyID) error {
 	return nil
 }
 
+// List returns all quota records for admin dashboard display.
 func (s *Service) List(ctx context.Context) ([]*models.APIKeyQuota, error) {
 	quotas, err := s.store.ListQuotas(ctx)
 	if err != nil {
@@ -106,6 +131,8 @@ func (s *Service) List(ctx context.Context) ([]*models.APIKeyQuota, error) {
 	return quotas, nil
 }
 
+// UpdateTier changes the subscription tier for an API key.
+// Takes effect immediately; does not reset current usage.
 func (s *Service) UpdateTier(ctx context.Context, apiKeyID id.APIKeyID, tier models.QuotaTier) error {
 	if apiKeyID.IsNil() {
 		return dErrors.New(dErrors.CodeBadRequest, "api_key_id is required")

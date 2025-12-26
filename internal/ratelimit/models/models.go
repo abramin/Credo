@@ -1,3 +1,11 @@
+// Package models defines domain types for the ratelimit module.
+//
+// Key concepts:
+//   - EndpointClass: Categorizes endpoints by sensitivity for rate limit configuration
+//   - RateLimitResult: Outcome of a rate limit check (allowed/denied, remaining quota)
+//   - AuthLockout: Tracks authentication failures to prevent brute-force attacks
+//   - AllowlistEntry: Exempts specific IPs or users from rate limiting
+//   - APIKeyQuota: Monthly usage tracking for partner API keys
 package models
 
 import (
@@ -9,6 +17,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// EndpointClass categorizes API endpoints by sensitivity level for rate limiting.
+// Each class has different per-IP and per-user limits configured in config.Config.
+// Used by middleware to apply appropriate rate limits to incoming requests.
 type EndpointClass string
 
 const (
@@ -24,6 +35,7 @@ const (
 	ClassAdmin EndpointClass = "admin"
 )
 
+// IsValid returns true if the endpoint class is a recognized value.
 func (c EndpointClass) IsValid() bool {
 	switch c {
 	case ClassAuth, ClassSensitive, ClassRead, ClassWrite, ClassAdmin:
@@ -32,13 +44,16 @@ func (c EndpointClass) IsValid() bool {
 	return false
 }
 
+// AllowlistEntryType identifies whether an allowlist entry exempts an IP address or user.
 type AllowlistEntryType string
 
 const (
-	AllowlistTypeIP     AllowlistEntryType = "ip"
-	AllowlistTypeUserID AllowlistEntryType = "user_id"
+	AllowlistTypeIP     AllowlistEntryType = "ip"      // Exempts a specific IP address
+	AllowlistTypeUserID AllowlistEntryType = "user_id" // Exempts a specific user
 )
 
+// ParseAllowlistEntryType validates and converts a string to AllowlistEntryType.
+// Returns an error if the string is empty or not a valid type.
 func ParseAllowlistEntryType(s string) (AllowlistEntryType, error) {
 	if s == "" {
 		return "", dErrors.New(dErrors.CodeInvalidInput, "allowlist entry type cannot be empty")
@@ -58,50 +73,74 @@ func (t AllowlistEntryType) String() string {
 	return string(t)
 }
 
+// RateLimitResult is the outcome of a rate limit check.
+// Returned by BucketStore.Allow and service Check methods.
+//
+// Fields:
+//   - Allowed: true if the request should proceed, false if rate limited
+//   - Bypassed: true if an allowlist entry exempted this request from checking
+//   - Limit: maximum requests allowed in the window
+//   - Remaining: requests left before hitting the limit
+//   - ResetAt: when the current window expires and counters reset
+//   - RetryAfter: seconds to wait before retrying (only set when Allowed=false)
 type RateLimitResult struct {
 	Allowed    bool      `json:"allowed"`
-	Bypassed   bool      `json:"bypassed,omitempty"`    // true when allowlist matched, skipping bucket checks
+	Bypassed   bool      `json:"bypassed,omitempty"`
 	Limit      int       `json:"limit"`
 	Remaining  int       `json:"remaining"`
 	ResetAt    time.Time `json:"reset_at"`
-	RetryAfter int       `json:"retry_after,omitempty"` // seconds, only set when not allowed
+	RetryAfter int       `json:"retry_after,omitempty"`
 }
 
+// AuthRateLimitResult extends RateLimitResult with authentication-specific fields.
+// Returned by authlockout.Service.Check for login/password-reset endpoints.
+//
+// Additional fields:
+//   - RequiresCaptcha: true after 3 consecutive lockouts in 24 hours (FR-2b)
+//   - FailureCount: number of failed attempts in the current window
 type AuthRateLimitResult struct {
 	RateLimitResult
 	RequiresCaptcha bool `json:"requires_captcha"`
 	FailureCount    int  `json:"failure_count"`
 }
 
+// AllowlistEntry exempts an IP address or user from rate limiting.
+// Created by admins via the admin API, with optional expiration.
+// Checked by services before applying rate limits.
 type AllowlistEntry struct {
 	ID         string             `json:"id"`
 	Type       AllowlistEntryType `json:"type"`
 	Identifier string             `json:"identifier"` // IP address or user_id
-	Reason     string             `json:"reason"`
+	Reason     string             `json:"reason"`     // Admin-provided justification
 	ExpiresAt  *time.Time         `json:"expires_at,omitempty"`
 	CreatedAt  time.Time          `json:"created_at"`
-	CreatedBy  id.UserID          `json:"created_by"` // admin user_id
+	CreatedBy  id.UserID          `json:"created_by"` // Admin who created the entry
 }
 
+// RateLimitViolation is an audit record created when a request is rate limited.
+// Used for security monitoring and abuse detection.
 type RateLimitViolation struct {
 	ID            string        `json:"id"`
-	Identifier    string        `json:"identifier"` // IP or user_id
+	Identifier    string        `json:"identifier"` // IP or user_id that was limited
 	EndpointClass EndpointClass `json:"endpoint_class"`
-	Endpoint      string        `json:"endpoint"`
-	Limit         int           `json:"limit"`
-	WindowSeconds int           `json:"window_seconds"`
+	Endpoint      string        `json:"endpoint"`      // The specific endpoint path
+	Limit         int           `json:"limit"`         // The limit that was exceeded
+	WindowSeconds int           `json:"window_seconds"` // The window duration
 	OccurredAt    time.Time     `json:"occurred_at"`
 }
 
+// QuotaTier represents subscription levels for partner API keys.
+// Higher tiers have larger monthly request quotas.
 type QuotaTier string
 
 const (
-	QuotaTierFree       QuotaTier = "free"
-	QuotaTierStarter    QuotaTier = "starter"
-	QuotaTierBusiness   QuotaTier = "business"
-	QuotaTierEnterprise QuotaTier = "enterprise"
+	QuotaTierFree       QuotaTier = "free"       // 1,000 requests/month
+	QuotaTierStarter    QuotaTier = "starter"    // 10,000 requests/month
+	QuotaTierBusiness   QuotaTier = "business"   // 100,000 requests/month
+	QuotaTierEnterprise QuotaTier = "enterprise" // 1,000,000 requests/month
 )
 
+// IsValid returns true if the tier is a recognized value.
 func (t QuotaTier) IsValid() bool {
 	switch t {
 	case QuotaTierFree, QuotaTierStarter, QuotaTierBusiness, QuotaTierEnterprise:
@@ -110,25 +149,39 @@ func (t QuotaTier) IsValid() bool {
 	return false
 }
 
+// APIKeyQuota tracks monthly usage for a partner API key.
+// Quotas reset on the first day of each month.
+// Used by quota.Service to enforce monthly limits and track overage.
 type APIKeyQuota struct {
 	APIKeyID       id.APIKeyID `json:"api_key_id"`
 	Tier           QuotaTier   `json:"tier"`
-	MonthlyLimit   int         `json:"monthly_limit"`
-	CurrentUsage   int         `json:"current_usage"`
-	OverageAllowed bool        `json:"overage_allowed"`
-	PeriodStart    time.Time   `json:"period_start"`
-	PeriodEnd      time.Time   `json:"period_end"`
+	MonthlyLimit   int         `json:"monthly_limit"`   // Max requests allowed this month
+	CurrentUsage   int         `json:"current_usage"`   // Requests used so far
+	OverageAllowed bool        `json:"overage_allowed"` // If true, requests proceed over quota (billed)
+	PeriodStart    time.Time   `json:"period_start"`    // First day of current month
+	PeriodEnd      time.Time   `json:"period_end"`      // Last moment of current month
 }
 
+// AuthLockout tracks authentication failures to prevent brute-force attacks (PRD-017 FR-2b).
+//
+// Behavior:
+//   - After 5 failures in 15 minutes: soft lock (sliding window)
+//   - After 10 daily failures: hard lock for 15 minutes
+//   - After 3 consecutive lockouts in 24 hours: require CAPTCHA
+//
+// The Identifier is a composite key of username/email + IP address,
+// preventing cross-IP attacks while allowing legitimate multi-device access.
 type AuthLockout struct {
-	Identifier      string     `json:"identifier"`     // username/email + IP composite key
-	FailureCount    int        `json:"failure_count"`  // failures in current window
-	DailyFailures   int        `json:"daily_failures"` // failures today (for hard lock)
-	LockedUntil     *time.Time `json:"locked_until,omitempty"`
+	Identifier      string     `json:"identifier"`       // Composite key: "username:IP"
+	FailureCount    int        `json:"failure_count"`    // Failures in current 15-min window
+	DailyFailures   int        `json:"daily_failures"`   // Failures today (for hard lock threshold)
+	LockedUntil     *time.Time `json:"locked_until,omitempty"` // Hard lock expiration
 	LastFailureAt   time.Time  `json:"last_failure_at"`
-	RequiresCaptcha bool       `json:"requires_captcha"` // after 3 consecutive lockouts in 24h
+	RequiresCaptcha bool       `json:"requires_captcha"` // Set after 3 consecutive lockouts
 }
 
+// NewAllowlistEntry creates a validated allowlist entry.
+// Returns an error if type, identifier, or reason is invalid/empty.
 func NewAllowlistEntry(entryType AllowlistEntryType, identifier, reason string, createdBy id.UserID, expiresAt *time.Time, now time.Time) (*AllowlistEntry, error) {
 	if !entryType.IsValid() {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "invalid allowlist entry type")
@@ -165,6 +218,8 @@ func (e *AllowlistEntry) IsExpiredAt(now time.Time) bool {
 	return now.After(*e.ExpiresAt)
 }
 
+// NewAuthLockout creates a new lockout record for an identifier.
+// The identifier should be a composite key created by NewAuthLockoutKey.
 func NewAuthLockout(identifier string, now time.Time) (*AuthLockout, error) {
 	if identifier == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")
@@ -245,6 +300,8 @@ func (l *AuthLockout) IsAttemptLimitReached(limit int) bool {
 	return l.FailureCount >= limit
 }
 
+// NewAPIKeyQuota creates a new quota record for an API key.
+// Automatically sets period boundaries to the current calendar month.
 func NewAPIKeyQuota(apiKeyID id.APIKeyID, tier QuotaTier, monthlyLimit int, overageAllowed bool, now time.Time) (*APIKeyQuota, error) {
 	if apiKeyID.IsNil() {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "api_key_id cannot be empty")
@@ -270,10 +327,13 @@ func NewAPIKeyQuota(apiKeyID id.APIKeyID, tier QuotaTier, monthlyLimit int, over
 	}, nil
 }
 
+// IsOverQuota returns true if current usage has reached or exceeded the monthly limit.
 func (q *APIKeyQuota) IsOverQuota() bool {
 	return q.CurrentUsage >= q.MonthlyLimit
 }
 
+// NewRateLimitViolation creates an audit record for a rate-limited request.
+// Used for security monitoring to detect abuse patterns.
 func NewRateLimitViolation(identifier string, class EndpointClass, endpoint string, limit, windowSeconds int, now time.Time) (*RateLimitViolation, error) {
 	if identifier == "" {
 		return nil, dErrors.New(dErrors.CodeInvariantViolation, "identifier cannot be empty")

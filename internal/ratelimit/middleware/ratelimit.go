@@ -1,3 +1,25 @@
+// Package middleware provides HTTP middleware for rate limiting.
+//
+// This package wraps the rate limiting services as chi-compatible middleware,
+// handling HTTP concerns (headers, response codes) and resilience (circuit breaker).
+//
+// Middleware types:
+//   - RateLimit: Per-IP limiting for unauthenticated endpoints
+//   - RateLimitAuthenticated: Combined IP+user limiting for protected endpoints
+//   - GlobalThrottle: DDoS protection across all endpoints
+//   - RateLimitClient: Per-OAuth-client limiting
+//
+// Resilience features:
+//   - Circuit breaker with automatic fallback to in-memory store
+//   - Fail-open by default (requests proceed on store errors)
+//   - Configurable fail-closed mode for high-security deployments
+//   - X-RateLimit-Status: degraded header when using fallback
+//
+// Standard response headers:
+//   - X-RateLimit-Limit: Maximum requests allowed
+//   - X-RateLimit-Remaining: Requests left in window
+//   - X-RateLimit-Reset: Unix timestamp when window resets
+//   - Retry-After: Seconds to wait (on 429 responses)
 package middleware
 
 import (
@@ -13,43 +35,51 @@ import (
 	"credo/pkg/platform/privacy"
 )
 
-// RateLimiter defines the interface for the rate limiting middleware.
-// This is a minimal interface containing only the methods the middleware actually uses.
+// RateLimiter is the interface consumed by the middleware.
+// Implemented by the aggregated rate limit service that combines requestlimit and globalthrottle.
 type RateLimiter interface {
 	CheckIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error)
 	CheckBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error)
 	CheckGlobalThrottle(ctx context.Context) (bool, error)
 }
 
+// ClientRateLimiter is the interface for per-OAuth-client rate limiting.
+// Implemented by clientlimit.Service.
 type ClientRateLimiter interface {
 	Check(ctx context.Context, clientID, endpoint string) (*models.RateLimitResult, error)
 }
 
+// Middleware provides HTTP middleware for rate limiting with circuit breaker resilience.
 type Middleware struct {
 	limiter         RateLimiter
 	logger          *slog.Logger
 	disabled        bool
-	failClosed      bool   // If true, reject requests when rate limiter is unavailable (high-security mode)
+	failClosed      bool   // If true, reject requests when rate limiter is unavailable
 	supportURL      string // URL for user support (included in auth lockout response)
 	ipBreaker       *CircuitBreaker
 	combinedBreaker *CircuitBreaker
 	fallback        RateLimiter
 }
 
+// Option configures a Middleware instance.
 type Option func(*Middleware)
 
+// WithDisabled disables rate limiting entirely (for testing/development).
 func WithDisabled(disabled bool) Option {
 	return func(m *Middleware) {
 		m.disabled = disabled
 	}
 }
 
+// WithSupportURL sets the support URL included in lockout error responses.
 func WithSupportURL(url string) Option {
 	return func(m *Middleware) {
 		m.supportURL = url
 	}
 }
 
+// WithFallbackLimiter sets the fallback rate limiter used when the primary fails.
+// Typically an in-memory implementation for resilience during store outages.
 func WithFallbackLimiter(limiter RateLimiter) Option {
 	return func(m *Middleware) {
 		if limiter != nil {
@@ -67,6 +97,7 @@ func WithFailClosed(enabled bool) Option {
 	}
 }
 
+// New creates a rate limiting middleware with circuit breaker resilience.
 func New(limiter RateLimiter, logger *slog.Logger, opts ...Option) *Middleware {
 	m := &Middleware{
 		limiter:         limiter,
@@ -83,6 +114,8 @@ func New(limiter RateLimiter, logger *slog.Logger, opts ...Option) *Middleware {
 	return m
 }
 
+// RateLimit returns middleware that enforces per-IP rate limits.
+// Use for unauthenticated endpoints. Returns 429 with Retry-After when exceeded.
 func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +161,9 @@ func (m *Middleware) RateLimit(class models.EndpointClass) func(http.Handler) ht
 	}
 }
 
+// RateLimitAuthenticated returns middleware that enforces both IP and user rate limits.
+// Use for authenticated endpoints. Applies the more restrictive of IP or user limits.
+// Returns 429 with user-specific quota information when exceeded.
 func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +202,9 @@ func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(htt
 	}
 }
 
-// GlobalThrottle returns middleware for global DDoS protection.
+// GlobalThrottle returns middleware for global DDoS protection (PRD-017 FR-6).
+// Limits total requests across all clients to protect against traffic floods.
+// Returns 503 Service Unavailable when the global limit is exceeded.
 func (m *Middleware) GlobalThrottle() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -243,6 +281,8 @@ func writeClientRateLimitExceeded(w http.ResponseWriter, result *models.RateLimi
 	})
 }
 
+// ClientMiddleware provides per-OAuth-client rate limiting (PRD-017 FR-2c).
+// Applies different limits for confidential (server-side) vs public (SPA/mobile) clients.
 type ClientMiddleware struct {
 	limiter        ClientRateLimiter
 	logger         *slog.Logger
@@ -251,8 +291,10 @@ type ClientMiddleware struct {
 	fallback       ClientRateLimiter
 }
 
+// ClientOption configures a ClientMiddleware instance.
 type ClientOption func(*ClientMiddleware)
 
+// WithClientFallbackLimiter sets the fallback for client rate limiting.
 func WithClientFallbackLimiter(limiter ClientRateLimiter) ClientOption {
 	return func(m *ClientMiddleware) {
 		if limiter != nil {
@@ -261,7 +303,7 @@ func WithClientFallbackLimiter(limiter ClientRateLimiter) ClientOption {
 	}
 }
 
-// NewClientMiddleware creates a new client rate limit middleware.
+// NewClientMiddleware creates middleware for per-OAuth-client rate limiting.
 func NewClientMiddleware(limiter ClientRateLimiter, logger *slog.Logger, disabled bool, opts ...ClientOption) *ClientMiddleware {
 	m := &ClientMiddleware{
 		limiter:        limiter,
