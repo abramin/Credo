@@ -16,6 +16,7 @@ import (
 	"credo/pkg/platform/audit"
 	auditpublisher "credo/pkg/platform/audit/publisher"
 	requesttime "credo/pkg/platform/middleware/requesttime"
+	platformsync "credo/pkg/platform/sync"
 	"credo/pkg/platform/sentinel"
 )
 
@@ -54,7 +55,7 @@ type Service struct {
 func NewService(store Store, auditor *auditpublisher.Publisher, logger *slog.Logger, opts ...Option) *Service {
 	svc := &Service{
 		store:                  store,
-		tx:                     &shardedConsentTx{store: store},
+		tx:                     &shardedConsentTx{mu: platformsync.NewShardedMutex(), store: store},
 		auditor:                auditor,
 		logger:                 logger,
 		consentTTL:             defaultConsentTTL,
