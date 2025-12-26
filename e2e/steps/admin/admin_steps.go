@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -129,15 +130,17 @@ func (s *adminSteps) createTenant(ctx context.Context, name string) error {
 
 // createTenantWithExactName creates a tenant with a consistent name for duplicate testing.
 // First call with a base name generates a unique name and caches it.
-// Subsequent calls with the same base name reuse the cached name.
-// This ensures test isolation while allowing duplicate name testing.
+// Subsequent calls with the same base name (case-insensitive) reuse the cached name.
+// This ensures test isolation while allowing duplicate/case-insensitive name testing.
 func (s *adminSteps) createTenantWithExactName(ctx context.Context, baseName string) error {
+	// Use lowercase key for case-insensitive matching (tests backend case-insensitive uniqueness)
+	cacheKey := strings.ToLower(baseName)
 	// Check if we already have a generated name for this base
-	name, exists := s.exactNameCache[baseName]
+	name, exists := s.exactNameCache[cacheKey]
 	if !exists {
 		// Generate unique name and cache it
 		name = fmt.Sprintf("%s-%d", baseName, time.Now().UnixNano())
-		s.exactNameCache[baseName] = name
+		s.exactNameCache[cacheKey] = name
 	}
 	body := map[string]interface{}{
 		"name": name,

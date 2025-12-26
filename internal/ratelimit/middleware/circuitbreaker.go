@@ -52,6 +52,8 @@ func (c *CircuitBreaker) RecordFailure() bool {
 	return false
 }
 
+// RecordSuccess records a successful check and returns whether the circuit is now closed.
+// Returns true if the circuit is closed (use primary), false if still open (use fallback).
 func (c *CircuitBreaker) RecordSuccess() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -67,4 +69,12 @@ func (c *CircuitBreaker) RecordSuccess() bool {
 	}
 	c.failureCount = 0
 	return true
+}
+
+// ShouldUsePrimary returns true if the circuit is closed and primary limiter should be used.
+// This is an alias for checking circuit state without recording success/failure.
+func (c *CircuitBreaker) ShouldUsePrimary() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.state == circuitClosed
 }

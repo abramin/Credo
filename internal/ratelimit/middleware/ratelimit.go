@@ -29,6 +29,7 @@ type Middleware struct {
 	limiter         RateLimiter
 	logger          *slog.Logger
 	disabled        bool
+	failClosed      bool   // If true, reject requests when rate limiter is unavailable (high-security mode)
 	supportURL      string // URL for user support (included in auth lockout response)
 	ipBreaker       *CircuitBreaker
 	combinedBreaker *CircuitBreaker
@@ -54,6 +55,15 @@ func WithFallbackLimiter(limiter RateLimiter) Option {
 		if limiter != nil {
 			m.fallback = limiter
 		}
+	}
+}
+
+// WithFailClosed enables fail-closed behavior for high-security deployments.
+// When enabled, requests are rejected (503) if the rate limiter is unavailable
+// and no fallback succeeds. Default is fail-open (requests proceed on error).
+func WithFailClosed(enabled bool) Option {
+	return func(m *Middleware) {
+		m.failClosed = enabled
 	}
 }
 
@@ -319,27 +329,45 @@ func (m *ClientMiddleware) RateLimitClient() func(http.Handler) http.Handler {
 	}
 }
 
-func (m *Middleware) checkIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, bool, error) {
-	result, err := m.limiter.CheckIPRateLimit(ctx, ip, class)
+func writeFailClosedError(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "30")
+	httputil.WriteJSON(w, http.StatusServiceUnavailable, &models.ServiceOverloadedResponse{
+		Error:      "rate_limit_unavailable",
+		Message:    "Rate limiting service is temporarily unavailable. Please try again later.",
+		RetryAfter: 30,
+	})
+}
+
+// withCircuitBreaker wraps a rate limit check with circuit breaker logic.
+// It handles primary check, fallback on failure, and circuit state transitions.
+func withCircuitBreaker[T any](
+	breaker *CircuitBreaker,
+	logger *slog.Logger,
+	primary func() (T, error),
+	fallback func() (T, error),
+	fallbackName string,
+) (result T, degraded bool, err error) {
+	result, err = primary()
 	if err != nil {
-		if m.ipBreaker.RecordFailure() && m.fallback != nil {
-			fallbackResult, fallbackErr := m.fallback.CheckIPRateLimit(ctx, ip, class)
+		if breaker.RecordFailure() && fallback != nil {
+			fallbackResult, fallbackErr := fallback()
 			if fallbackErr != nil {
-				if m.logger != nil {
-					m.logger.Error("fallback IP rate limit failed", "error", fallbackErr)
+				if logger != nil {
+					logger.Error("fallback "+fallbackName+" failed", "error", fallbackErr)
 				}
-				return nil, false, err
+				return result, false, err
 			}
 			return fallbackResult, true, err
 		}
-		return nil, false, err
+		return result, false, err
 	}
 
-	if !m.ipBreaker.RecordSuccess() && m.fallback != nil {
-		fallbackResult, fallbackErr := m.fallback.CheckIPRateLimit(ctx, ip, class)
+	// Primary succeeded - check if circuit is still open (needs more successes to close)
+	if !breaker.RecordSuccess() && fallback != nil {
+		fallbackResult, fallbackErr := fallback()
 		if fallbackErr != nil {
-			if m.logger != nil {
-				m.logger.Error("fallback IP rate limit failed", "error", fallbackErr)
+			if logger != nil {
+				logger.Error("fallback "+fallbackName+" failed", "error", fallbackErr)
 			}
 			return result, false, nil
 		}
@@ -347,64 +375,43 @@ func (m *Middleware) checkIPRateLimit(ctx context.Context, ip string, class mode
 	}
 
 	return result, false, nil
+}
+
+func (m *Middleware) checkIPRateLimit(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, bool, error) {
+	primary := func() (*models.RateLimitResult, error) {
+		return m.limiter.CheckIPRateLimit(ctx, ip, class)
+	}
+	var fallback func() (*models.RateLimitResult, error)
+	if m.fallback != nil {
+		fallback = func() (*models.RateLimitResult, error) {
+			return m.fallback.CheckIPRateLimit(ctx, ip, class)
+		}
+	}
+	return withCircuitBreaker(m.ipBreaker, m.logger, primary, fallback, "IP rate limit")
 }
 
 func (m *Middleware) checkBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, bool, error) {
-	result, err := m.limiter.CheckBothLimits(ctx, ip, userID, class)
-	if err != nil {
-		if m.combinedBreaker.RecordFailure() && m.fallback != nil {
-			fallbackResult, fallbackErr := m.fallback.CheckBothLimits(ctx, ip, userID, class)
-			if fallbackErr != nil {
-				if m.logger != nil {
-					m.logger.Error("fallback combined rate limit failed", "error", fallbackErr)
-				}
-				return nil, false, err
-			}
-			return fallbackResult, true, err
-		}
-		return nil, false, err
+	primary := func() (*models.RateLimitResult, error) {
+		return m.limiter.CheckBothLimits(ctx, ip, userID, class)
 	}
-
-	if !m.combinedBreaker.RecordSuccess() && m.fallback != nil {
-		fallbackResult, fallbackErr := m.fallback.CheckBothLimits(ctx, ip, userID, class)
-		if fallbackErr != nil {
-			if m.logger != nil {
-				m.logger.Error("fallback combined rate limit failed", "error", fallbackErr)
-			}
-			return result, false, nil
+	var fallback func() (*models.RateLimitResult, error)
+	if m.fallback != nil {
+		fallback = func() (*models.RateLimitResult, error) {
+			return m.fallback.CheckBothLimits(ctx, ip, userID, class)
 		}
-		return fallbackResult, true, nil
 	}
-
-	return result, false, nil
+	return withCircuitBreaker(m.combinedBreaker, m.logger, primary, fallback, "combined rate limit")
 }
 
 func (m *ClientMiddleware) checkClientLimit(ctx context.Context, clientID, endpoint string) (*models.RateLimitResult, bool, error) {
-	result, err := m.limiter.Check(ctx, clientID, endpoint)
-	if err != nil {
-		if m.circuitBreaker.RecordFailure() && m.fallback != nil {
-			fallbackResult, fallbackErr := m.fallback.Check(ctx, clientID, endpoint)
-			if fallbackErr != nil {
-				if m.logger != nil {
-					m.logger.Error("fallback client rate limit failed", "error", fallbackErr)
-				}
-				return nil, false, err
-			}
-			return fallbackResult, true, err
-		}
-		return nil, false, err
+	primary := func() (*models.RateLimitResult, error) {
+		return m.limiter.Check(ctx, clientID, endpoint)
 	}
-
-	if !m.circuitBreaker.RecordSuccess() && m.fallback != nil {
-		fallbackResult, fallbackErr := m.fallback.Check(ctx, clientID, endpoint)
-		if fallbackErr != nil {
-			if m.logger != nil {
-				m.logger.Error("fallback client rate limit failed", "error", fallbackErr)
-			}
-			return result, false, nil
+	var fallback func() (*models.RateLimitResult, error)
+	if m.fallback != nil {
+		fallback = func() (*models.RateLimitResult, error) {
+			return m.fallback.Check(ctx, clientID, endpoint)
 		}
-		return fallbackResult, true, nil
 	}
-
-	return result, false, nil
+	return withCircuitBreaker(m.circuitBreaker, m.logger, primary, fallback, "client rate limit")
 }

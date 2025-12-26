@@ -15,7 +15,6 @@ import (
 	"credo/pkg/platform/privacy"
 )
 
-
 type Store interface {
 	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
 	Get(ctx context.Context, identifier string) (*models.AuthLockout, error)
@@ -91,10 +90,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 
 	// Check if currently hard-locked (FR-2b: "hard lock for 15 minutes")
 	if record.IsLockedAt(now) {
-		retryAfter := int(record.LockedUntil.Sub(now).Seconds())
-		if retryAfter < 0 {
-			retryAfter = 0
-		}
+		retryAfter := max(int(record.LockedUntil.Sub(now).Seconds()), 0)
 		s.logAudit(ctx, "auth_lockout_triggered",
 			"identifier", identifier,
 			"ip", privacy.AnonymizeIP(ip),
@@ -115,10 +111,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	if record.IsAttemptLimitReached(s.config.AttemptsPerWindow) {
 		// Block - too many attempts in window
 		resetAt := s.config.ResetTime(record.LastFailureAt)
-		retryAfter := int(resetAt.Sub(now).Seconds())
-		if retryAfter < 0 {
-			retryAfter = 0
-		}
+		retryAfter := max(int(resetAt.Sub(now).Seconds()), 0)
 		return &models.AuthRateLimitResult{
 			RateLimitResult: models.RateLimitResult{
 				Allowed:    false,
@@ -133,10 +126,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	// Apply progressive backoff (FR-2b: "250ms → 500ms → 1s")
 	// Calculate backoff even for zero failures to maintain constant-time behavior
 	delay := s.GetProgressiveBackoff(record.FailureCount)
-	remaining := record.RemainingAttempts(s.config.AttemptsPerWindow)
-	if remaining > s.config.AttemptsPerWindow {
-		remaining = s.config.AttemptsPerWindow
-	}
+	remaining := min(record.RemainingAttempts(s.config.AttemptsPerWindow), s.config.AttemptsPerWindow)
 
 	return &models.AuthRateLimitResult{
 		RateLimitResult: models.RateLimitResult{
@@ -217,7 +207,9 @@ func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
 	if s.auditPublisher == nil {
 		return
 	}
-	_ = s.auditPublisher.Emit(ctx, audit.Event{
+	if err := s.auditPublisher.Emit(ctx, audit.Event{
 		Action: event,
-	})
+	}); err != nil && s.logger != nil {
+		s.logger.WarnContext(ctx, "failed to emit audit event", "event", event, "error", err)
+	}
 }

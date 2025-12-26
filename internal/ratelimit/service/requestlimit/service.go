@@ -264,7 +264,9 @@ func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
 	if s.auditPublisher == nil {
 		return
 	}
-	_ = s.auditPublisher.Emit(ctx, audit.Event{
+	if err := s.auditPublisher.Emit(ctx, audit.Event{
 		Action: event,
-	})
+	}); err != nil && s.logger != nil {
+		s.logger.WarnContext(ctx, "failed to emit audit event", "event", event, "error", err)
+	}
 }

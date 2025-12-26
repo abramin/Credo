@@ -322,9 +322,13 @@ func (s *ClientService) applyClientUpdate(ctx context.Context, client *models.Cl
 
 // maybeRotateSecret generates and applies a new secret if requested.
 // Returns the cleartext secret (empty if not rotated).
+// Returns an error if rotation is requested on a public client.
 func (s *ClientService) maybeRotateSecret(client *models.Client, rotate bool) (string, error) {
 	if !rotate {
 		return "", nil
+	}
+	if !client.IsConfidential() {
+		return "", dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
 	}
 	secret, hash, err := generateSecret(false)
 	if err != nil {

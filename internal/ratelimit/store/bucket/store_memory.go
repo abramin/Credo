@@ -26,7 +26,12 @@ type circularWindow struct {
 	window     time.Duration
 }
 
-func (cw *circularWindow) tryConsume(cost, limit int, now time.Time) (allowed bool, remaining int, resetAt time.Time) {
+// tryConsume attempts to consume 'cost' tokens from the bucket.
+// Returns whether allowed, remaining tokens, and reset time.
+// If not allowed, remaining will be 0.
+// If allowed, remaining will be limit - (used + cost).
+// resetAt is the time when the oldest valid token expires.
+func (cw *circularWindow) tryConsume(cost int, limit int, now time.Time) (allowed bool, remaining int, resetAt time.Time) {
 	nowNano := now.UnixNano()
 	cutoffNano := nowNano - cw.window.Nanoseconds()
 
@@ -34,10 +39,14 @@ func (cw *circularWindow) tryConsume(cost, limit int, now time.Time) (allowed bo
 	validCount := 0
 	oldestValid := nowNano
 	for i := 0; i < cw.count; i++ {
+		// Calculate the index in the circular buffer
 		idx := (cw.head - cw.count + i + circularBufferSize) % circularBufferSize
+		// Retrieve the timestamp at the calculated index
 		ts := cw.timestamps[idx]
+		// Check if the timestamp is within the valid window
 		if ts > cutoffNano {
 			validCount++
+			// Track oldest valid timestamp
 			if ts < oldestValid {
 				oldestValid = ts
 			}
@@ -47,20 +56,26 @@ func (cw *circularWindow) tryConsume(cost, limit int, now time.Time) (allowed bo
 	// Update count to reflect cleanup
 	cw.count = validCount
 
+	// Check if there are enough tokens available
 	if validCount+cost > limit {
+		// Not enough tokens available
 		resetAt = time.Unix(0, oldestValid).Add(cw.window)
 		return false, 0, resetAt
 	}
 
 	// Record new timestamps
 	for range cost {
+		// Add current timestamp at head position
 		cw.timestamps[cw.head] = nowNano
+		// Move head forward in circular manner
 		cw.head = (cw.head + 1) % circularBufferSize
+		// Increase count if not at max size
 		if cw.count < circularBufferSize {
 			cw.count++
 		}
 	}
 
+	//
 	remaining = limit - (validCount + cost)
 	resetAt = now.Add(cw.window)
 	return true, remaining, resetAt
