@@ -79,10 +79,11 @@ func (s *InMemoryAuthorizationCodeStore) ConsumeAuthCode(_ context.Context, code
 	return record, nil
 }
 
-func (s *InMemoryAuthorizationCodeStore) DeleteExpiredCodes(_ context.Context) (int, error) {
+// DeleteExpiredCodes removes all authorization codes that have expired as of the given time.
+// The time parameter is injected for testability (no hidden time.Now() calls).
+func (s *InMemoryAuthorizationCodeStore) DeleteExpiredCodes(_ context.Context, now time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
 	deletedCount := 0
 	for code, record := range s.authCodes {
 		if record.ExpiresAt.Before(now) {

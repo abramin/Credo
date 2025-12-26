@@ -21,6 +21,20 @@ import (
 	"credo/pkg/platform/middleware/requesttime"
 )
 
+// validateRequestedScopes checks that all requested scopes are allowed by the client.
+// Returns nil if allowed is empty (no restrictions) or all requested scopes are in allowed.
+func validateRequestedScopes(requested, allowed []string) error {
+	if len(allowed) == 0 {
+		return nil
+	}
+	for _, scope := range requested {
+		if !slices.Contains(allowed, scope) {
+			return dErrors.New(dErrors.CodeBadRequest, fmt.Sprintf("requested scope '%s' not allowed for client", scope))
+		}
+	}
+	return nil
+}
+
 type authorizeParams struct {
 	Email             string
 	Scopes            []string
@@ -41,6 +55,11 @@ type authorizeResult struct {
 }
 
 func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationRequest) (*models.AuthorizationResult, error) {
+	start := time.Now()
+	defer func() {
+		s.observeAuthorizeDuration(float64(time.Since(start).Milliseconds()))
+	}()
+
 	if req == nil {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
@@ -85,12 +104,8 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		Tenant:            tnt,
 	}
 
-	if len(client.AllowedScopes) > 0 {
-		for _, scope := range params.Scopes {
-			if !slices.Contains(client.AllowedScopes, scope) {
-				return nil, dErrors.New(dErrors.CodeBadRequest, fmt.Sprintf("requested scope '%s' not allowed for client", scope))
-			}
-		}
+	if err := validateRequestedScopes(params.Scopes, client.AllowedScopes); err != nil {
+		return nil, err
 	}
 
 	result, err := s.authorizeInTx(ctx, params)
@@ -133,6 +148,7 @@ func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*a
 			params.RedirectURI,
 			params.Now,
 			params.Now.Add(10*time.Minute),
+			params.Now,
 		)
 		if err != nil {
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create authorization code")

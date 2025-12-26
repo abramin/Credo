@@ -83,6 +83,10 @@ func (s *InMemoryRefreshTokenStore) DeleteBySessionID(_ context.Context, session
 	return nil
 }
 
+// ConsumeRefreshToken marks the refresh token as used if valid.
+// It checks for existence, expiry, and usage status.
+// Returns the token record and an error if any validation fails.
+// IMPORTANT: Returns the record even on ErrAlreadyUsed to enable replay detection.
 func (s *InMemoryRefreshTokenStore) ConsumeRefreshToken(_ context.Context, token string, now time.Time) (*models.RefreshTokenRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,10 +96,10 @@ func (s *InMemoryRefreshTokenStore) ConsumeRefreshToken(_ context.Context, token
 		return nil, fmt.Errorf("refresh token not found: %w", sentinel.ErrNotFound)
 	}
 	if now.After(record.ExpiresAt) {
-		return nil, fmt.Errorf("refresh token expired: %w", sentinel.ErrExpired)
+		return record, fmt.Errorf("refresh token expired: %w", sentinel.ErrExpired)
 	}
 	if record.Used {
-		return nil, fmt.Errorf("refresh token already used: %w", sentinel.ErrAlreadyUsed)
+		return record, fmt.Errorf("refresh token already used: %w", sentinel.ErrAlreadyUsed)
 	}
 
 	if record.LastRefreshedAt == nil || now.After(*record.LastRefreshedAt) {
@@ -105,10 +109,11 @@ func (s *InMemoryRefreshTokenStore) ConsumeRefreshToken(_ context.Context, token
 	return record, nil
 }
 
-func (s *InMemoryRefreshTokenStore) DeleteExpiredTokens(_ context.Context) (int, error) {
+// DeleteExpiredTokens removes all refresh tokens that have expired as of the given time.
+// The time parameter is injected for testability (no hidden time.Now() calls).
+func (s *InMemoryRefreshTokenStore) DeleteExpiredTokens(_ context.Context, now time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
 	deletedCount := 0
 	for key, token := range s.tokens {
 		if token.ExpiresAt.Before(now) {

@@ -41,4 +41,10 @@ const (
 
 	// MaxStateLength is the maximum length of an OAuth state parameter.
 	MaxStateLength = 500
+
+	// MaxCodeLength is the maximum length of an authorization code.
+	MaxCodeLength = 256
+
+	// MaxRefreshTokenLength is the maximum length of a refresh token.
+	MaxRefreshTokenLength = 256
 )

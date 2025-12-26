@@ -122,9 +122,24 @@ func (r *TokenRequest) Normalize() {
 }
 
 // Validate validates the token request following strict validation order:
+// size -> required fields -> syntax -> semantics
 func (r *TokenRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
+	}
+
+	// Phase 1: Size validation (fail fast on oversized input)
+	if len(r.ClientID) > validation.MaxClientIDLength {
+		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("client_id must be %d characters or less", validation.MaxClientIDLength))
+	}
+	if len(r.Code) > validation.MaxCodeLength {
+		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("code must be %d characters or less", validation.MaxCodeLength))
+	}
+	if len(r.RedirectURI) > validation.MaxRedirectURILength {
+		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("redirect_uri must be %d characters or less", validation.MaxRedirectURILength))
+	}
+	if len(r.RefreshToken) > validation.MaxRefreshTokenLength {
+		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("refresh_token must be %d characters or less", validation.MaxRefreshTokenLength))
 	}
 
 	// Phase 2: Required fields (presence checks)
