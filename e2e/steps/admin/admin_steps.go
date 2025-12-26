@@ -78,6 +78,27 @@ func RegisterSteps(ctx *godog.ScenarioContext, tc TestContext) {
 	// Security tests for tenant lifecycle
 	ctx.Step(`^I deactivate the tenant without admin token$`, steps.deactivateTenantWithoutAdminToken)
 	ctx.Step(`^I deactivate tenant with id "([^"]*)"$`, steps.deactivateTenantByID)
+
+	// Public client creation
+	ctx.Step(`^I create a public client "([^"]*)" under the tenant$`, steps.createPublicClientUnderTenant)
+	ctx.Step(`^I create a public client "([^"]*)" with client_credentials grant under the tenant$`, steps.createPublicClientWithClientCredentialsGrant)
+	ctx.Step(`^I create a client with redirect URI "([^"]*)" under the tenant$`, steps.createClientWithRedirectURI)
+
+	// Auth tests without admin token
+	ctx.Step(`^I reactivate the tenant without admin token$`, steps.reactivateTenantWithoutAdminToken)
+	ctx.Step(`^I reactivate the client without admin token$`, steps.reactivateClientWithoutAdminToken)
+	ctx.Step(`^I get the tenant details without admin token$`, steps.getTenantDetailsWithoutAdminToken)
+	ctx.Step(`^I get the client details without admin token$`, steps.getClientDetailsWithoutAdminToken)
+	ctx.Step(`^I update the client name to "([^"]*)" without admin token$`, steps.updateClientNameWithoutAdminToken)
+	ctx.Step(`^I rotate the client secret without admin token$`, steps.rotateClientSecretWithoutAdminToken)
+
+	// Update validation
+	ctx.Step(`^I update the client with redirect URI "([^"]*)"$`, steps.updateClientWithRedirectURI)
+	ctx.Step(`^I update the client with client_credentials grant$`, steps.updateClientWithClientCredentialsGrant)
+
+	// Secret rotation validation
+	ctx.Step(`^I authenticate with the old client secret$`, steps.authenticateWithOldClientSecret)
+	ctx.Step(`^the authentication should fail$`, steps.authenticationShouldFail)
 }
 
 type adminSteps struct {
@@ -399,4 +420,185 @@ func (s *adminSteps) deactivateClientByID(ctx context.Context, clientID string) 
 	return s.tc.POSTWithHeaders("/admin/clients/"+clientID+"/deactivate", nil, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
+}
+
+// Public Client Steps
+
+func (s *adminSteps) createPublicClientUnderTenant(ctx context.Context, clientName string) error {
+	tenantID := s.tc.GetTenantID()
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID not set")
+	}
+	body := map[string]interface{}{
+		"tenant_id":      tenantID,
+		"name":           clientName,
+		"redirect_uris":  []string{"http://localhost:3000/callback"},
+		"allowed_grants": []string{"authorization_code", "refresh_token"},
+		"allowed_scopes": []string{"openid", "profile", "email"},
+		"public_client":  true,
+	}
+	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+func (s *adminSteps) createPublicClientWithClientCredentialsGrant(ctx context.Context, clientName string) error {
+	tenantID := s.tc.GetTenantID()
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID not set")
+	}
+	body := map[string]interface{}{
+		"tenant_id":      tenantID,
+		"name":           clientName,
+		"redirect_uris":  []string{"http://localhost:3000/callback"},
+		"allowed_grants": []string{"authorization_code", "client_credentials"},
+		"allowed_scopes": []string{"openid", "profile", "email"},
+		"public_client":  true,
+	}
+	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+func (s *adminSteps) createClientWithRedirectURI(ctx context.Context, redirectURI string) error {
+	tenantID := s.tc.GetTenantID()
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID not set")
+	}
+	body := map[string]interface{}{
+		"tenant_id":      tenantID,
+		"name":           "Redirect URI Test Client",
+		"redirect_uris":  []string{redirectURI},
+		"allowed_grants": []string{"authorization_code", "refresh_token"},
+		"allowed_scopes": []string{"openid", "profile", "email"},
+		"public_client":  false,
+	}
+	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+// Auth tests without admin token
+
+func (s *adminSteps) reactivateTenantWithoutAdminToken(ctx context.Context) error {
+	tenantID := s.tc.GetTenantID()
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID not set")
+	}
+	return s.tc.POSTWithHeaders("/admin/tenants/"+tenantID+"/reactivate", nil, map[string]string{
+		"X-Admin-Token": "", // Empty token
+	})
+}
+
+func (s *adminSteps) reactivateClientWithoutAdminToken(ctx context.Context) error {
+	clientID := s.tc.GetTestClientID()
+	if clientID == "" {
+		return fmt.Errorf("client ID not set")
+	}
+	return s.tc.POSTWithHeaders("/admin/clients/"+clientID+"/reactivate", nil, map[string]string{
+		"X-Admin-Token": "", // Empty token
+	})
+}
+
+func (s *adminSteps) getTenantDetailsWithoutAdminToken(ctx context.Context) error {
+	tenantID := s.tc.GetTenantID()
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID not set")
+	}
+	return s.tc.GET("/admin/tenants/"+tenantID, map[string]string{
+		"X-Admin-Token": "", // Empty token
+	})
+}
+
+func (s *adminSteps) getClientDetailsWithoutAdminToken(ctx context.Context) error {
+	clientID := s.tc.GetTestClientID()
+	if clientID == "" {
+		return fmt.Errorf("client ID not set")
+	}
+	return s.tc.GET("/admin/clients/"+clientID, map[string]string{
+		"X-Admin-Token": "", // Empty token
+	})
+}
+
+func (s *adminSteps) updateClientNameWithoutAdminToken(ctx context.Context, newName string) error {
+	clientID := s.tc.GetTestClientID()
+	if clientID == "" {
+		return fmt.Errorf("client ID not set")
+	}
+	body := map[string]interface{}{
+		"name": newName,
+	}
+	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+		"X-Admin-Token": "", // Empty token
+	})
+}
+
+func (s *adminSteps) rotateClientSecretWithoutAdminToken(ctx context.Context) error {
+	clientID := s.tc.GetTestClientID()
+	if clientID == "" {
+		return fmt.Errorf("client ID not set")
+	}
+	body := map[string]interface{}{
+		"rotate_secret": true,
+	}
+	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+		"X-Admin-Token": "", // Empty token
+	})
+}
+
+// Update validation steps
+
+func (s *adminSteps) updateClientWithRedirectURI(ctx context.Context, redirectURI string) error {
+	clientID := s.tc.GetTestClientID()
+	if clientID == "" {
+		return fmt.Errorf("client ID not set")
+	}
+	body := map[string]interface{}{
+		"redirect_uris": []string{redirectURI},
+	}
+	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+func (s *adminSteps) updateClientWithClientCredentialsGrant(ctx context.Context) error {
+	clientID := s.tc.GetTestClientID()
+	if clientID == "" {
+		return fmt.Errorf("client ID not set")
+	}
+	body := map[string]interface{}{
+		"allowed_grants": []string{"authorization_code", "client_credentials"},
+	}
+	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+		"X-Admin-Token": s.tc.GetAdminToken(),
+	})
+}
+
+// Secret rotation validation
+
+func (s *adminSteps) authenticateWithOldClientSecret(ctx context.Context) error {
+	oauthClientID := s.tc.GetOAuthClientID()
+	oldSecret := s.tc.GetClientSecret()
+	if oauthClientID == "" {
+		return fmt.Errorf("OAuth client_id not set")
+	}
+	if oldSecret == "" {
+		return fmt.Errorf("old client secret not set")
+	}
+	// Attempt token exchange with old credentials
+	body := map[string]interface{}{
+		"grant_type":    "client_credentials",
+		"client_id":     oauthClientID,
+		"client_secret": oldSecret,
+		"scope":         "openid",
+	}
+	return s.tc.POST("/oauth/token", body)
+}
+
+func (s *adminSteps) authenticationShouldFail(ctx context.Context) error {
+	status := s.tc.GetLastResponseStatus()
+	if status >= 200 && status < 300 {
+		return fmt.Errorf("expected authentication to fail, but got status %d", status)
+	}
+	return nil
 }
