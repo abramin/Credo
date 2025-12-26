@@ -5,8 +5,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	pkgerrors "credo/pkg/domain-errors"
 )
+
+// Shard contention metrics for monitoring lock behavior
+var (
+	shardLockWaitDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "credo_consent_shard_lock_wait_seconds",
+		Help:    "Time spent waiting to acquire shard lock",
+		Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1},
+	})
+	shardLockAcquisitions = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "credo_consent_shard_lock_acquisitions_total",
+		Help: "Total number of shard lock acquisitions",
+	})
+)
+
+// TODO: Use pkg/sync.ShardedMutex where possible
 
 // ConsentStoreTx provides a transactional boundary for consent store mutations.
 // Implementations may wrap a database transaction or, in-memory, a coarse lock.
@@ -47,7 +65,12 @@ func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(store Store) err
 	}
 
 	shard := t.selectShard(ctx)
+
+	// Record lock acquisition timing for contention monitoring
+	lockStart := time.Now()
 	t.shards[shard].Lock()
+	shardLockWaitDuration.Observe(time.Since(lockStart).Seconds())
+	shardLockAcquisitions.Inc()
 	defer t.shards[shard].Unlock()
 
 	// Check again after acquiring lock

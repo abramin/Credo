@@ -9,14 +9,14 @@ import (
 
 	"github.com/google/uuid"
 
-	"credo/internal/consent/models"
 	consentmetrics "credo/internal/consent/metrics"
-	"credo/internal/consent/store"
+	"credo/internal/consent/models"
 	id "credo/pkg/domain"
 	pkgerrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	auditpublisher "credo/pkg/platform/audit/publisher"
 	requesttime "credo/pkg/platform/middleware/requesttime"
+	"credo/pkg/platform/sentinel"
 )
 
 // Store defines the persistence interface for consent records.
@@ -153,7 +153,7 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID id.UserID, purpose models.Purpose) (*models.Record, error) {
 	now := requesttime.Now(ctx)
 	existing, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err != nil && !errors.Is(err, sentinel.ErrNotFound) {
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to read consent")
 	}
 
@@ -241,13 +241,13 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	var revoked []*models.Record
 	now := requesttime.Now(ctx)
 
-	// Wrap multi-purpose revoke in transaction to ensure atomicity per AGENTS.md
+	// Wrap multi-purpose revoke in transaction to ensure atomicity
 	// Add user ID to context for sharded locking
 	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
 	txErr := s.tx.RunInTx(txCtx, func(txStore Store) error {
 		for _, purpose := range purposes {
 			record, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
-			if errors.Is(err, store.ErrNotFound) {
+			if errors.Is(err, sentinel.ErrNotFound) {
 				// Can't revoke what doesn't exist - skip silently
 				continue
 			}
@@ -286,7 +286,7 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 }
 
 // RevokeAll revokes all active consents for a user.
-// Intended for test cleanup and administrative purposes.
+// Intended administrative purposes.
 // Returns the count of revoked consents.
 func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) {
 	if userID.IsNil() {
@@ -344,6 +344,9 @@ func (s *Service) List(ctx context.Context, userID id.UserID, filter *models.Rec
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to list consents")
 	}
 
+	// Record distribution of records per user for performance monitoring
+	s.observeRecordsPerUser(float64(len(records)))
+
 	return records, nil
 }
 
@@ -357,7 +360,7 @@ func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.
 
 	record, err := s.store.FindByUserAndPurpose(ctx, userID, purpose)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, sentinel.ErrNotFound) {
 			s.recordConsentCheckOutcome(ctx, userID, purpose, outcomeMissing)
 			return pkgerrors.New(pkgerrors.CodeMissingConsent, "consent not granted for required purpose")
 		}
@@ -433,6 +436,13 @@ func (s *Service) incrementActiveConsents(count float64) {
 func (s *Service) decrementActiveConsents(count float64) {
 	if s.metrics != nil {
 		s.metrics.DecrementActiveConsentsPerUser(count)
+	}
+}
+
+// observeRecordsPerUser records the distribution of consent records per user.
+func (s *Service) observeRecordsPerUser(count float64) {
+	if s.metrics != nil {
+		s.metrics.ObserveRecordsPerUser(count)
 	}
 }
 
