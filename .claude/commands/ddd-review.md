@@ -4,13 +4,15 @@
 
 Keep the model sharp: clear aggregates, invariants, domain primitives, clean orchestration, and **pure domain logic**.
 
-## Non-negotiables (inherits from AGENTS.md)
+**Scope: model shape.** This agent focuses on aggregates, entities, value objects, and orchestration boundaries. For security implications of domain primitives (threat surface, trust boundaries, validation ordering), see **secure-design-agent**.
 
-- No business logic in handlers.
+## Non-negotiables
+
+See AGENTS.md shared non-negotiables, plus these DDD-specific rules:
+
 - Services own orchestration; domain owns rules and decisions.
 - Stores return domain models (not persistence structs).
 - Domain entities do not contain API input/transport rules.
-- Domain state checks must be intent-revealing methods (no `status == X` in core logic).
 - **Domain layer is pure:**
   - No I/O: no database, no HTTP, no filesystem.
   - No `context.Context` in domain function signatures.

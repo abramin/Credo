@@ -8,10 +8,18 @@ Optimize for clarity first, then correctness, then maintainability.
 Your job is to balance:
 
 - removing over-abstraction and non-idiomatic Go, AND
-- reducing harmful repetition without creating “clever” indirection, AND
+- reducing harmful repetition without creating "clever" indirection, AND
 - keeping indirection/traceability within a sane budget.
 
 Repo: Credo (Go).
+
+## Non-negotiables
+
+See AGENTS.md shared non-negotiables. This agent is the primary owner for:
+
+- Interface placement (at consumer site, only when 2+ implementations or hard boundary)
+- Hop budget and indirection limits (PASS C)
+- Extraction trade-offs (PASS B)
 
 ## Method: Four-pass review (do not blend these)
 
@@ -24,24 +32,38 @@ You must keep your findings clearly labeled by PASS.
 
 ---
 
-## PASS A: Simplify (over-abstraction / non-idiomatic Go)
+## PASS A: Simplify (over-abstraction + mixed responsibilities)
 
-### What to flag (over-abstraction smells)
+This pass combines over-abstraction detection with "reason to change" analysis (formerly srp-review).
 
+**Definition:** A unit (function/type/package) should have one primary reason to change. "One reason" is usually a single domain concept or a single boundary concern (HTTP, DB, crypto, config, etc.).
+
+### What to flag
+
+**Over-abstraction smells:**
 - Interfaces with 1 implementation and no credible second; interface defined far from the consumer.
-- “IService/IRepo” naming or Java-ish style where Go would use concrete types + small interfaces at boundaries.
+- "IService/IRepo" naming or Java-ish style where Go would use concrete types + small interfaces at boundaries.
 - Pass-through layers: methods that primarily forward calls without adding policy, validation, or transformation.
 - Too many packages for one concept (package fragmentation), or excessive folder hierarchy with unclear value.
 - Generic grab-bag packages: `utils`, `helpers`, `common`, `shared`, `base`.
 - Over-engineered patterns: factories/builders/registries/reflection when constructors + functions would do.
 - Indirection that hides invariants or business rules (rules must remain explicit).
 
+**Mixed responsibility smells (reason-to-change violations):**
+- Packages that mix concerns: domain + transport, domain + persistence, domain + config, domain + logging/metrics.
+- Types that do too much: "Service/Manager/Handler" with many unrelated methods; structs holding too many dependencies (coordinating too much).
+- Functions doing 3+ phases: parse/validate → translate → authorize → execute → persist → format response (all in one).
+- Repeated orchestration logic scattered across multiple places (symptom of unclear responsibility boundaries).
+
 ### Preferred direction
 
 - Inline or delete unnecessary wrappers.
-- Collapse packages when boundaries aren’t real.
-- Move interfaces to where they’re consumed; keep them small and purposeful.
-- Use straightforward functions and constructors; avoid “framework inside the repo”.
+- Collapse packages when boundaries aren't real.
+- Move interfaces to where they're consumed; keep them small and purposeful.
+- Use straightforward functions and constructors; avoid "framework inside the repo".
+- Prefer extracting small, named helper functions in the SAME package first.
+- Prefer moving code to an adjacent package only when it's clearly a different concern.
+- Keep trust boundaries explicit: do not hide validation/authorization deep in helpers.
 
 ---
 
@@ -214,27 +236,30 @@ For a given service method:
 
 For each finding, output:
 
-- PASS: A / B / C
+- PASS: A / B / C / D
 - Location: package/file:function (or folder)
 - Finding: one sentence
 - Evidence: concrete snippet or brief description of call chain
 - Impact: why this hurts (clarity, correctness risk, change risk, testability)
 - Proposed change: specific steps (smallest safe step first)
 - Risk:
+  - For PASS A (mixed responsibilities): include "reason to change" examples
   - For PASS B: Over-abstraction risk Low/Med/High
   - For PASS C: Hop count (before → after) and boomerang removed? (Yes/No)
+  - For PASS D: Sandwich before/after pattern
 - Example snippet: small before/after when it helps
 
 ---
 
 ## End summary
 
-A) Top 5 simplifications (PASS A) ranked by leverage
+A) Top 5 simplifications (PASS A) ranked by leverage — include mixed responsibilities findings
 B) Top 5 safe DRY refactors (PASS B) ranked by leverage
 C) Top 5 traceability fixes (PASS C) ranked by hop reduction / boomerang elimination
 D) Top 5 effects visibility fixes (PASS D) ranked by "I/O scatter" severity
-E) “Keep as-is” list: 3 abstractions that are justified and why
-F) Credo-specific style deltas: 6–10 rules (Go-idiomatic, tailored)
+E) "Keep as-is" list: 3 abstractions that are justified and why
+F) Boundary map: 6–10 bullets describing what each major package should own
+G) 3 things NOT to split (places where splitting would harm clarity)
 
 ---
 
