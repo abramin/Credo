@@ -60,7 +60,7 @@ type AuthCodeStore interface {
 	FindByCode(ctx context.Context, code string) (*models.AuthorizationCodeRecord, error)
 	MarkUsed(ctx context.Context, code string) error
 	ConsumeAuthCode(ctx context.Context, code string, redirectURI string, now time.Time) (*models.AuthorizationCodeRecord, error)
-	DeleteExpiredCodes(ctx context.Context) (int, error)
+	DeleteExpiredCodes(ctx context.Context, now time.Time) (int, error)
 }
 
 type RefreshTokenStore interface {
@@ -121,12 +121,22 @@ const (
 	TokenFlowRefresh TokenFlow = "refresh"
 )
 
+// TRLFailureModeWarn logs TRL failures but continues (default).
+const TRLFailureModeWarn = "warn"
+
+// TRLFailureModeFail returns an error if TRL write fails.
+const TRLFailureModeFail = "fail"
+
 type Config struct {
 	SessionTTL             time.Duration
 	TokenTTL               time.Duration
 	RefreshTokenTTL        time.Duration
 	AllowedRedirectSchemes []string
 	DeviceBindingEnabled   bool
+	// TRLFailureMode controls behavior when token revocation list write fails.
+	// "warn" (default): log the error and continue
+	// "fail": return an error, failing the operation
+	TRLFailureMode string
 }
 
 // applyDefaults sets default values for any unset config fields.
@@ -142,6 +152,9 @@ func (c *Config) applyDefaults() {
 	}
 	if len(c.AllowedRedirectSchemes) == 0 {
 		c.AllowedRedirectSchemes = []string{"https"}
+	}
+	if c.TRLFailureMode == "" {
+		c.TRLFailureMode = TRLFailureModeWarn
 	}
 }
 
@@ -256,6 +269,20 @@ func WithTRL(trl TokenRevocationList) Option {
 	}
 }
 
+// validateRequiredDeps checks that all required dependencies are provided.
+func validateRequiredDeps(users UserStore, sessions SessionStore, codes AuthCodeStore, refreshTokens RefreshTokenStore, jwt TokenGenerator, clientResolver ClientResolver) error {
+	if users == nil || sessions == nil || codes == nil || refreshTokens == nil {
+		return fmt.Errorf("users, sessions, codes, and refreshTokens stores are required")
+	}
+	if jwt == nil {
+		return fmt.Errorf("token generator (jwt) is required")
+	}
+	if clientResolver == nil {
+		return fmt.Errorf("client resolver is required")
+	}
+	return nil
+}
+
 // New creates an auth service with required dependencies.
 // Required: stores (users, sessions, codes, refreshTokens), jwt generator, and client resolver.
 // Optional: logger, metrics, auditPublisher, TRL (via functional options).
@@ -269,14 +296,8 @@ func New(
 	cfg *Config,
 	opts ...Option,
 ) (*Service, error) {
-	if users == nil || sessions == nil || codes == nil || refreshTokens == nil {
-		return nil, fmt.Errorf("users, sessions, codes, and refreshTokens stores are required")
-	}
-	if jwt == nil {
-		return nil, fmt.Errorf("token generator (jwt) is required")
-	}
-	if clientResolver == nil {
-		return nil, fmt.Errorf("client resolver is required")
+	if err := validateRequiredDeps(users, sessions, codes, refreshTokens, jwt, clientResolver); err != nil {
+		return nil, err
 	}
 	if cfg == nil {
 		cfg = &Config{}

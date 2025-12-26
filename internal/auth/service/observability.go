@@ -86,3 +86,24 @@ func (s *Service) incrementTokenRequests() {
 		s.metrics.IncrementTokenRequests()
 	}
 }
+
+// observeAuthorizeDuration records the duration of an authorization request
+func (s *Service) observeAuthorizeDuration(durationMs float64) {
+	if s.metrics != nil {
+		s.metrics.ObserveAuthorizeDuration(durationMs)
+	}
+}
+
+// observeTokenExchangeDuration records the duration of a token exchange operation
+func (s *Service) observeTokenExchangeDuration(durationMs float64) {
+	if s.metrics != nil {
+		s.metrics.ObserveTokenExchangeDuration(durationMs)
+	}
+}
+
+// observeTokenRefreshDuration records the duration of a token refresh operation
+func (s *Service) observeTokenRefreshDuration(durationMs float64) {
+	if s.metrics != nil {
+		s.metrics.ObserveTokenRefreshDuration(durationMs)
+	}
+}

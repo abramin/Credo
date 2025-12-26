@@ -17,6 +17,11 @@ import (
 // It validates the authorization code, ensures the session and client are consistent,
 // consumes the code to prevent reuse, and issues new tokens.
 func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.TokenRequest) (*models.TokenResult, error) {
+	start := time.Now()
+	defer func() {
+		s.observeTokenExchangeDuration(float64(time.Since(start).Milliseconds()))
+	}()
+
 	now := requesttime.Now(ctx)
 	var (
 		codeRecord *models.AuthorizationCodeRecord

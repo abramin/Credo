@@ -111,11 +111,12 @@ func (s *InMemorySessionStore) RevokeSessionIfActive(_ context.Context, sessionI
 	return nil
 }
 
-func (s *InMemorySessionStore) DeleteExpiredSessions(ctx context.Context) (int, error) {
+// DeleteExpiredSessions removes all sessions that have expired as of the given time.
+// The time parameter is injected for testability (no hidden time.Now() calls).
+func (s *InMemorySessionStore) DeleteExpiredSessions(_ context.Context, now time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now()
 	deletedCount := 0
 	for id, session := range s.sessions {
 		if session.ExpiresAt.Before(now) {

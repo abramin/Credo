@@ -53,4 +53,5 @@ type SessionRevocationResult struct {
 
 type LogoutAllResult struct {
 	RevokedCount int `json:"revoked_count"`
+	FailedCount  int `json:"failed_count,omitempty"`
 }
