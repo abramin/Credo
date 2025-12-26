@@ -71,9 +71,9 @@ func (c *Client) IsActive() bool {
 
 // Deactivate transitions the client to inactive status.
 // Updates the timestamp to track when the transition occurred.
-// Returns an error if the client is already inactive.
+// Returns an error if the transition is not allowed.
 func (c *Client) Deactivate(now time.Time) error {
-	if !c.IsActive() {
+	if !c.Status.CanTransitionTo(ClientStatusInactive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "client is already inactive")
 	}
 	c.Status = ClientStatusInactive
@@ -83,9 +83,9 @@ func (c *Client) Deactivate(now time.Time) error {
 
 // Reactivate transitions the client to active status.
 // Updates the timestamp to track when the transition occurred.
-// Returns an error if the client is already active.
+// Returns an error if the transition is not allowed.
 func (c *Client) Reactivate(now time.Time) error {
-	if c.IsActive() {
+	if !c.Status.CanTransitionTo(ClientStatusActive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "client is already active")
 	}
 	c.Status = ClientStatusActive

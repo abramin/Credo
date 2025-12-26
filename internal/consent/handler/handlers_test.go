@@ -78,7 +78,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent_ErrorMapping() {
 		w := httptest.NewRecorder()
 		handler.HandleGrantConsent(w, req)
 
-		assertStatusAndError(t, w, http.StatusBadRequest, "bad_request")
+		assertStatusAndError(t, w, http.StatusBadRequest, "validation_error")
 	})
 
 	s.T().Run("invalid purpose value returns 400", func(t *testing.T) {
@@ -90,7 +90,7 @@ func (s *ConsentHandlerSuite) TestHandleGrantConsent_ErrorMapping() {
 		w := httptest.NewRecorder()
 		handler.HandleGrantConsent(w, req)
 
-		assertStatusAndError(t, w, http.StatusBadRequest, "bad_request")
+		assertStatusAndError(t, w, http.StatusBadRequest, "validation_error")
 	})
 
 	s.T().Run("service CodeInternal error returns 500", func(t *testing.T) {
@@ -158,7 +158,7 @@ func (s *ConsentHandlerSuite) TestHandleGetConsents_ErrorMapping() {
 
 		handler.HandleGetConsents(w, req)
 
-		assertStatusAndError(t, w, http.StatusBadRequest, "bad_request")
+		assertStatusAndError(t, w, http.StatusBadRequest, "validation_error")
 	})
 }
 
@@ -189,7 +189,7 @@ func (s *ConsentHandlerSuite) TestHandleRevokeConsent_ErrorMapping() {
 		w := httptest.NewRecorder()
 		handler.HandleRevokeConsent(w, req)
 
-		assertStatusAndError(t, w, http.StatusBadRequest, "bad_request")
+		assertStatusAndError(t, w, http.StatusBadRequest, "validation_error")
 	})
 
 	s.T().Run("service CodeInternal error returns 500", func(t *testing.T) {

@@ -39,15 +39,20 @@ type Service interface {
 	RotateClientSecretForTenant(ctx context.Context, tenantID id.TenantID, id id.ClientID) (*models.Client, string, error)
 }
 
+// Handler provides HTTP endpoints for tenant and client management.
+// All endpoints require admin authorization via X-Admin-Token middleware.
 type Handler struct {
 	service Service
 	logger  *slog.Logger
 }
 
+// New creates a new tenant handler with the given service and logger.
 func New(service Service, logger *slog.Logger) *Handler {
 	return &Handler{service: service, logger: logger}
 }
 
+// Register mounts all tenant and client admin routes on the router.
+// Routes are prefixed with /admin/ and require admin authentication.
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/admin/tenants", h.HandleCreateTenant)
 	r.Get("/admin/tenants/{id}", h.HandleGetTenant)
@@ -61,7 +66,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/admin/clients/{id}/rotate-secret", h.HandleRotateClientSecret)
 }
 
-// HandleCreateTenant creates a tenant.
+// HandleCreateTenant creates a new tenant with the given name.
+// Returns the created tenant with its generated UUID.
 func (h *Handler) HandleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)

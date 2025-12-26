@@ -57,19 +57,67 @@ func requireTenantID(tenantID id.TenantID) error {
 	return nil
 }
 
-// Error wrapping helpers translate sentinel errors to domain errors.
+// Error mapping: translates store/sentinel errors into domain errors.
 
+// storeErrorMapping defines how a sentinel error maps to a domain error.
+type storeErrorMapping struct {
+	sentinel  error
+	code      dErrors.Code
+	clientMsg string
+	tenantMsg string
+}
+
+// storeErrorMappings defines error translations in priority order.
+// First match wins; more specific errors should come first.
+var storeErrorMappings = []storeErrorMapping{
+	{sentinel.ErrNotFound, dErrors.CodeNotFound, "client not found", "tenant not found"},
+	{sentinel.ErrAlreadyUsed, dErrors.CodeConflict, "client already exists", "tenant name already exists"},
+	{sentinel.ErrInvalidState, dErrors.CodeConflict, "invalid client state", "invalid tenant state"},
+}
+
+// wrapClientErr translates store errors into client-specific domain errors.
 func wrapClientErr(err error, action string) error {
-	if errors.Is(err, sentinel.ErrNotFound) {
-		return dErrors.New(dErrors.CodeNotFound, "client not found")
+	if err == nil {
+		return nil
 	}
+
+	// Pass through existing domain errors
+	var de *dErrors.Error
+	if errors.As(err, &de) {
+		return err
+	}
+
+	// Check mappings in order
+	for _, m := range storeErrorMappings {
+		if errors.Is(err, m.sentinel) {
+			return dErrors.Wrap(err, m.code, m.clientMsg)
+		}
+	}
+
+	// Default: internal error
 	return dErrors.Wrap(err, dErrors.CodeInternal, action)
 }
 
+// wrapTenantErr translates store errors into tenant-specific domain errors.
 func wrapTenantErr(err error, action string) error {
-	if errors.Is(err, sentinel.ErrNotFound) {
-		return dErrors.New(dErrors.CodeNotFound, "tenant not found")
+	if err == nil {
+		return nil
 	}
+
+	// Pass through existing domain errors
+	var de *dErrors.Error
+	if errors.As(err, &de) {
+		return err
+	}
+
+	// Check mappings in order
+	for _, m := range storeErrorMappings {
+		if errors.Is(err, m.sentinel) {
+			return dErrors.Wrap(err, m.code, m.tenantMsg)
+		}
+	}
+
+	// Default: internal error
 	return dErrors.Wrap(err, dErrors.CodeInternal, action)
 }
 
@@ -117,9 +165,14 @@ func (e *auditEmitter) emitToAudit(ctx context.Context, event string, attributes
 			"error", err,
 		)
 	}
-	_ = e.publisher.Emit(ctx, audit.Event{
+	if err := e.publisher.Emit(ctx, audit.Event{
 		UserID:  userID,
 		Subject: userIDStr,
 		Action:  event,
-	})
+	}); err != nil && e.logger != nil {
+		e.logger.ErrorContext(ctx, "failed to emit audit event",
+			"event", event,
+			"error", err,
+		)
+	}
 }

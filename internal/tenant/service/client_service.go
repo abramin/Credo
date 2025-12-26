@@ -39,6 +39,9 @@ func NewClientService(clients ClientStore, tenants TenantStore, opts ...Option) 
 // CreateClient registers a client under a tenant.
 // Returns the created client and the cleartext secret (only available at creation time).
 func (s *ClientService) CreateClient(ctx context.Context, cmd *CreateClientCommand) (*models.Client, string, error) {
+	start := time.Now()
+	defer s.observeCreateClient(start)
+
 	if err := cmd.Validate(); err != nil {
 		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid client request")
 	}
@@ -319,9 +322,13 @@ func (s *ClientService) applyClientUpdate(ctx context.Context, client *models.Cl
 
 // maybeRotateSecret generates and applies a new secret if requested.
 // Returns the cleartext secret (empty if not rotated).
+// Returns an error if rotation is requested on a public client.
 func (s *ClientService) maybeRotateSecret(client *models.Client, rotate bool) (string, error) {
 	if !rotate {
 		return "", nil
+	}
+	if !client.IsConfidential() {
+		return "", dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
 	}
 	secret, hash, err := generateSecret(false)
 	if err != nil {
@@ -363,6 +370,12 @@ func applyFieldUpdates(client *models.Client, cmd *UpdateClientCommand) {
 func (s *ClientService) observeResolveClient(start time.Time) {
 	if s.metrics != nil {
 		s.metrics.ObserveResolveClient(start)
+	}
+}
+
+func (s *ClientService) observeCreateClient(start time.Time) {
+	if s.metrics != nil {
+		s.metrics.ObserveCreateClient(start)
 	}
 }
 

@@ -41,7 +41,7 @@ Feature: Tenant & Client Management Admin API
   Scenario: Create tenant with empty name fails
     When I create a tenant with name ""
     Then the response status should be 400
-    And the response field "error" should equal "bad_request"
+    And the response field "error" should equal "validation_error"
 
     @admin @tenant @security
   Scenario: Create tenant without admin token fails
@@ -279,3 +279,250 @@ Feature: Tenant & Client Management Admin API
     When I deactivate client with id "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     Then the response status should be 404
     And the response field "error" should equal "not_found"
+
+    # ============================================================
+    # CLIENT VALIDATION (OAuth Security)
+    # ============================================================
+
+    @admin @client @validation @security
+  Scenario: Public client cannot use client_credentials grant
+    Given I create a tenant with name "Public Client Grant Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a public client "Public SPA" with client_credentials grant under the tenant
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    @admin @client @validation @security
+  Scenario: Redirect URI rejects localhost subdomain bypass
+    Given I create a tenant with name "Localhost Bypass Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a client with redirect URI "http://localhost.attacker.com/callback" under the tenant
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    @admin @tenant @validation
+  Scenario: Tenant name uniqueness is case-insensitive
+    When I create a tenant with exact name "CaseTest"
+    Then the response status should be 201
+    And I save the tenant ID from the response
+    When I create a tenant with exact name "casetest"
+    Then the response status should be 409
+    And the response field "error" should equal "conflict"
+
+    # ============================================================
+    # SECRET ROTATION EDGE CASES
+    # ============================================================
+
+    @admin @client @security
+  Scenario: Rotate secret for public client fails
+    Given I create a tenant with name "Public Client Rotation Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a public client "Public SPA" under the tenant
+    Then the response status should be 201
+    And I save the client ID from the response
+    When I rotate the client secret
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    @admin @client @security
+  Scenario: Old secret is invalidated after rotation
+    Given I create a tenant with name "Secret Invalidation Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "Rotation Invalidation App" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    And I save the client secret from the response
+    And I save the OAuth client_id from the response
+    When I rotate the client secret
+    Then the response status should be 200
+    When I authenticate with the old client secret
+    Then the authentication should fail
+
+    # ============================================================
+    # ADDITIONAL SECURITY TESTS (Auth enforcement)
+    # ============================================================
+
+    @admin @tenant @security
+  Scenario: Reactivate tenant without admin token fails
+    Given I create a tenant with name "Reactivate Auth Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I deactivate the tenant
+    And the response status should be 200
+    When I reactivate the tenant without admin token
+    Then the response status should be 401
+    And the response field "error" should equal "unauthorized"
+
+    @admin @client @security
+  Scenario: Reactivate client without admin token fails
+    Given I create a tenant with name "Client Reactivate Auth Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "Auth Test Client" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    And I deactivate the client
+    And the response status should be 200
+    When I reactivate the client without admin token
+    Then the response status should be 401
+    And the response field "error" should equal "unauthorized"
+
+    @admin @tenant @security
+  Scenario: Get tenant without admin token fails
+    Given I create a tenant with name "Get Tenant Auth Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I get the tenant details without admin token
+    Then the response status should be 401
+    And the response field "error" should equal "unauthorized"
+
+    @admin @client @security
+  Scenario: Get client without admin token fails
+    Given I create a tenant with name "Get Client Auth Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "Get Auth Test Client" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    When I get the client details without admin token
+    Then the response status should be 401
+    And the response field "error" should equal "unauthorized"
+
+    @admin @client @security
+  Scenario: Update client without admin token fails
+    Given I create a tenant with name "Update Client Auth Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "Update Auth Test Client" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    When I update the client name to "New Name" without admin token
+    Then the response status should be 401
+    And the response field "error" should equal "unauthorized"
+
+    @admin @client @security
+  Scenario: Rotate secret without admin token fails
+    Given I create a tenant with name "Rotate Secret Auth Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "Rotate Auth Test Client" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    When I rotate the client secret without admin token
+    Then the response status should be 401
+    And the response field "error" should equal "unauthorized"
+
+    # ============================================================
+    # CLIENT UPDATE VALIDATION
+    # ============================================================
+
+    @admin @client @validation
+  Scenario: Update client with invalid redirect URI fails
+    Given I create a tenant with name "Update URI Validation Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "URI Update Test App" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    When I update the client with redirect URI "http://example.com/callback"
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    @admin @client @validation
+  Scenario: Update public client to use client_credentials fails
+    Given I create a tenant with name "Public Grant Update Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a public client "Public Grant Test" under the tenant
+    Then the response status should be 201
+    And I save the client ID from the response
+    When I update the client with client_credentials grant
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    @admin @client @validation
+  Scenario: Update client with empty name fails
+    Given I create a tenant with name "Empty Name Update Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "Empty Name Test App" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    When I update the client name to ""
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    # ============================================================
+    # TENANT-CLIENT RELATIONSHIP
+    # ============================================================
+
+    @admin @client @lifecycle
+  Scenario: Reactivating tenant does not auto-reactivate deactivated clients
+    Given I create a tenant with name "Cascade Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I create a client "Cascade App" under the tenant
+    And the response status should be 201
+    And I save the client ID from the response
+    And I save the OAuth client_id from the response
+    And I deactivate the client
+    And the response status should be 200
+    And I deactivate the tenant
+    And the response status should be 200
+    When I reactivate the tenant
+    Then the response status should be 200
+    When I initiate authorization with the client
+    Then the response status should be 400
+    And the response field "error" should equal "invalid_client"
+
+    # ============================================================
+    # INACTIVE TENANT CLIENT CREATION
+    # ============================================================
+
+    @admin @client @lifecycle
+  Scenario: Create client under inactive tenant fails
+    Given I create a tenant with name "Inactive Tenant Client Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    And I deactivate the tenant
+    And the response status should be 200
+    When I create a client "Orphan Client" under the tenant
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    # ============================================================
+    # NAME LENGTH BOUNDARY TESTS
+    # ============================================================
+
+    @admin @tenant @validation
+  Scenario: Tenant name at max length succeeds
+    When I create a tenant with name of exactly 128 characters
+    Then the response status should be 201
+    And I save the tenant ID from the response
+
+    @admin @tenant @validation
+  Scenario: Tenant name exceeds max length fails
+    When I create a tenant with name of exactly 129 characters
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"
+
+    @admin @client @validation
+  Scenario: Client name at max length succeeds
+    Given I create a tenant with name "Client Name Length Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a client with name of exactly 128 characters under the tenant
+    Then the response status should be 201
+
+    @admin @client @validation
+  Scenario: Client name exceeds max length fails
+    Given I create a tenant with name "Client Name Overflow Test"
+    And the response status should be 201
+    And I save the tenant ID from the response
+    When I create a client with name of exactly 129 characters under the tenant
+    Then the response status should be 400
+    And the response field "error" should equal "validation_error"

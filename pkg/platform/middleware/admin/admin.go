@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
 
@@ -11,7 +12,8 @@ func RequireAdminToken(expectedToken string, logger *slog.Logger) func(http.Hand
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := r.Header.Get("X-Admin-Token")
-			if token != expectedToken {
+			// Use constant-time comparison to prevent timing attacks
+			if subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) != 1 {
 				ctx := r.Context()
 				requestID := request.GetRequestID(ctx)
 				logger.WarnContext(ctx, "admin token mismatch",

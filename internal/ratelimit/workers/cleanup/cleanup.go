@@ -15,6 +15,8 @@ type CleanupResult struct {
 	Duration           time.Duration // Time taken for cleanup run
 }
 
+// AuthLockoutStore defines the subset of store operations needed for cleanup.
+// This is kept local because it's a narrow interface specific to cleanup needs.
 type AuthLockoutStore interface {
 	ResetFailureCount(ctx context.Context) (failuresReset int, err error)
 	ResetDailyFailures(ctx context.Context) (failuresReset int, err error)
@@ -76,7 +78,6 @@ func (s *AuthLockoutCleanupService) Start(ctx context.Context) error {
 			duration := time.Since(startTime)
 
 			if err != nil {
-				// PRD-017 FR-8: Log with standardized event name
 				s.logger.Error("auth_lockout_cleanup_failed",
 					"error", err,
 					"duration_ms", duration.Milliseconds(),
@@ -91,7 +92,6 @@ func (s *AuthLockoutCleanupService) Start(ctx context.Context) error {
 			// Set duration in result
 			res.Duration = duration
 
-			// PRD-017 FR-8: Log with standardized event name and duration_ms
 			s.logger.Info("auth_lockout_cleanup_completed",
 				"failure_counts_reset", res.FailuresReset,
 				"daily_failures_reset", res.DailyFailuresReset,

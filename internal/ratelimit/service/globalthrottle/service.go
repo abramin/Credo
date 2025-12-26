@@ -6,19 +6,15 @@ import (
 	"log/slog"
 
 	"credo/internal/ratelimit/config"
+	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
 )
 
-type Store interface {
-	IncrementGlobal(ctx context.Context) (count int, blocked bool, err error)
-	GetGlobalCount(ctx context.Context) (count int, err error)
-}
+// Store is an alias to the shared interface.
+type Store = ports.GlobalThrottleStore
 
-type AuditPublisher interface {
-	Emit(ctx context.Context, event audit.Event) error
-}
+// AuditPublisher is an alias to the shared interface.
+type AuditPublisher = ports.AuditPublisher
 
 type Service struct {
 	store          Store
@@ -74,7 +70,7 @@ func (s *Service) Check(ctx context.Context) (bool, error) {
 	}
 
 	if blocked {
-		s.logAudit(ctx, "global_throttle_triggered",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "global_throttle_triggered",
 			"current_count", count,
 			"global_limit", s.config.GlobalPerSecond,
 		)
@@ -90,20 +86,4 @@ func (s *Service) GetCount(ctx context.Context) (int, error) {
 		return 0, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get global count")
 	}
 	return count, nil
-}
-
-func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
-	if requestID := request.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
-	}
-	args := append(attrs, "event", event, "log_type", "audit")
-	if s.logger != nil {
-		s.logger.InfoContext(ctx, event, args...)
-	}
-	if s.auditPublisher == nil {
-		return
-	}
-	_ = s.auditPublisher.Emit(ctx, audit.Event{
-		Action: event,
-	})
 }

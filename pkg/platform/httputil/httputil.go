@@ -74,8 +74,10 @@ func DomainCodeToHTTPCode(code dErrors.Code) string {
 	switch code {
 	case dErrors.CodeNotFound:
 		return "not_found"
-	case dErrors.CodeBadRequest, dErrors.CodeValidation, dErrors.CodeInvalidInput:
+	case dErrors.CodeBadRequest, dErrors.CodeInvalidInput:
 		return "bad_request"
+	case dErrors.CodeValidation, dErrors.CodeInvariantViolation:
+		return "validation_error"
 	case dErrors.CodeConflict:
 		return "conflict"
 	case dErrors.CodeUnauthorized:

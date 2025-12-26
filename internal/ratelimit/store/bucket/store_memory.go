@@ -17,71 +17,116 @@ const (
 	circularBufferSize = 256    // Fixed size for circular buffer (covers most limits)
 )
 
-// circularWindow is a fixed-size circular buffer for sliding window rate limiting.
-// Provides O(1) operations and bounded memory.
-type circularWindow struct {
-	timestamps [circularBufferSize]int64 // Unix nano timestamps
-	head       int                       // Next write position
-	count      int                       // Current number of valid entries
-	window     time.Duration
+// ---------------------------------------------------------------------------
+// Sliding Window Rate Limiter
+// ---------------------------------------------------------------------------
+//
+// This implements a sliding window rate limiter using a circular buffer.
+//
+// How it works:
+//   - Each request's timestamp is recorded in a fixed-size circular buffer
+//   - To check the limit, we count how many timestamps fall within the window
+//   - Expired timestamps (outside the window) are ignored during counting
+//
+// Example: limit=5 requests per 1-minute window
+//
+//	Timeline (newest on right):
+//	|------ 1 minute window ------|
+//	[expired] [expired] [req1] [req2] [req3] [req4] [req5]
+//	                    ↑ valid requests = 5, at limit
+//
+// The circular buffer provides O(1) amortized operations and bounded memory.
+// When the buffer fills, old entries are overwritten (they're expired anyway).
+// ---------------------------------------------------------------------------
+
+// slidingWindow tracks request timestamps in a circular buffer for rate limiting.
+type slidingWindow struct {
+	timestamps [circularBufferSize]int64 // Request timestamps as Unix nanoseconds
+	writePos   int                       // Next position to write (head of circular buffer)
+	size       int                       // Number of entries written (up to buffer capacity)
+	windowSize time.Duration             // Duration of the sliding window
 }
 
-func (cw *circularWindow) tryConsume(cost, limit int, now time.Time) (allowed bool, remaining int, resetAt time.Time) {
+// tryConsume attempts to record 'cost' requests against the rate limit.
+//
+// Returns:
+//   - allowed: true if the request is within the limit
+//   - remaining: number of requests still available in the window
+//   - resetAt: when the oldest request expires (allowing new requests)
+func (sw *slidingWindow) tryConsume(cost int, limit int, now time.Time) (allowed bool, remaining int, resetAt time.Time) {
 	nowNano := now.UnixNano()
-	cutoffNano := nowNano - cw.window.Nanoseconds()
+	windowStart := nowNano - sw.windowSize.Nanoseconds()
 
-	// Count valid (non-expired) entries
-	validCount := 0
-	oldestValid := nowNano
-	for i := 0; i < cw.count; i++ {
-		idx := (cw.head - cw.count + i + circularBufferSize) % circularBufferSize
-		ts := cw.timestamps[idx]
-		if ts > cutoffNano {
-			validCount++
-			if ts < oldestValid {
-				oldestValid = ts
-			}
-		}
+	// Count requests within the current window and find the oldest one
+	requestsInWindow, oldestTimestamp := sw.countRequestsInWindow(windowStart, nowNano)
+
+	// Update size to reflect only valid entries (lazy cleanup)
+	sw.size = requestsInWindow
+
+	// Check if adding these requests would exceed the limit
+	if requestsInWindow+cost > limit {
+		// Calculate when the oldest request will expire
+		oldestExpiry := time.Unix(0, oldestTimestamp).Add(sw.windowSize)
+		return false, 0, oldestExpiry
 	}
 
-	// Update count to reflect cleanup
-	cw.count = validCount
+	// Record the new request timestamps
+	sw.recordRequests(cost, nowNano)
 
-	if validCount+cost > limit {
-		resetAt = time.Unix(0, oldestValid).Add(cw.window)
-		return false, 0, resetAt
-	}
-
-	// Record new timestamps
-	for range cost {
-		cw.timestamps[cw.head] = nowNano
-		cw.head = (cw.head + 1) % circularBufferSize
-		if cw.count < circularBufferSize {
-			cw.count++
-		}
-	}
-
-	remaining = limit - (validCount + cost)
-	resetAt = now.Add(cw.window)
+	remaining = limit - (requestsInWindow + cost)
+	resetAt = now.Add(sw.windowSize)
 	return true, remaining, resetAt
 }
 
-func (cw *circularWindow) currentCount(now time.Time) int {
-	cutoffNano := now.UnixNano() - cw.window.Nanoseconds()
-	validCount := 0
-	for i := 0; i < cw.count; i++ {
-		idx := (cw.head - cw.count + i + circularBufferSize) % circularBufferSize
-		if cw.timestamps[idx] > cutoffNano {
-			validCount++
+// countRequestsInWindow counts valid requests and finds the oldest timestamp.
+func (sw *slidingWindow) countRequestsInWindow(windowStart, nowNano int64) (count int, oldestTimestamp int64) {
+	oldestTimestamp = nowNano // Default to now if no valid requests
+
+	for i := 0; i < sw.size; i++ {
+		idx := sw.bufferIndex(i)
+		ts := sw.timestamps[idx]
+
+		if ts > windowStart {
+			count++
+			if ts < oldestTimestamp {
+				oldestTimestamp = ts
+			}
 		}
 	}
-	return validCount
+	return count, oldestTimestamp
 }
 
-// lruEntry wraps a bucket with LRU tracking.
+// bufferIndex calculates the actual array index for a logical position.
+// Position 0 is the oldest entry, position (size-1) is the newest.
+func (sw *slidingWindow) bufferIndex(position int) int {
+	return (sw.writePos - sw.size + position + circularBufferSize) % circularBufferSize
+}
+
+// recordRequests writes 'count' request timestamps to the buffer.
+func (sw *slidingWindow) recordRequests(count int, timestamp int64) {
+	for range count {
+		sw.timestamps[sw.writePos] = timestamp
+		sw.writePos = (sw.writePos + 1) % circularBufferSize
+
+		if sw.size < circularBufferSize {
+			sw.size++
+		}
+		// When size == circularBufferSize, we're overwriting old entries
+		// This is fine because they're expired anyway
+	}
+}
+
+// currentCount returns the number of requests currently in the window.
+func (sw *slidingWindow) currentCount(now time.Time) int {
+	windowStart := now.UnixNano() - sw.windowSize.Nanoseconds()
+	count, _ := sw.countRequestsInWindow(windowStart, now.UnixNano())
+	return count
+}
+
+// lruEntry wraps a sliding window with LRU tracking.
 type lruEntry struct {
 	key    string
-	bucket *circularWindow
+	window *slidingWindow
 }
 
 // shard is a partition of the bucket store with its own lock and LRU list.
@@ -100,20 +145,20 @@ func newShard(maxSize int) *shard {
 	}
 }
 
-func (s *shard) get(key string) (*circularWindow, bool) {
+func (s *shard) get(key string) (*slidingWindow, bool) {
 	elem, ok := s.buckets[key]
 	if !ok {
 		return nil, false
 	}
 	// Move to front (most recently used)
 	s.lruList.MoveToFront(elem)
-	return elem.Value.(*lruEntry).bucket, true
+	return elem.Value.(*lruEntry).window, true
 }
 
-func (s *shard) set(key string, bucket *circularWindow) {
+func (s *shard) set(key string, window *slidingWindow) {
 	if elem, ok := s.buckets[key]; ok {
 		s.lruList.MoveToFront(elem)
-		elem.Value.(*lruEntry).bucket = bucket
+		elem.Value.(*lruEntry).window = window
 		return
 	}
 
@@ -127,7 +172,8 @@ func (s *shard) set(key string, bucket *circularWindow) {
 		}
 	}
 
-	entry := &lruEntry{key: key, bucket: bucket}
+	entry := &lruEntry{key: key, window: window}
+	// Insert new entry at front
 	elem := s.lruList.PushFront(entry)
 	s.buckets[key] = elem
 }
@@ -202,22 +248,22 @@ func (s *InMemoryBucketStore) Allow(ctx context.Context, key string, limit int, 
 	return s.AllowN(ctx, key, 1, limit, window)
 }
 
-func (s *InMemoryBucketStore) AllowN(ctx context.Context, key string, cost, limit int, window time.Duration) (*models.RateLimitResult, error) {
+func (s *InMemoryBucketStore) AllowN(ctx context.Context, key string, cost, limit int, windowDuration time.Duration) (*models.RateLimitResult, error) {
 	sh := s.getShard(key)
 
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 
-	bucket, ok := sh.get(key)
+	sw, ok := sh.get(key)
 	if !ok {
-		bucket = &circularWindow{
-			window: window,
+		sw = &slidingWindow{
+			windowSize: windowDuration,
 		}
-		sh.set(key, bucket)
+		sh.set(key, sw)
 	}
 
 	now := requesttime.Now(ctx)
-	allowed, remaining, resetAt := bucket.tryConsume(cost, limit, now)
+	allowed, remaining, resetAt := sw.tryConsume(cost, limit, now)
 
 	return &models.RateLimitResult{
 		Allowed:    allowed,
@@ -249,7 +295,7 @@ func (s *InMemoryBucketStore) GetCurrentCount(ctx context.Context, key string) (
 		return 0, nil
 	}
 
-	return elem.Value.(*lruEntry).bucket.currentCount(requesttime.Now(ctx)), nil
+	return elem.Value.(*lruEntry).window.currentCount(requesttime.Now(ctx)), nil
 }
 
 // Stats returns store statistics for monitoring.

@@ -1,3 +1,19 @@
+// Package requestlimit provides per-IP and per-user rate limiting.
+//
+// This is the primary rate limiting service used by middleware to enforce
+// request quotas on API endpoints. It implements sliding window rate limiting
+// with configurable limits per endpoint class.
+//
+// Usage:
+//
+//	svc, _ := requestlimit.New(bucketStore, allowlistStore)
+//	result, _ := svc.CheckIP(ctx, clientIP, models.ClassAuth)
+//	if !result.Allowed {
+//	    // Return 429 Too Many Requests
+//	}
+//
+// The service checks allowlist entries before applying rate limits,
+// allowing admins to exempt specific IPs or users from limiting.
 package requestlimit
 
 import (
@@ -9,26 +25,22 @@ import (
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/metrics"
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
 	requesttime "credo/pkg/platform/middleware/requesttime"
 	"credo/pkg/platform/privacy"
 )
 
-type BucketStore interface {
-	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
-	AllowN(ctx context.Context, key string, cost, limit int, window time.Duration) (*models.RateLimitResult, error)
-}
+// Type aliases for interfaces from ports package.
+// This allows external packages to use these types without importing ports directly.
+type (
+	BucketStore    = ports.BucketStore
+	AllowlistStore = ports.AllowlistStore
+	AuditPublisher = ports.AuditPublisher
+)
 
-type AllowlistStore interface {
-	IsAllowlisted(ctx context.Context, identifier string) (bool, error)
-}
-
-type AuditPublisher interface {
-	Emit(ctx context.Context, event audit.Event) error
-}
-
+// Service enforces per-IP and per-user rate limits using sliding window counters.
+// Thread-safe for concurrent use by HTTP middleware.
 type Service struct {
 	buckets        BucketStore
 	allowlist      AllowlistStore
@@ -38,32 +50,39 @@ type Service struct {
 	metrics        *metrics.Metrics
 }
 
+// Option configures a Service instance.
 type Option func(*Service)
 
+// WithLogger sets the structured logger for audit and debug logging.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {
 		s.logger = logger
 	}
 }
 
+// WithAuditPublisher sets the audit event publisher for security logging.
 func WithAuditPublisher(publisher AuditPublisher) Option {
 	return func(s *Service) {
 		s.auditPublisher = publisher
 	}
 }
 
+// WithConfig overrides the default rate limit configuration.
 func WithConfig(cfg *config.Config) Option {
 	return func(s *Service) {
 		s.config = cfg
 	}
 }
 
+// WithMetrics sets the metrics recorder for observability.
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(s *Service) {
 		s.metrics = m
 	}
 }
 
+// New creates a rate limiting service with the given stores and options.
+// Returns an error if required stores are nil.
 func New(
 	buckets BucketStore,
 	allowlist AllowlistStore,
@@ -89,11 +108,14 @@ func New(
 	return svc, nil
 }
 
+// CheckIP enforces per-IP rate limits for unauthenticated requests.
+// Used by middleware.RateLimit for endpoints that don't require authentication.
+// Returns Allowed=false if the IP has exceeded its quota for the endpoint class.
 func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	requestsPerWindow, window, ok := s.config.GetIPLimit(class)
 	if !ok {
 		// Default-deny: no limit configured for this class (PRD-017 FR-1)
-		s.logAudit(ctx, "rate_limit_config_missing",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
 			"identifier", privacy.AnonymizeIP(ip),
 			"endpoint_class", class,
 			"limit_type", models.KeyPrefixIP,
@@ -109,11 +131,14 @@ func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointC
 	return s.checkRateLimit(ctx, ip, class, models.KeyPrefixIP, requestsPerWindow, window, privacy.AnonymizeIP(ip))
 }
 
+// CheckUser enforces per-user rate limits.
+// Used when you want to limit by user identity only, ignoring IP.
+// Returns Allowed=false if the user has exceeded their quota for the endpoint class.
 func (s *Service) CheckUser(ctx context.Context, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	requestsPerWindow, window, ok := s.config.GetUserLimit(class)
 	if !ok {
 		// Default-deny: no limit configured for this class (PRD-017 FR-1)
-		s.logAudit(ctx, "rate_limit_config_missing",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
 			"identifier", userID,
 			"endpoint_class", class,
 			"limit_type", models.KeyPrefixUser,
@@ -127,6 +152,15 @@ func (s *Service) CheckUser(ctx context.Context, userID string, class models.End
 		}, nil
 	}
 	return s.checkRateLimit(ctx, userID, class, models.KeyPrefixUser, requestsPerWindow, window, userID)
+}
+
+// limitParams groups parameters for a single rate limit check.
+type limitParams struct {
+	identifier    string
+	logIdentifier string
+	prefix        models.KeyPrefix
+	limit         int
+	window        time.Duration
 }
 
 func (s *Service) checkRateLimit(
@@ -150,7 +184,7 @@ func (s *Service) checkRateLimit(
 		if s.metrics != nil {
 			s.metrics.RecordAllowlistBypass(bypassType)
 		}
-		s.logAudit(ctx, "allowlist_bypass",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "allowlist_bypass",
 			"identifier", logIdentifier,
 			"endpoint_class", class,
 			"bypass_type", bypassType,
@@ -172,7 +206,7 @@ func (s *Service) checkRateLimit(
 	}
 
 	if !result.Allowed {
-		s.logAudit(ctx, string(keyPrefix)+"_rate_limit_exceeded",
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, string(keyPrefix)+"_rate_limit_exceeded",
 			"identifier", logIdentifier,
 			"endpoint_class", class,
 			"limit", requestsPerWindow,
@@ -183,28 +217,52 @@ func (s *Service) checkRateLimit(
 	return result, nil
 }
 
+// checkSingleLimit performs a rate limit check without allowlist handling.
+// Used by CheckBoth after allowlist checks are done upfront.
+func (s *Service) checkSingleLimit(ctx context.Context, p limitParams, class models.EndpointClass) (*models.RateLimitResult, error) {
+	key := models.NewRateLimitKey(p.prefix, p.identifier, class)
+	res, err := s.buckets.Allow(ctx, key.String(), p.limit, p.window)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to check "+string(p.prefix)+" rate limit")
+	}
+	if !res.Allowed {
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, string(p.prefix)+"_rate_limit_exceeded",
+			"identifier", p.logIdentifier,
+			"endpoint_class", class,
+			"limit", p.limit,
+			"window_seconds", int(p.window.Seconds()),
+		)
+	}
+	return res, nil
+}
+
+// CheckBoth enforces both IP and user rate limits for authenticated requests.
+// Used by middleware.RateLimitAuthenticated for protected endpoints.
+//
+// Behavior:
+//   - Checks allowlist first; if either IP or user is allowlisted, request is bypassed
+//   - Applies IP limit first; if exceeded, returns immediately (fail fast)
+//   - Applies user limit second
+//   - Returns the more restrictive result (lower remaining count wins)
+//
+// This is the primary entry point for authenticated request rate limiting.
 func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
 	now := requesttime.Now(ctx)
 
-	// Check IP limit first
-	ipRequestsPerWindow, ipWindow, ipOk := s.config.GetIPLimit(class)
-	if !ipOk {
-		// Default-deny: no IP limit configured for this class (PRD-017 FR-1)
-		s.logAudit(ctx, "rate_limit_config_missing",
-			"identifier", privacy.AnonymizeIP(ip),
-			"endpoint_class", class,
-			"limit_type", models.KeyPrefixIP,
-		)
-		return &models.RateLimitResult{
-			Allowed:    false,
-			Limit:      0,
-			Remaining:  0,
-			ResetAt:    now,
-			RetryAfter: 60,
-		}, nil
+	// Get limits upfront to fail fast if config is missing
+	ipLimit, userLimit, denial := s.getBothLimits(ctx, ip, userID, class, now)
+	if denial != nil {
+		return denial, nil
 	}
 
-	ipRes, err := s.checkRateLimit(ctx, ip, class, models.KeyPrefixIP, ipRequestsPerWindow, ipWindow, privacy.AnonymizeIP(ip))
+	// Check allowlist for both identifiers upfront
+	bypassed, result := s.checkAllowlistBypass(ctx, ip, userID, class, ipLimit, userLimit, now)
+	if bypassed {
+		return result, nil
+	}
+
+	// Check IP rate limit first (early return if denied)
+	ipRes, err := s.checkSingleLimit(ctx, *ipLimit, class)
 	if err != nil {
 		return nil, err
 	}
@@ -212,25 +270,8 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 		return ipRes, nil
 	}
 
-	// Check user limit
-	userRequestsPerWindow, userWindow, userOk := s.config.GetUserLimit(class)
-	if !userOk {
-		// Default-deny: no user limit configured for this class (PRD-017 FR-1)
-		s.logAudit(ctx, "rate_limit_config_missing",
-			"identifier", userID,
-			"endpoint_class", class,
-			"limit_type", models.KeyPrefixUser,
-		)
-		return &models.RateLimitResult{
-			Allowed:    false,
-			Limit:      0,
-			Remaining:  0,
-			ResetAt:    now,
-			RetryAfter: 60,
-		}, nil
-	}
-
-	userRes, err := s.checkRateLimit(ctx, userID, class, models.KeyPrefixUser, userRequestsPerWindow, userWindow, userID)
+	// Check user rate limit
+	userRes, err := s.checkSingleLimit(ctx, *userLimit, class)
 	if err != nil {
 		return nil, err
 	}
@@ -238,33 +279,111 @@ func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models
 		return userRes, nil
 	}
 
-	// If both pass, return a combined result that shows the more restrictive remaining count and reset time
-	if ipRes.Remaining < userRes.Remaining {
-		return ipRes, nil
-	} else if userRes.Remaining < ipRes.Remaining {
-		return userRes, nil
-	} else {
-		// If remaining counts are equal, return the one with the earlier reset time
-		if ipRes.ResetAt.Before(userRes.ResetAt) {
-			return ipRes, nil
-		} else {
-			return userRes, nil
-		}
+	return moreRestrictiveResult(ipRes, userRes), nil
+}
+
+// getBothLimits retrieves IP and user limits, returning a denial result if config is missing.
+func (s *Service) getBothLimits(ctx context.Context, ip, userID string, class models.EndpointClass, now time.Time) (*limitParams, *limitParams, *models.RateLimitResult) {
+	denial := &models.RateLimitResult{
+		Allowed:    false,
+		Limit:      0,
+		Remaining:  0,
+		ResetAt:    now,
+		RetryAfter: 60,
+	}
+
+	ipRequestsPerWindow, ipWindow, ipOk := s.config.GetIPLimit(class)
+	if !ipOk {
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
+			"identifier", privacy.AnonymizeIP(ip),
+			"endpoint_class", class,
+			"limit_type", models.KeyPrefixIP,
+		)
+		return nil, nil, denial
+	}
+
+	userRequestsPerWindow, userWindow, userOk := s.config.GetUserLimit(class)
+	if !userOk {
+		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
+			"identifier", userID,
+			"endpoint_class", class,
+			"limit_type", models.KeyPrefixUser,
+		)
+		return nil, nil, denial
+	}
+
+	ipParams := &limitParams{
+		identifier:    ip,
+		logIdentifier: privacy.AnonymizeIP(ip),
+		prefix:        models.KeyPrefixIP,
+		limit:         ipRequestsPerWindow,
+		window:        ipWindow,
+	}
+	userParams := &limitParams{
+		identifier:    userID,
+		logIdentifier: userID,
+		prefix:        models.KeyPrefixUser,
+		limit:         userRequestsPerWindow,
+		window:        userWindow,
+	}
+	return ipParams, userParams, nil
+}
+
+// checkAllowlistBypass checks if either IP or user is allowlisted and returns bypass result.
+func (s *Service) checkAllowlistBypass(ctx context.Context, ip, userID string, class models.EndpointClass, ipLimit, userLimit *limitParams, now time.Time) (bool, *models.RateLimitResult) {
+	ipAllowlisted, err := s.allowlist.IsAllowlisted(ctx, ip)
+	if err != nil {
+		return false, nil
+	}
+	userAllowlisted, err := s.allowlist.IsAllowlisted(ctx, userID)
+	if err != nil {
+		return false, nil
+	}
+
+	if !ipAllowlisted && !userAllowlisted {
+		return false, nil
+	}
+
+	bypassType := "ip"
+	if userAllowlisted {
+		bypassType = "user"
+	}
+	if s.metrics != nil {
+		s.metrics.RecordAllowlistBypass(bypassType)
+	}
+	ports.LogAudit(ctx, s.logger, s.auditPublisher, "allowlist_bypass",
+		"ip", privacy.AnonymizeIP(ip),
+		"user_id", userID,
+		"endpoint_class", class,
+		"bypass_type", bypassType,
+	)
+
+	// Return the more restrictive limit info for consistency
+	limit, window := ipLimit.limit, ipLimit.window
+	if userLimit.limit < ipLimit.limit {
+		limit, window = userLimit.limit, userLimit.window
+	}
+	return true, &models.RateLimitResult{
+		Allowed:    true,
+		Bypassed:   true,
+		Limit:      limit,
+		Remaining:  limit,
+		ResetAt:    now.Add(window),
+		RetryAfter: 0,
 	}
 }
 
-func (s *Service) logAudit(ctx context.Context, event string, attrs ...any) {
-	if requestID := request.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
+// moreRestrictiveResult returns the result with fewer remaining requests,
+// or the earlier reset time if remaining counts are equal.
+func moreRestrictiveResult(a, b *models.RateLimitResult) *models.RateLimitResult {
+	if a.Remaining < b.Remaining {
+		return a
 	}
-	args := append(attrs, "event", event, "log_type", "audit")
-	if s.logger != nil {
-		s.logger.InfoContext(ctx, event, args...)
+	if b.Remaining < a.Remaining {
+		return b
 	}
-	if s.auditPublisher == nil {
-		return
+	if a.ResetAt.Before(b.ResetAt) {
+		return a
 	}
-	_ = s.auditPublisher.Emit(ctx, audit.Event{
-		Action: event,
-	})
+	return b
 }

@@ -65,10 +65,7 @@ func (h *QuotaHandler) requireAPIKeyFromPath(r *http.Request, w http.ResponseWri
 
 // toQuotaUsageResponse converts a quota model to a response DTO
 func toQuotaUsageResponse(quota *models.APIKeyQuota) models.QuotaUsageResponse {
-	remaining := quota.MonthlyLimit - quota.CurrentUsage
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(quota.MonthlyLimit-quota.CurrentUsage, 0)
 	return models.QuotaUsageResponse{
 		APIKeyID:  quota.APIKeyID.String(),
 		Tier:      string(quota.Tier),

@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"fmt"
+	"net/url"
 	"strings"
 
 	"credo/internal/tenant/models"
@@ -57,30 +57,27 @@ func (r *CreateClientRequest) Normalize() {
 }
 
 // Validate validates the create client request following strict validation order.
+// Follows 4-phase validation: size → required → syntax → semantic (semantic done in service).
 func (r *CreateClientRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
 	// Phase 1: Size validation (fail fast on oversized input)
-	if len(r.RedirectURIs) > validation.MaxRedirectURIs {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many redirect URIs: max %d allowed", validation.MaxRedirectURIs))
+	if err := validation.CheckSliceCount("redirect URIs", len(r.RedirectURIs), validation.MaxRedirectURIs); err != nil {
+		return err
 	}
-	if len(r.AllowedGrants) > validation.MaxGrants {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many grant types: max %d allowed", validation.MaxGrants))
+	if err := validation.CheckSliceCount("grant types", len(r.AllowedGrants), validation.MaxGrants); err != nil {
+		return err
 	}
-	if len(r.AllowedScopes) > validation.MaxScopes {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many scopes: max %d allowed", validation.MaxScopes))
+	if err := validation.CheckSliceCount("scopes", len(r.AllowedScopes), validation.MaxScopes); err != nil {
+		return err
 	}
-	for _, uri := range r.RedirectURIs {
-		if len(uri) > validation.MaxRedirectURILength {
-			return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("redirect URI exceeds max length of %d", validation.MaxRedirectURILength))
-		}
+	if err := validation.CheckEachStringLength("redirect URI", r.RedirectURIs, validation.MaxRedirectURILength); err != nil {
+		return err
 	}
-	for _, scope := range r.AllowedScopes {
-		if len(scope) > validation.MaxScopeLength {
-			return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("scope exceeds max length of %d", validation.MaxScopeLength))
-		}
+	if err := validation.CheckEachStringLength("scope", r.AllowedScopes, validation.MaxScopeLength); err != nil {
+		return err
 	}
 
 	// Phase 2: Required fields
@@ -89,6 +86,13 @@ func (r *CreateClientRequest) Validate() error {
 	}
 	if len(r.RedirectURIs) == 0 {
 		return dErrors.New(dErrors.CodeValidation, "at least one redirect_uri is required")
+	}
+
+	// Phase 3: Syntax validation (format checks)
+	for _, uri := range r.RedirectURIs {
+		if _, err := url.Parse(uri); err != nil {
+			return dErrors.New(dErrors.CodeValidation, "invalid redirect_uri format")
+		}
 	}
 
 	return nil
@@ -136,32 +140,42 @@ func (r *UpdateClientRequest) Normalize() {
 }
 
 // Validate validates the update client request following strict validation order.
+// Follows 4-phase validation: size → required → syntax → semantic (semantic done in service).
 func (r *UpdateClientRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 
 	// Phase 1: Size validation (fail fast on oversized input)
-	if r.RedirectURIs != nil && len(*r.RedirectURIs) > validation.MaxRedirectURIs {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many redirect URIs: max %d allowed", validation.MaxRedirectURIs))
-	}
-	if r.AllowedGrants != nil && len(*r.AllowedGrants) > validation.MaxGrants {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many grant types: max %d allowed", validation.MaxGrants))
-	}
-	if r.AllowedScopes != nil && len(*r.AllowedScopes) > validation.MaxScopes {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many scopes: max %d allowed", validation.MaxScopes))
-	}
 	if r.RedirectURIs != nil {
-		for _, uri := range *r.RedirectURIs {
-			if len(uri) > validation.MaxRedirectURILength {
-				return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("redirect URI exceeds max length of %d", validation.MaxRedirectURILength))
-			}
+		if err := validation.CheckSliceCount("redirect URIs", len(*r.RedirectURIs), validation.MaxRedirectURIs); err != nil {
+			return err
+		}
+		if err := validation.CheckEachStringLength("redirect URI", *r.RedirectURIs, validation.MaxRedirectURILength); err != nil {
+			return err
+		}
+	}
+	if r.AllowedGrants != nil {
+		if err := validation.CheckSliceCount("grant types", len(*r.AllowedGrants), validation.MaxGrants); err != nil {
+			return err
 		}
 	}
 	if r.AllowedScopes != nil {
-		for _, scope := range *r.AllowedScopes {
-			if len(scope) > validation.MaxScopeLength {
-				return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("scope exceeds max length of %d", validation.MaxScopeLength))
+		if err := validation.CheckSliceCount("scopes", len(*r.AllowedScopes), validation.MaxScopes); err != nil {
+			return err
+		}
+		if err := validation.CheckEachStringLength("scope", *r.AllowedScopes, validation.MaxScopeLength); err != nil {
+			return err
+		}
+	}
+
+	// Phase 2: Required fields - none for update (all fields optional)
+
+	// Phase 3: Syntax validation (format checks)
+	if r.RedirectURIs != nil {
+		for _, uri := range *r.RedirectURIs {
+			if _, err := url.Parse(uri); err != nil {
+				return dErrors.New(dErrors.CodeValidation, "invalid redirect_uri format")
 			}
 		}
 	}
