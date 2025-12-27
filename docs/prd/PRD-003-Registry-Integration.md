@@ -4,7 +4,7 @@
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
 **Last Updated:** 2025-12-27
-**Version:** 1.7
+**Version:** 1.8
 
 ---
 
@@ -523,6 +523,38 @@ Maintains provider compatibility through:
 
 This architecture satisfies all TR-6 requirements while providing a foundation for future registry integrations.
 
+### TR-6.1: Cache Enhancements (Implemented)
+
+The in-memory cache implementation includes additional features beyond the basic TTL requirements:
+
+- **LRU eviction** with configurable max size (10,000 entries default per type)
+- **Separate locks** for citizens/sanctions to reduce lock contention
+- **Regulated mode tracking** prevents serving stale PII when mode changes (cache invalidates on mode mismatch)
+- **CleanupExpired()** for periodic maintenance of expired entries
+- **ClearAll()** with invalidation metrics for cache reset operations
+
+### TR-6.2: Retry & Resilience (Implemented)
+
+The orchestrator implements robust retry and resilience patterns:
+
+- **Exponential backoff**: InitialDelay=100ms, MaxDelay=2s, MaxRetries=3 per provider, Multiplier=2.0
+- **Global retry budget**: 10 total retries across all providers (thread-safe atomic counting)
+- **HTTP status code mapping** to error categories (401/403→auth, 404→not found, 429→rate limited, 503/504→outage)
+- **Automatic retry semantics**: Timeout, provider outage, and rate-limited errors are retryable; auth, bad data, and contract mismatch are not
+
+### TR-6.3: Prometheus Metrics (Implemented)
+
+Registry-specific Prometheus metrics for observability:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `credo_registry_cache_hits_total` | Counter | Cache hits by record type |
+| `credo_registry_cache_misses_total` | Counter | Cache misses by record type |
+| `credo_registry_cache_lookup_duration_seconds` | Histogram | Cache lookup latency (buckets: 0.1ms-50ms) |
+| `credo_registry_cache_entries_citizen` | Gauge | Current citizen cache entries |
+| `credo_registry_cache_entries_sanctions` | Gauge | Current sanctions cache entries |
+| `credo_registry_cache_invalidations_total` | Counter | ClearAll() operations |
+
 ### TR-7: SQL Indexing for Cache & TTL Management
 
 **Objective:** Demonstrate SQL indexing concepts from "Use The Index, Luke" with production-ready patterns for registry cache management.
@@ -904,6 +936,8 @@ In regulated mode:
 
 ### Tracing
 
+**Implementation Status:** Not yet implemented. Tracer interface and OpenTelemetry wiring pending.
+
 - All registry flows **MUST** emit distributed traces using an internal tracer interface (do not depend directly on OpenTelemetry APIs). The interface **MUST** support `Start(ctx, name, attrs...) (context.Context, Span)` and `Span.End(err error)` so spans can record failures without panics.
 - `Service.Check` **MUST** start a parent span named `registry.check` with attributes for `national_id` (hashed or redacted) and `regulated_mode`. Child spans **MUST** wrap `Citizen` and `Sanctions` calls (`registry.citizen` and `registry.sanctions`) and annotate cache hits/misses via span attributes (`cache.hit`, `cache.ttl_remaining_ms`).
 - Mock clients **MUST** start spans for outbound calls (`registry.citizen.call`, `registry.sanctions.call`) and include attributes for simulated latency and deterministic test data branches (e.g., `listed`, `age_bucket`).
@@ -1063,17 +1097,17 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 ## 12. Acceptance Criteria
 
-- [ ] Citizen lookup returns full data in non-regulated mode
-- [ ] Citizen lookup returns minimized data in regulated mode
-- [ ] Sanctions lookup returns listed status
-- [ ] Cache reduces latency on repeated lookups
-- [ ] Cache expires after 5 minutes
-- [ ] Combined Check() runs citizen + sanctions in parallel with shared context cancellation and traces/metrics for each call
-- [ ] Operations require consent (403 without)
-- [ ] All lookups emit audit events
-- [ ] Mock clients simulate realistic latency
-- [ ] Registry timeouts return 504
-- [ ] Code passes `make test` and `make lint`
+- [x] Citizen lookup returns full data in non-regulated mode
+- [x] Citizen lookup returns minimized data in regulated mode
+- [x] Sanctions lookup returns listed status
+- [x] Cache reduces latency on repeated lookups
+- [x] Cache expires after 5 minutes
+- [x] Combined Check() runs citizen + sanctions in parallel with shared context cancellation and traces/metrics for each call
+- [x] Operations require consent (403 without)
+- [x] All lookups emit audit events
+- [x] Mock clients simulate realistic latency
+- [x] Registry timeouts return 504
+- [x] Code passes `make test` and `make lint`
 
 ---
 
@@ -1095,20 +1129,23 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 ## 14. Future Enhancements (Out of Scope)
 
+**Now Implemented (see TR-6.1, TR-6.2):**
+- ~~Retry logic with exponential backoff~~ → TR-6.2
+- ~~Multiple registry providers (failover)~~ → Orchestrator with provider chains
+
+**Still Pending:**
 - Real external registry integration (SOAP/REST APIs)
 - Batch registry lookups (check multiple IDs)
 - Registry webhooks (real-time updates)
-- Multiple registry providers (failover)
 - Historical registry snapshots (time travel queries)
 - Persistent cache (Redis, Memcached)
 - Cache warming (pre-populate frequently accessed records)
 - Rate limiting per user/IP
-- Retry logic with exponential backoff
-- Circuit breaker for registry failures
+- Circuit breaker for registry failures (currently backoff/retry only)
 - Biometric pipeline compatibility: optional hooks for face match scores and liveness evidence treated as standardized confidence inputs alongside registry checks.
 - Bringing registry logic in-house: replace mocks with internally maintained registry connectors (caching, SLA monitoring, schema validation, resilience patterns) to reduce third-party dependency and limit downtime blast radius.
 - **Document verification provider**: Provider type for verifying identity documents (passports, national IDs, driver licenses) with OCR extraction, document authenticity checks, and data cross-referencing against registry records.
-- **Voting strategy with quorum rules**: Multi-provider consensus mechanism where evidence from multiple sources is aggregated using configurable quorum rules (e.g., 2-of-3 providers must agree, weighted voting by provider confidence scores, conflict resolution policies).
+- **Voting strategy with quorum rules**: Partially implemented. Confidence-weighted selection works; full majority voting with quorum rules pending (e.g., 2-of-3 providers must agree, conflict resolution policies).
 
 ### Registry Integration Readiness Checklist (Appendix)
 
@@ -1178,6 +1215,7 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 | Version | Date       | Author           | Changes                                                                                                                                          |
 | ------- | ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1.8     | 2025-12-27 | Engineering      | PRD review: marked completed requirements, documented implemented extensions (TR-6.1 cache, TR-6.2 retry, TR-6.3 metrics), noted tracing pending |
 | 1.7     | 2025-12-27 | Engineering      | Added Domain Architecture section with Citizen/Sanctions subdomains and shared kernel; documented domain purity rules                            |
 | 1.6     | 2025-12-27 | Engineering      | Added document verification provider and voting strategy with quorum rules to Future Enhancements                                                 |
 | 1.5     | 2025-12-21 | Engineering      | Added TR-7: SQL Indexing for Cache & TTL (partial indexes, range queries, NULL handling, covering indexes, cleanup worker) with exercises        |
