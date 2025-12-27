@@ -18,14 +18,107 @@ Multi-source citizen and sanctions registry lookups with provider orchestration.
 
 This is a distinct bounded context because registry lookups have their own provider abstraction, error taxonomy, caching semantics, and evidence correlation rules separate from consent, auth, or decision contexts.
 
+### Subdomain Structure
+
+The Registry bounded context is organized into two first-class **subdomains** with a **shared kernel**:
+
+```
+domain/
+├── shared/              # Shared Kernel - common domain primitives
+│   └── types.go         # NationalID, Confidence, CheckedAt, ProviderID
+├── citizen/             # Citizen Subdomain - identity verification
+│   └── citizen.go       # CitizenVerification aggregate root
+└── sanctions/           # Sanctions Subdomain - compliance screening
+    └── sanctions.go     # SanctionsCheck aggregate root
+```
+
+#### Shared Kernel (`domain/shared/`)
+
+Domain primitives shared between Citizen and Sanctions subdomains:
+
+| Type | Description | Invariants |
+|------|-------------|------------|
+| `NationalID` | Validated lookup key | 6-20 alphanumeric (A-Z, 0-9) |
+| `Confidence` | Evidence reliability score | 0.0-1.0 range |
+| `CheckedAt` | Verification timestamp | TTL-aware freshness checks |
+| `ProviderID` | Evidence source identifier | Non-empty |
+
+#### Citizen Subdomain (`domain/citizen/`)
+
+**Aggregate Root:** `CitizenVerification`
+
+Handles identity verification through national population registries. Contains PII that requires GDPR compliance.
+
+```go
+type CitizenVerification struct {
+    nationalID  shared.NationalID
+    details     PersonalDetails    // PII: name, DOB, address
+    status      VerificationStatus // Valid flag + CheckedAt
+    providerID  shared.ProviderID
+    confidence  shared.Confidence
+    minimized   bool
+}
+
+// Key method: GDPR-compliant minimization
+func (c CitizenVerification) Minimized() CitizenVerification
+```
+
+**Key Invariants:**
+- NationalID is always present and valid
+- Minimized records have empty PersonalDetails
+- Minimization is one-way (cannot "un-minimize")
+
+#### Sanctions Subdomain (`domain/sanctions/`)
+
+**Aggregate Root:** `SanctionsCheck`
+
+Handles compliance screening against sanctions lists, PEP databases, and watchlists.
+
+```go
+type SanctionsCheck struct {
+    nationalID  shared.NationalID
+    listed      bool
+    details     ListingDetails     // Type, reason, date
+    source      Source
+    checkedAt   shared.CheckedAt
+    providerID  shared.ProviderID
+    confidence  shared.Confidence
+}
+
+// Rich query methods
+func (s SanctionsCheck) IsSanctioned() bool
+func (s SanctionsCheck) IsPEP() bool
+func (s SanctionsCheck) IsOnWatchlist() bool
+func (s SanctionsCheck) RequiresEnhancedDueDiligence() bool
+```
+
+**Key Invariants:**
+- Source is always present
+- If Listed is true, ListType must be set
+- If Listed is false, ListingDetails is empty
+
+### Domain Purity
+
+All domain packages (`domain/*`) follow strict purity rules:
+
+| Rule | Rationale |
+|------|-----------|
+| No I/O | Domain logic independent of infrastructure |
+| No `context.Context` | Domain doesn't coordinate async/cancellation |
+| No `time.Now()` | Time injected from application layer |
+| Pure input → output | Fully testable without mocks |
+
 ### Ubiquitous Language
 
 | Domain Term            | Code Location                                     |
 | ---------------------- | ------------------------------------------------- |
+| **CitizenVerification** | `domain/citizen.CitizenVerification` (aggregate) |
+| **SanctionsCheck**     | `domain/sanctions.SanctionsCheck` (aggregate)    |
+| **NationalID**         | `domain/shared.NationalID` (value object)        |
 | **Provider**           | `providers.Provider` (interface)                  |
 | **Evidence**           | `providers.Evidence` (generic result from any provider) |
-| **Citizen Record**     | `models.CitizenRecord`                            |
-| **Sanctions Record**   | `models.SanctionsRecord`                          |
+| **Citizen Record**     | `models.CitizenRecord` (infrastructure model)    |
+| **Sanctions Record**   | `models.SanctionsRecord` (infrastructure model)  |
 | **Orchestrator**       | `orchestrator.Orchestrator`                       |
 | **Lookup Strategy**    | `orchestrator.LookupStrategy` (primary, fallback, parallel, voting) |
 | **Provider Chain**     | `orchestrator.ProviderChain` (primary + fallbacks) |
@@ -80,11 +173,15 @@ This module follows **hexagonal architecture** with an **orchestrator pattern** 
 
 ```
 internal/evidence/registry/
+├── domain/             # Pure domain layer (no I/O)
+│   ├── shared/         # Shared kernel (NationalID, Confidence, etc.)
+│   ├── citizen/        # Citizen subdomain aggregate
+│   └── sanctions/      # Sanctions subdomain aggregate
 ├── adapters/           # Inbound adapters for external dependencies
 │   └── consent_adapter.go
 ├── cache/              # Registry cache implementation
 ├── handler/            # HTTP handlers (decode, validate, respond)
-├── models/             # Domain entities
+├── models/             # Infrastructure entities (for persistence/transport)
 ├── orchestrator/       # Multi-provider coordination
 │   └── correlation/    # Evidence correlation rules
 ├── ports/              # Interface definitions
@@ -93,7 +190,7 @@ internal/evidence/registry/
 │   ├── citizen/        # Citizen registry provider
 │   ├── contract/       # Cross-module DTOs
 │   └── sanctions/      # Sanctions list provider
-├── service/            # Application service
+├── service/            # Application service (orchestration + effects)
 └── store/              # Persistence adapters
 ```
 

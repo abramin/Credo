@@ -4,7 +4,7 @@
 **Priority:** P0 (Critical)
 **Owner:** Engineering Team
 **Last Updated:** 2025-12-27
-**Version:** 1.6
+**Version:** 1.7
 
 ---
 
@@ -36,6 +36,80 @@ Credo needs to integrate with external government and financial registries to ve
 - Multiple registry providers (single mock per type)
 - Historical registry snapshots
 - Real-time registry webhooks
+
+---
+
+## 1.1. Domain Architecture
+
+The Registry bounded context is organized into two first-class **subdomains** with a **shared kernel** for common types:
+
+```
+internal/evidence/registry/
+├── domain/                    # Pure domain layer (no I/O)
+│   ├── shared/               # Shared Kernel
+│   │   └── types.go          # NationalID, Confidence, CheckedAt, ProviderID
+│   ├── citizen/              # Citizen Subdomain
+│   │   └── citizen.go        # CitizenVerification aggregate
+│   └── sanctions/            # Sanctions Subdomain
+│       └── sanctions.go      # SanctionsCheck aggregate
+├── models/                    # Infrastructure models (for persistence/transport)
+├── providers/                 # External registry adapters
+├── orchestrator/             # Multi-source coordination
+└── service/                  # Application layer (orchestration + effects)
+```
+
+### Shared Kernel
+
+Contains domain primitives used across both subdomains:
+
+| Type | Description | Invariants |
+|------|-------------|------------|
+| `NationalID` | Validated lookup key | 6-20 alphanumeric chars (A-Z, 0-9) |
+| `Confidence` | Evidence reliability score | 0.0-1.0 range |
+| `CheckedAt` | Verification timestamp | Supports TTL-based freshness checks |
+| `ProviderID` | Evidence source identifier | Non-empty string |
+
+### Citizen Subdomain
+
+Handles identity verification through national population registries.
+
+**Aggregate Root:** `CitizenVerification`
+
+| Component | Description |
+|-----------|-------------|
+| `PersonalDetails` | Value object containing PII (name, DOB, address) |
+| `VerificationStatus` | Value object with Valid flag and CheckedAt |
+| `Minimized()` | Returns GDPR-compliant copy with PII stripped |
+
+**Key Invariants:**
+- NationalID is always present and valid
+- Minimized records have empty PersonalDetails
+- Minimization is a one-way transformation (cannot "un-minimize")
+
+### Sanctions Subdomain
+
+Handles compliance screening against sanctions lists and PEP databases.
+
+**Aggregate Root:** `SanctionsCheck`
+
+| Component | Description |
+|-----------|-------------|
+| `ListType` | Enum: sanctions, pep, watchlist |
+| `ListingDetails` | Value object with reason and listed date |
+| `Source` | Authoritative source of the check |
+
+**Key Invariants:**
+- Source is always present
+- If Listed is true, ListType must be set (not empty)
+- If Listed is false, ListingDetails is empty
+
+### Domain Purity
+
+All domain packages follow strict purity rules:
+- ✓ No I/O (no database, HTTP, filesystem)
+- ✓ No `context.Context` in function signatures
+- ✓ No `time.Now()` or `rand.*` calls—time received as parameters
+- ✓ Pure input → output functions, testable without mocks
 
 ---
 
@@ -1104,6 +1178,7 @@ curl -X POST http://localhost:8080/registry/citizen \
 
 | Version | Date       | Author           | Changes                                                                                                                                          |
 | ------- | ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1.7     | 2025-12-27 | Engineering      | Added Domain Architecture section with Citizen/Sanctions subdomains and shared kernel; documented domain purity rules                            |
 | 1.6     | 2025-12-27 | Engineering      | Added document verification provider and voting strategy with quorum rules to Future Enhancements                                                 |
 | 1.5     | 2025-12-21 | Engineering      | Added TR-7: SQL Indexing for Cache & TTL (partial indexes, range queries, NULL handling, covering indexes, cleanup worker) with exercises        |
 | 1.4     | 2025-12-18 | Security Eng     | Added secure-by-design and testing requirements (value objects, default-deny, immutability, typed results)                                       |

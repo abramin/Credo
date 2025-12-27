@@ -535,6 +535,27 @@ Evidence is split into `registry` and `vc`.
 - Apply minimisation when regulated mode is active
 - Normalize errors across different registry providers
 
+**Subdomain Architecture**
+
+The Registry bounded context is organized into two first-class subdomains with a shared kernel:
+
+```
+internal/evidence/registry/domain/
+├── shared/              # Shared Kernel
+│   └── types.go         # NationalID, Confidence, CheckedAt, ProviderID
+├── citizen/             # Citizen Subdomain
+│   └── citizen.go       # CitizenVerification aggregate
+└── sanctions/           # Sanctions Subdomain
+    └── sanctions.go     # SanctionsCheck aggregate
+```
+
+- **Citizen Subdomain**: Identity verification through population registries. Contains PII with GDPR-compliant minimization.
+- **Sanctions Subdomain**: Compliance screening against sanctions lists and PEP databases. No PII minimization needed.
+- **Shared Kernel**: Common types (`NationalID`, `Confidence`, `CheckedAt`, `ProviderID`) used by both subdomains.
+- **Domain Purity**: All domain packages have no I/O, no `context.Context`, and no `time.Now()` calls.
+
+See `internal/evidence/registry/README.md` and `docs/prd/PRD-003-Registry-Integration.md` for complete details.
+
 **Key types**
 
 ```go

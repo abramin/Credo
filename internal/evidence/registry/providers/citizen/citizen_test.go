@@ -147,7 +147,7 @@ func TestCitizenResponseParser(t *testing.T) {
 		assert.Nil(t, evidence)
 	})
 
-	t.Run("handles missing checked_at gracefully", func(t *testing.T) {
+	t.Run("leaves CheckedAt zero for invalid timestamp (adapter fills it)", func(t *testing.T) {
 		body := []byte(`{
 			"national_id": "123456789",
 			"full_name": "Alice Johnson",
@@ -159,7 +159,10 @@ func TestCitizenResponseParser(t *testing.T) {
 
 		evidence, err := parseCitizenResponse(200, body)
 		require.NoError(t, err)
-		assert.False(t, evidence.CheckedAt.IsZero(), "should use current time if parse fails")
+		// Parser intentionally leaves CheckedAt zero when parsing fails.
+		// The HTTPAdapter's parseAndEnrich fills it from requesttime.Now(ctx).
+		// This maintains domain purity - no time.Now() calls in the parser.
+		assert.True(t, evidence.CheckedAt.IsZero(), "parser leaves zero for adapter to fill")
 	})
 }
 

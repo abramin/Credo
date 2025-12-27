@@ -105,6 +105,48 @@ valid by default.
 - `DerivedIdentity` is a domain-level value object that strips PII and carries
   only derived attributes for decisioning in `internal/decision/models.go`.
 
+### Registry Module (Evidence Context)
+
+The Registry module demonstrates subdomain decomposition within a bounded context.
+It is organized into two first-class **subdomains** with a **shared kernel**:
+
+```
+internal/evidence/registry/domain/
+├── shared/              # Shared Kernel
+│   └── types.go         # NationalID, Confidence, CheckedAt, ProviderID
+├── citizen/             # Citizen Subdomain
+│   └── citizen.go       # CitizenVerification aggregate
+└── sanctions/           # Sanctions Subdomain
+    └── sanctions.go     # SanctionsCheck aggregate
+```
+
+**Shared Kernel (`domain/shared/`):**
+- `NationalID`: Validated lookup key (6-20 alphanumeric chars)
+- `Confidence`: Evidence reliability score (0.0-1.0)
+- `CheckedAt`: Verification timestamp with TTL-aware freshness checks
+- `ProviderID`: Evidence source identifier
+
+**Citizen Subdomain (`domain/citizen/`):**
+- `CitizenVerification` is the aggregate root handling identity verification
+- `PersonalDetails` is a value object containing PII (name, DOB, address)
+- `VerificationStatus` is a value object with Valid flag and CheckedAt
+- Key invariant: Minimized records have empty PersonalDetails (one-way transformation)
+
+**Sanctions Subdomain (`domain/sanctions/`):**
+- `SanctionsCheck` is the aggregate root handling compliance screening
+- `ListType` is a value object enum (sanctions, pep, watchlist)
+- `ListingDetails` is a value object with reason and listed date
+- Key invariant: If Listed is true, ListType must be set
+
+**Domain Purity:**
+All domain packages follow strict purity rules:
+- No I/O (no database, HTTP, filesystem)
+- No `context.Context` in function signatures
+- No `time.Now()` calls—time is received as parameters from the application layer
+- Pure input → output functions, fully testable without mocks
+
+See `internal/evidence/registry/README.md` for complete details.
+
 ## Glossary
 
 - Aggregate: A cluster of domain objects treated as a unit for consistency.
