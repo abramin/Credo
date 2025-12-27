@@ -7,13 +7,15 @@ import (
 
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/observability"
-	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 )
 
-// Store is an alias to the shared interface.
-type Store = ports.GlobalThrottleStore
+// Store manages global request throttling counters.
+type Store interface {
+	IncrementGlobal(ctx context.Context) (count int, blocked bool, err error)
+	GetGlobalCount(ctx context.Context) (count int, err error)
+}
 
 // AuditPublisher emits audit events for security-relevant operations.
 type AuditPublisher interface {

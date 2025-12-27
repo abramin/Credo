@@ -26,19 +26,21 @@ import (
 	"credo/internal/ratelimit/metrics"
 	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/observability"
-	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	requesttime "credo/pkg/platform/middleware/requesttime"
 	"credo/pkg/platform/privacy"
 )
 
-// Type aliases for interfaces from ports package.
-// This allows external packages to use these types without importing ports directly.
-type (
-	BucketStore    = ports.BucketStore
-	AllowlistStore = ports.AllowlistStore
-)
+// BucketStore checks rate limits using sliding window counters.
+type BucketStore interface {
+	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
+}
+
+// AllowlistStore checks if an identifier should bypass rate limiting.
+type AllowlistStore interface {
+	IsAllowlisted(ctx context.Context, identifier string) (bool, error)
+}
 
 // AuditPublisher emits audit events for security-relevant operations.
 type AuditPublisher interface {

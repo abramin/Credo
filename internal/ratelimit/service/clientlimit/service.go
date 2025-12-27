@@ -10,7 +10,6 @@ import (
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/observability"
-	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	"credo/pkg/platform/middleware/requesttime"
@@ -26,10 +25,10 @@ type AuditPublisher interface {
 	Emit(ctx context.Context, event audit.Event) error
 }
 
-// Type aliases for shared interfaces.
-type (
-	ClientLookup = ports.ClientLookup
-)
+// ClientLookup provides OAuth client type information.
+type ClientLookup interface {
+	IsConfidentialClient(ctx context.Context, clientID string) (bool, error)
+}
 
 type Service struct {
 	buckets        BucketStore

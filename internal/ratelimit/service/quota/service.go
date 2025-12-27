@@ -20,16 +20,19 @@ import (
 
 	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/observability"
-	"credo/internal/ratelimit/ports"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 )
 
-// Type aliases for shared interfaces.
-type (
-	Store = ports.QuotaStore
-)
+// Store manages API key usage quotas.
+type Store interface {
+	GetQuota(ctx context.Context, apiKeyID id.APIKeyID) (*models.APIKeyQuota, error)
+	IncrementUsage(ctx context.Context, apiKeyID id.APIKeyID, count int) (*models.APIKeyQuota, error)
+	ResetQuota(ctx context.Context, apiKeyID id.APIKeyID) error
+	ListQuotas(ctx context.Context) ([]*models.APIKeyQuota, error)
+	UpdateTier(ctx context.Context, apiKeyID id.APIKeyID, tier models.QuotaTier) error
+}
 
 // AuditPublisher emits audit events for security-relevant operations.
 type AuditPublisher interface {
