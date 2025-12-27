@@ -5,7 +5,11 @@ import (
 	"fmt"
 )
 
-// ErrorCategory defines the normalized failure taxonomy
+// ErrorCategory defines the normalized failure taxonomy for provider errors.
+//
+// All provider implementations should use these categories to classify failures,
+// allowing the orchestrator to make consistent retry and fallback decisions regardless
+// of the underlying provider protocol or API.
 type ErrorCategory string
 
 const (
@@ -34,13 +38,17 @@ const (
 	ErrorInternal ErrorCategory = "internal"
 )
 
-// ProviderError wraps provider failures with normalized categorization
+// ProviderError wraps provider failures with normalized categorization.
+//
+// This structured error type allows the orchestrator and service layers to make
+// informed decisions about retries, fallbacks, and error translation without
+// inspecting raw error messages or coupling to specific provider implementations.
 type ProviderError struct {
 	Category   ErrorCategory
 	ProviderID string
 	Message    string
 	Underlying error
-	Retryable  bool // Whether this error is worth retrying
+	Retryable  bool // Automatically set based on Category (timeout, outage, rate-limited → true)
 }
 
 // Error implements the error interface
@@ -56,7 +64,11 @@ func (e *ProviderError) Unwrap() error {
 	return e.Underlying
 }
 
-// NewProviderError creates a new normalized provider error
+// NewProviderError creates a new normalized provider error with automatic retry classification.
+//
+// The Retryable flag is automatically set to true for transient failures (timeout, outage, rate-limited)
+// and false for permanent failures (bad data, not found, auth, contract mismatch). Provider adapters
+// should use this constructor to ensure consistent error handling across all implementations.
 func NewProviderError(category ErrorCategory, providerID, message string, underlying error) *ProviderError {
 	retryable := category == ErrorTimeout ||
 		category == ErrorProviderOutage ||
@@ -89,9 +101,11 @@ func GetCategory(err error) ErrorCategory {
 	return ErrorInternal
 }
 
-// Sentinel errors for common cases
+// Sentinel errors for orchestrator-level failures.
+// These are distinct from ProviderError which wraps individual provider failures.
+// Use errors.Is() to check for these conditions.
 var (
-	ErrProviderNotFound     = errors.New("provider not found")
-	ErrNoProvidersAvailable = errors.New("no providers available for this type")
-	ErrAllProvidersFailed   = errors.New("all providers failed")
+	ErrProviderNotFound     = errors.New("provider not found")       // Requested provider ID not in registry
+	ErrNoProvidersAvailable = errors.New("no providers available for this type") // No providers registered for requested type
+	ErrAllProvidersFailed   = errors.New("all providers failed")     // All providers in chain failed (after retries)
 )

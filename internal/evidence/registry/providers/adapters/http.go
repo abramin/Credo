@@ -13,7 +13,11 @@ import (
 	"credo/pkg/platform/middleware/requesttime"
 )
 
-// HTTPAdapter wraps HTTP-based registry providers
+// HTTPAdapter wraps HTTP-based registry providers implementing the Provider interface.
+//
+// This adapter handles the common HTTP concerns (request building, error mapping, response parsing)
+// while delegating protocol-specific parsing to a configurable ResponseParser function.
+// It maps HTTP status codes to normalized ProviderError categories for consistent error handling.
 type HTTPAdapter struct {
 	id      string
 	baseURL string
@@ -24,13 +28,15 @@ type HTTPAdapter struct {
 	parser  ResponseParser
 }
 
-// TODO: revisit this
 // HTTPDoer is the minimal interface needed from an HTTP client.
+// This abstraction allows injecting mock clients for testing without depending on the full http.Client.
 type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// ResponseParser converts HTTP responses to Evidence
+// ResponseParser converts HTTP responses to Evidence.
+// Each provider type (citizen, sanctions) supplies its own parser that understands the API response format.
+// The parser should populate Evidence.Data with provider-specific fields; the adapter enriches the rest.
 type ResponseParser func(statusCode int, body []byte) (*providers.Evidence, error)
 
 // HTTPAdapterConfig configures an HTTP adapter
@@ -81,7 +87,13 @@ func (a *HTTPAdapter) Capabilities() providers.Capabilities {
 	return a.capabs
 }
 
-// Lookup performs an evidence check via HTTP
+// Lookup performs an evidence check via HTTP POST to {baseURL}/lookup.
+//
+// The method:
+//  1. Marshals filters to JSON and sends as POST body
+//  2. Maps HTTP status codes to ProviderError categories (401/403→auth, 404→not found, 429→rate limited, 503→outage)
+//  3. Parses successful responses using the configured ResponseParser
+//  4. Enriches the evidence with ProviderID, ProviderType, and CheckedAt timestamp
 func (a *HTTPAdapter) Lookup(ctx context.Context, filters map[string]string) (*providers.Evidence, error) {
 	req, err := a.buildRequest(ctx, filters)
 	if err != nil {
@@ -165,7 +177,15 @@ func (a *HTTPAdapter) executeRequest(ctx context.Context, req *http.Request) (*h
 	return resp, body, nil
 }
 
-// checkStatusCode maps HTTP status codes to provider errors.
+// checkStatusCode maps HTTP status codes to ProviderError categories.
+//
+// Status code mapping:
+//   - 401, 403 → ErrorAuthentication (not retryable)
+//   - 404 → ErrorNotFound (not retryable)
+//   - 429 → ErrorRateLimited (retryable)
+//   - 503, 504 → ErrorProviderOutage (retryable)
+//   - 2xx → nil (success, handled by caller)
+//   - Other → nil (passed to parser for handling)
 func (a *HTTPAdapter) checkStatusCode(statusCode int) error {
 	switch statusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -224,7 +244,8 @@ func (a *HTTPAdapter) parseAndEnrich(ctx context.Context, statusCode int, body [
 	return evidence, nil
 }
 
-// Health checks if the provider is available
+// Health checks if the provider is available by making a GET request to {baseURL}/health.
+// Returns nil if the endpoint responds with 200 OK, ProviderError otherwise.
 func (a *HTTPAdapter) Health(ctx context.Context) error {
 	url := fmt.Sprintf("%s/health", a.baseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

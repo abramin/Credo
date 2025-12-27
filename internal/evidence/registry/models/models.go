@@ -21,6 +21,7 @@ type SanctionsRecord struct {
 	CheckedAt  time.Time
 }
 
+// RegistryResult holds the combined results of citizen and sanctions lookups.
 type RegistryResult struct {
 	Citizen  *CitizenRecord
 	Sanction *SanctionsRecord

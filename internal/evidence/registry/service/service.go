@@ -12,7 +12,13 @@ import (
 	dErrors "credo/pkg/domain-errors"
 )
 
-// Service coordinates registry lookups with caching and optional minimisation.
+// Service coordinates registry lookups with caching and optional PII minimisation.
+//
+// The service implements a cache-through pattern where lookups first check the cache,
+// then fall back to the orchestrator for cache misses. Results are cached on successful lookup.
+//
+// When regulated mode is enabled, citizen records are minimized to remove PII (name, DOB, address)
+// before being returned or cached, retaining only the Valid flag for GDPR compliance.
 type Service struct {
 	orchestrator *orchestrator.Orchestrator
 	cache        CacheStore
@@ -20,7 +26,9 @@ type Service struct {
 	logger       *slog.Logger
 }
 
-// CacheStore defines the interface for registry caching operations
+// CacheStore defines the interface for registry caching operations.
+// Implementations should return store.ErrNotFound for cache misses to distinguish
+// from actual errors. The service treats any non-ErrNotFound error as a failure.
 type CacheStore interface {
 	FindCitizen(ctx context.Context, nationalID string) (*models.CitizenRecord, error)
 	SaveCitizen(ctx context.Context, record *models.CitizenRecord) error
@@ -52,8 +60,15 @@ func New(orch *orchestrator.Orchestrator, cache CacheStore, regulated bool, opts
 }
 
 // Check performs atomic citizen and sanctions lookups with transaction-like semantics.
-// Both lookups must succeed before either result is cached. If one fails, no partial
-// state is cached, ensuring consistency on retry.
+//
+// The method operates in three phases:
+//  1. Cache check: Retrieves any cached records to avoid redundant lookups
+//  2. Fetch missing: Queries the orchestrator only for records not in cache
+//  3. Atomic commit: Caches results only if BOTH lookups succeeded
+//
+// This ensures consistency: if one lookup fails, no partial state is cached,
+// preventing scenarios where retrying would see stale data for one record type.
+// If regulated mode is enabled, citizen PII is stripped before caching.
 func (s *Service) Check(ctx context.Context, nationalID string) (*models.RegistryResult, error) {
 	// Phase 1: Check cache
 	citizen, sanction, citizenCached, sanctionsCached, err := s.checkCache(ctx, nationalID)
@@ -188,8 +203,14 @@ func (s *Service) commitCache(ctx context.Context, citizen *models.CitizenRecord
 	}
 }
 
-// Citizen performs a single citizen lookup with caching.
-// For combined lookups, prefer Check() which provides atomic transaction semantics.
+// Citizen performs a single citizen lookup with cache-through semantics.
+//
+// The method first checks the cache; on a miss, it queries the orchestrator using
+// the fallback strategy and caches successful results. If regulated mode is enabled,
+// PII is stripped from the record before returning and caching.
+//
+// For combined citizen + sanctions lookups, prefer Check() which provides atomic
+// transaction semantics ensuring both records are fetched and cached together.
 func (s *Service) Citizen(ctx context.Context, nationalID string) (*models.CitizenRecord, error) {
 	if s.cache != nil {
 		if cached, err := s.cache.FindCitizen(ctx, nationalID); err == nil {
@@ -235,8 +256,13 @@ func (s *Service) Citizen(ctx context.Context, nationalID string) (*models.Citiz
 	return record, nil
 }
 
-// Sanctions performs a single sanctions lookup with caching.
-// For combined lookups, prefer Check() which provides atomic transaction semantics.
+// Sanctions performs a single sanctions lookup with cache-through semantics.
+//
+// The method first checks the cache; on a miss, it queries the orchestrator using
+// the fallback strategy and caches successful results.
+//
+// For combined citizen + sanctions lookups, prefer Check() which provides atomic
+// transaction semantics ensuring both records are fetched and cached together.
 func (s *Service) Sanctions(ctx context.Context, nationalID string) (*models.SanctionsRecord, error) {
 	if s.cache != nil {
 		if cached, err := s.cache.FindSanction(ctx, nationalID); err == nil {
@@ -278,6 +304,10 @@ func (s *Service) Sanctions(ctx context.Context, nationalID string) (*models.San
 }
 
 // translateOrchestratorError converts orchestrator/provider errors to domain errors.
+//
+// This method implements the error boundary between infrastructure (providers/orchestrator)
+// and domain layers. It first checks for provider-specific errors in the result, then
+// handles orchestrator sentinel errors, ensuring no internal error details leak to callers.
 func (s *Service) translateOrchestratorError(err error, result *orchestrator.LookupResult) error {
 	// First check for provider-specific errors in the result
 	if result != nil && len(result.Errors) > 0 {
@@ -303,6 +333,12 @@ func (s *Service) translateOrchestratorError(err error, result *orchestrator.Loo
 }
 
 // translateProviderError converts provider-specific errors to domain errors.
+//
+// Maps the normalized ErrorCategory from providers to appropriate domain error codes:
+//   - ErrorTimeout → CodeTimeout (retryable by caller)
+//   - ErrorNotFound → CodeNotFound (record doesn't exist)
+//   - ErrorBadData → CodeBadRequest (caller provided invalid input)
+//   - All others → CodeInternal (infrastructure failures hidden from caller)
 func (s *Service) translateProviderError(err error) error {
 	var pe *providers.ProviderError
 	if errors.As(err, &pe) {

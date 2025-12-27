@@ -9,7 +9,8 @@ import (
 	"credo/internal/evidence/registry/providers"
 )
 
-// LookupStrategy defines how to select providers for a lookup
+// LookupStrategy defines how providers are selected and queried during evidence gathering.
+// The choice of strategy affects reliability, latency, and resource usage.
 type LookupStrategy string
 
 const (
@@ -26,19 +27,24 @@ const (
 	StrategyVoting LookupStrategy = "voting"
 )
 
-// CorrelationRule defines how to merge evidence from multiple sources
+// CorrelationRule defines how to reconcile and merge evidence from multiple sources.
+// Rules are applied after parallel lookups to resolve conflicts between providers.
 type CorrelationRule interface {
-	// Merge combines evidence from multiple providers
+	// Merge combines evidence from multiple providers into a single authoritative record.
+	// Returns the merged evidence or an error if merging is not possible.
 	Merge(evidence []*providers.Evidence) (*providers.Evidence, error)
 
-	// Applicable checks if this rule applies to the given evidence types
+	// Applicable returns true if this rule can process the given combination of evidence types.
+	// The orchestrator will try rules in order until one is applicable and succeeds.
 	Applicable(types []providers.ProviderType) bool
 }
 
-// ProviderChain defines a sequence of providers with fallback logic
+// ProviderChain defines a sequence of providers with fallback logic.
+// When using StrategyFallback, the orchestrator will try Primary first,
+// then each Secondary in order until one succeeds.
 type ProviderChain struct {
 	Primary   string   // Primary provider ID
-	Secondary []string // Fallback provider IDs
+	Secondary []string // Fallback provider IDs, tried in order
 	Timeout   time.Duration
 }
 
@@ -66,7 +72,11 @@ type OrchestratorConfig struct {
 	Backoff BackoffConfig
 }
 
-// Orchestrator coordinates multi-source evidence gathering
+// Orchestrator coordinates multi-source evidence gathering from registry providers.
+//
+// It supports multiple lookup strategies (primary, fallback, parallel, voting) and
+// handles provider failures with configurable retry backoff. When multiple providers
+// return results, correlation rules can merge conflicting evidence into a single record.
 type Orchestrator struct {
 	registry *providers.ProviderRegistry
 	chains   map[providers.ProviderType]ProviderChain
@@ -123,7 +133,12 @@ type LookupResult struct {
 	Errors   map[string]error // Provider ID -> error
 }
 
-// Lookup gathers evidence according to the request
+// Lookup gathers evidence according to the request using the specified or default strategy.
+//
+// The method applies a context timeout (from request or default) before dispatching to
+// the appropriate strategy implementation. All strategies return partial results in
+// LookupResult.Errors when some providers fail, allowing callers to decide whether
+// partial evidence is acceptable.
 func (o *Orchestrator) Lookup(ctx context.Context, req LookupRequest) (*LookupResult, error) {
 	// Apply default timeout if not specified
 	timeout := req.Timeout
@@ -254,7 +269,12 @@ func (o *Orchestrator) tryChainWithFallback(ctx context.Context, chain ProviderC
 	return nil
 }
 
-// lookupParallel queries all providers in parallel
+// lookupParallel queries all providers of each requested type concurrently.
+//
+// For each provider type, it spawns goroutines to query all registered providers simultaneously.
+// Results are collected with mutex protection. After all goroutines complete, correlation rules
+// are applied to merge multiple evidence records if applicable. This strategy prioritizes
+// completeness over latency by waiting for all providers to respond (or timeout).
 func (o *Orchestrator) lookupParallel(ctx context.Context, req LookupRequest) (*LookupResult, error) {
 	result := &LookupResult{
 		Evidence: make([]*providers.Evidence, 0),
@@ -313,7 +333,12 @@ func (o *Orchestrator) lookupParallel(ctx context.Context, req LookupRequest) (*
 	return result, nil
 }
 
-// lookupVoting queries multiple providers and uses majority vote
+// lookupVoting queries multiple providers and selects evidence by highest confidence per type.
+//
+// First performs a parallel lookup, then for each provider type, keeps only the evidence
+// with the highest confidence score. This is a simplified voting strategy that currently
+// does not implement true majority voting - it assumes higher confidence indicates more
+// authoritative data.
 func (o *Orchestrator) lookupVoting(ctx context.Context, req LookupRequest) (*LookupResult, error) {
 	// First do parallel lookup
 	result, err := o.lookupParallel(ctx, req)
@@ -350,7 +375,12 @@ func (o *Orchestrator) tryProvider(ctx context.Context, providerID string, filte
 	return provider.Lookup(ctx, filters)
 }
 
-// tryProviderWithBackoff attempts to get evidence with exponential backoff for retryable errors
+// tryProviderWithBackoff attempts to get evidence with exponential backoff for retryable errors.
+//
+// The method retries up to MaxRetries times for errors marked as retryable (timeouts, rate limits,
+// provider outages). Non-retryable errors (bad data, not found, auth failures) fail immediately.
+// Delay between retries grows exponentially: InitialDelay * (Multiplier ^ attempt), capped at MaxDelay.
+// Respects context cancellation between retry attempts.
 func (o *Orchestrator) tryProviderWithBackoff(ctx context.Context, providerID string, filters map[string]string) (*providers.Evidence, error) {
 	provider, ok := o.registry.Get(providerID)
 	if !ok {
@@ -392,7 +422,11 @@ func (o *Orchestrator) tryProviderWithBackoff(ctx context.Context, providerID st
 	return nil, lastErr
 }
 
-// HealthCheck checks the health of all registered providers
+// HealthCheck checks the health of all registered providers and returns a map of results.
+//
+// Each provider's Health method is called sequentially. The returned map contains provider IDs
+// as keys; nil values indicate healthy providers, non-nil values contain the health check error.
+// This is useful for monitoring dashboards and readiness probes.
 func (o *Orchestrator) HealthCheck(ctx context.Context) map[string]error {
 	results := make(map[string]error)
 
