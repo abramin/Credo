@@ -15,7 +15,6 @@ import (
 	"credo/pkg/platform/middleware/requesttime"
 )
 
-// BucketStore is a subset of ports.BucketStore (only Allow needed).
 type BucketStore interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
 }

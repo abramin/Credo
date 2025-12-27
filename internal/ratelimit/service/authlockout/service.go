@@ -38,7 +38,6 @@ import (
 )
 
 // Store is the persistence interface for auth lockout records.
-// A subset of ports.AuthLockoutStore (excludes cleanup worker methods).
 type Store interface {
 	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
 	Get(ctx context.Context, identifier string) (*models.AuthLockout, error)
