@@ -9,15 +9,26 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"credo/internal/evidence/registry/providers"
 	"credo/pkg/platform/middleware/requesttime"
 )
+
+// Tracer for distributed tracing of outbound HTTP calls.
+var adapterTracer = otel.Tracer("credo/registry/adapter")
 
 // HTTPAdapter wraps HTTP-based registry providers implementing the Provider interface.
 //
 // This adapter handles the common HTTP concerns (request building, error mapping, response parsing)
 // while delegating protocol-specific parsing to a configurable ResponseParser function.
 // It maps HTTP status codes to normalized ProviderError categories for consistent error handling.
+//
+// Emits spans for outbound HTTP calls with the span name based on the provider type
+// (e.g., registry.citizen.call, registry.sanctions.call).
 type HTTPAdapter struct {
 	id      string
 	baseURL string
@@ -94,7 +105,13 @@ func (a *HTTPAdapter) Capabilities() providers.Capabilities {
 //  2. Maps HTTP status codes to ProviderError categories (401/403→auth, 404→not found, 429→rate limited, 503→outage)
 //  3. Parses successful responses using the configured ResponseParser
 //  4. Enriches the evidence with ProviderID, ProviderType, and CheckedAt timestamp
-func (a *HTTPAdapter) Lookup(ctx context.Context, filters map[string]string) (*providers.Evidence, error) {
+//
+// When a tracer is configured, emits a span for the outbound call (e.g., registry.citizen.call).
+func (a *HTTPAdapter) Lookup(ctx context.Context, filters map[string]string) (evidence *providers.Evidence, err error) {
+	// Start span for outbound call if tracer is configured
+	ctx, span := a.startSpan(ctx)
+	defer func() { a.endSpan(span, err) }()
+
 	req, err := a.buildRequest(ctx, filters)
 	if err != nil {
 		return nil, err
@@ -105,7 +122,7 @@ func (a *HTTPAdapter) Lookup(ctx context.Context, filters map[string]string) (*p
 		return nil, err
 	}
 
-	if err := a.checkStatusCode(resp.StatusCode); err != nil {
+	if err = a.checkStatusCode(resp.StatusCode); err != nil {
 		return nil, err
 	}
 
@@ -278,4 +295,40 @@ func (a *HTTPAdapter) Health(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// -----------------------------------------------------------------------------
+// Tracing helpers
+// -----------------------------------------------------------------------------
+
+// spanName returns the appropriate span name based on the provider type.
+func (a *HTTPAdapter) spanName() string {
+	switch a.capabs.Type {
+	case providers.ProviderTypeCitizen:
+		return "registry.citizen.call"
+	case providers.ProviderTypeSanctions:
+		return "registry.sanctions.call"
+	default:
+		return "registry.provider.call"
+	}
+}
+
+// startSpan starts a new span for the outbound HTTP call.
+func (a *HTTPAdapter) startSpan(ctx context.Context) (context.Context, trace.Span) {
+	return adapterTracer.Start(ctx, a.spanName(),
+		trace.WithAttributes(
+			attribute.String("provider.id", a.id),
+			attribute.String("provider.type", string(a.capabs.Type)),
+			attribute.String("provider.base_url", a.baseURL),
+		),
+	)
+}
+
+// endSpan ends a span and records any error.
+func (a *HTTPAdapter) endSpan(span trace.Span, err error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.End()
 }

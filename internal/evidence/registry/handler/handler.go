@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"credo/internal/evidence/registry/models"
 	id "credo/pkg/domain"
@@ -16,6 +19,9 @@ import (
 	auth "credo/pkg/platform/middleware/auth"
 	"credo/pkg/platform/middleware/request"
 )
+
+// Tracer for distributed tracing of handler operations.
+var handlerTracer = otel.Tracer("credo/registry/handler")
 
 // RegistryService defines the interface for registry operations used by handlers.
 // Methods accept type-safe NationalID to enforce validation at parse time.
@@ -218,6 +224,7 @@ func (h *Handler) requireUserID(ctx context.Context, requestID string) (id.UserI
 }
 
 // emitAudit publishes an audit event. Failures are logged but don't fail the operation.
+// When a tracer is configured, emits an audit.emitted span event after successful publishing.
 func (h *Handler) emitAudit(ctx context.Context, event audit.Event) {
 	if h.auditPort == nil {
 		return
@@ -228,17 +235,26 @@ func (h *Handler) emitAudit(ctx context.Context, event audit.Event) {
 			"action", event.Action,
 			"user_id", event.UserID,
 		)
+		return
 	}
+	// Emit span event for audit trail correlation
+	h.emitAuditSpanEvent(ctx, event.Action)
 }
 
 // emitCriticalAudit publishes an audit event that MUST succeed.
 // Returns an error if the audit fails, allowing callers to fail-close.
 // Use this for security-critical events like sanctions hits.
+// When a tracer is configured, emits an audit.emitted span event after successful publishing.
 func (h *Handler) emitCriticalAudit(ctx context.Context, event audit.Event) error {
 	if h.auditPort == nil {
 		return dErrors.New(dErrors.CodeInternal, "audit system unavailable")
 	}
-	return h.auditPort.Emit(ctx, event)
+	if err := h.auditPort.Emit(ctx, event); err != nil {
+		return err
+	}
+	// Emit span event for audit trail correlation
+	h.emitAuditSpanEvent(ctx, event.Action)
+	return nil
 }
 
 // auditSanctionsCheck emits an audit event for a sanctions check with fail-closed semantics.
@@ -284,4 +300,21 @@ func redactNationalID(nid id.NationalID) string {
 		return "****"
 	}
 	return "****" + s[len(s)-4:]
+}
+
+// emitAuditSpanEvent adds an audit.emitted span event to the current trace.
+// This correlates audit logs with distributed traces for compliance analysis.
+func (h *Handler) emitAuditSpanEvent(ctx context.Context, action string) {
+	// Start a minimal span that ends immediately after adding the event
+	_, span := handlerTracer.Start(ctx, "audit.publish",
+		trace.WithAttributes(
+			attribute.String("audit.action", action),
+		),
+	)
+	span.AddEvent("audit.emitted",
+		trace.WithAttributes(
+			attribute.String("audit.action", action),
+		),
+	)
+	span.End()
 }

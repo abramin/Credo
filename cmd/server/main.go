@@ -432,7 +432,7 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 	// Create provider registry
 	registry := providers.NewProviderRegistry()
 
-	// Register citizen provider
+	// Register citizen provider (tracing handled via OpenTelemetry SDK)
 	citizenProv := citizenProvider.New(
 		"citizen-registry",
 		infra.Cfg.Registry.CitizenRegistryURL,
@@ -470,7 +470,8 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 	// Create consent adapter (needed by both service and handler)
 	consentAdapter := registryAdapters.NewConsentAdapter(consentSvc)
 
-	// Create registry service with orchestrator and consent port for atomic consent checks
+	// Create registry service with orchestrator and consent port
+	// Tracing is handled automatically via OpenTelemetry SDK
 	svc := registryService.New(
 		orch,
 		cache,
