@@ -27,7 +27,9 @@ func TestRequestID(t *testing.T) {
 	})
 
 	t.Run("accepts valid client-provided ID", func(t *testing.T) {
+		var capturedID string
 		handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedID = GetRequestID(r.Context())
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -37,7 +39,7 @@ func TestRequestID(t *testing.T) {
 		handler.ServeHTTP(w, req)
 
 		assert.Equal(t, "my-request-123", w.Header().Get("X-Request-ID"))
-		assert.Equal(t, "my-request-123", GetRequestID(req.Context()))
+		assert.Equal(t, "my-request-123", capturedID)
 	})
 
 	t.Run("accepts ID with periods and underscores", func(t *testing.T) {
