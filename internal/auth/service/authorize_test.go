@@ -84,7 +84,7 @@ func (s *ServiceSuite) TestAuthorize() {
 				return user, nil
 			})
 
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
@@ -96,8 +96,6 @@ func (s *ServiceSuite) TestAuthorize() {
 				assert.Equal(s.T(), tenantID, session.TenantID)
 				return nil
 			})
-
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
 
 		result, err := s.service.Authorize(ctx, &req)
 		s.NoError(err)

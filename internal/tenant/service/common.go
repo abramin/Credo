@@ -156,6 +156,8 @@ func (e *auditEmitter) emitToAudit(ctx context.Context, event string, attributes
 	if e.publisher == nil {
 		return
 	}
+
+	// Extract admin user who performed the action
 	userIDStr := attrs.ExtractString(attributes, "user_id")
 	userID, err := id.ParseUserID(userIDStr)
 	if err != nil && userIDStr != "" && e.logger != nil {
@@ -165,10 +167,23 @@ func (e *auditEmitter) emitToAudit(ctx context.Context, event string, attributes
 			"error", err,
 		)
 	}
+
+	// Subject is the affected entity (tenant_id or client_id for searchability)
+	subject := attrs.ExtractString(attributes, "tenant_id")
+	if subject == "" {
+		subject = attrs.ExtractString(attributes, "client_id")
+	}
+	if subject == "" {
+		subject = userIDStr // Fallback to user_id if no entity ID
+	}
+
+	requestID := request.GetRequestID(ctx)
+
 	if err := e.publisher.Emit(ctx, audit.Event{
-		UserID:  userID,
-		Subject: userIDStr,
-		Action:  event,
+		UserID:    userID,
+		Subject:   subject,
+		Action:    event,
+		RequestID: requestID,
 	}); err != nil && e.logger != nil {
 		e.logger.ErrorContext(ctx, "failed to emit audit event",
 			"event", event,

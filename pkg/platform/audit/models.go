@@ -25,20 +25,37 @@ type Event struct {
 type AuditEvent string
 
 const (
-	EventUserCreated       AuditEvent = "user_created"
-	EventSessionCreated    AuditEvent = "session_created"
-	EventSessionRevoked    AuditEvent = "session_revoked"
-	EventTokenIssued       AuditEvent = "token_issued"
-	EventTokenRefreshed    AuditEvent = "token_refreshed"
-	EventUserInfoAccessed  AuditEvent = "userinfo_accessed"
-	EventAuthFailed        AuditEvent = "auth_failed"
-	EventUserDeleted       AuditEvent = "user_deleted"
-	EventSessionsRevoked   AuditEvent = "sessions_revoked"
+	// Auth events
+	EventUserCreated      AuditEvent = "user_created"
+	EventSessionCreated   AuditEvent = "session_created"
+	EventSessionRevoked   AuditEvent = "session_revoked"
+	EventSessionsRevoked  AuditEvent = "sessions_revoked"
+	EventTokenIssued      AuditEvent = "token_issued"
+	EventTokenRefreshed   AuditEvent = "token_refreshed"
+	EventUserInfoAccessed AuditEvent = "userinfo_accessed"
+	EventAuthFailed       AuditEvent = "auth_failed"
+	EventUserDeleted      AuditEvent = "user_deleted"
+
+	// Tenant events
 	EventTenantCreated     AuditEvent = "tenant_created"
-	EventTenantDeactivated AuditEvent = "tenant.deactivated"
-	EventTenantReactivated AuditEvent = "tenant.reactivated"
-	EventClientCreated     AuditEvent = "client_created"
-	EventClientDeactivated AuditEvent = "client.deactivated"
-	EventClientReactivated AuditEvent = "client.reactivated"
-	EventSecretRotated     AuditEvent = "secret_rotated"
+	EventTenantDeactivated AuditEvent = "tenant_deactivated"
+	EventTenantReactivated AuditEvent = "tenant_reactivated"
+
+	// Client events
+	EventClientCreated       AuditEvent = "client_created"
+	EventClientDeactivated   AuditEvent = "client_deactivated"
+	EventClientReactivated   AuditEvent = "client_reactivated"
+	EventClientSecretRotated AuditEvent = "client_secret_rotated"
+
+	// Consent events
+	EventConsentGranted AuditEvent = "consent_granted"
+	EventConsentRevoked AuditEvent = "consent_revoked"
+	EventConsentDeleted AuditEvent = "consent_deleted"
+	EventConsentChecked AuditEvent = "consent_checked"
+
+	// Rate limit events
+	EventRateLimitExceeded    AuditEvent = "rate_limit_exceeded"
+	EventAuthLockoutTriggered AuditEvent = "auth_lockout_triggered"
+	EventAuthLockoutCleared   AuditEvent = "auth_lockout_cleared"
+	EventAllowlistBypassed    AuditEvent = "allowlist_bypassed"
 )

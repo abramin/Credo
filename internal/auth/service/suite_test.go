@@ -43,6 +43,7 @@ func (s *ServiceSuite) SetupTest() {
 	s.mockAuditPublisher = mocks.NewMockAuditPublisher(s.ctrl)
 	s.mockTRL = mocks.NewMockTokenRevocationList(s.ctrl)
 	s.mockClientResolver = mocks.NewMockClientResolver(s.ctrl)
+
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := &Config{
 		SessionTTL:             2 * time.Hour,

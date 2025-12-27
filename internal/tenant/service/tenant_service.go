@@ -11,6 +11,7 @@ import (
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit"
 	"credo/pkg/platform/middleware/requesttime"
 	"credo/pkg/platform/sentinel"
 )
@@ -48,7 +49,7 @@ func (s *TenantService) CreateTenant(ctx context.Context, name string) (*models.
 		}
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create tenant")
 	}
-	s.auditEmitter.emit(ctx, "tenant.created", "tenant_id", t.ID)
+	s.auditEmitter.emit(ctx, string(audit.EventTenantCreated), "tenant_id", t.ID)
 	s.incrementTenantCreated()
 
 	return t, nil
@@ -87,7 +88,7 @@ func (s *TenantService) DeactivateTenant(ctx context.Context, tenantID id.Tenant
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
 	}
 
-	s.auditEmitter.emit(ctx, "tenant.deactivated", "tenant_id", tenant.ID)
+	s.auditEmitter.emit(ctx, string(audit.EventTenantDeactivated), "tenant_id", tenant.ID)
 
 	return tenant, nil
 }
@@ -114,7 +115,7 @@ func (s *TenantService) ReactivateTenant(ctx context.Context, tenantID id.Tenant
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
 	}
 
-	s.auditEmitter.emit(ctx, "tenant.reactivated", "tenant_id", tenant.ID)
+	s.auditEmitter.emit(ctx, string(audit.EventTenantReactivated), "tenant_id", tenant.ID)
 
 	return tenant, nil
 }

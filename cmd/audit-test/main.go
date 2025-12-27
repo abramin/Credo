@@ -46,7 +46,7 @@ func main() {
 
 	// Test 1: Emit some events normally
 	fmt.Println("1. Emitting 5 events (should all succeed)...")
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		event := audit.Event{
 			UserID:    id.UserID(uuid.New()),
 			Action:    "test_action",
@@ -69,7 +69,7 @@ func main() {
 	// Test 2: Flood the buffer to trigger drops
 	fmt.Println("\n2. Flooding buffer with 20 events (buffer size is 10)...")
 	dropped := 0
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		event := audit.Event{
 			UserID:    id.UserID(uuid.New()),
 			Action:    "flood_action",

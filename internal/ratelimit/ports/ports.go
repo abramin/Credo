@@ -9,6 +9,7 @@ import (
 
 	"credo/internal/ratelimit/models"
 	id "credo/pkg/domain"
+	"credo/pkg/platform/attrs"
 	"credo/pkg/platform/audit"
 	request "credo/pkg/platform/middleware/request"
 )
@@ -107,25 +108,60 @@ type ClientLookup interface {
 
 // LogAudit is a shared helper for logging audit events across ratelimit services.
 // It logs to both the structured logger and the audit publisher if available.
-func LogAudit(ctx context.Context, logger *slog.Logger, publisher AuditPublisher, event string, attrs ...any) {
+func LogAudit(ctx context.Context, logger *slog.Logger, publisher AuditPublisher, event string, attrList ...any) {
+	requestID := request.GetRequestID(ctx)
+
 	// Add request ID for traceability
-	if requestID := request.GetRequestID(ctx); requestID != "" {
-		attrs = append(attrs, "request_id", requestID)
+	if requestID != "" {
+		attrList = append(attrList, "request_id", requestID)
 	}
 
 	// Add standard audit fields
-	args := append(attrs, "event", event, "log_type", "audit")
+	args := append(attrList, "event", event, "log_type", "audit")
 
 	// Log to structured logger
 	if logger != nil {
 		logger.InfoContext(ctx, event, args...)
 	}
 
-	// Emit to audit publisher
+	// Emit to audit publisher with enriched fields
 	if publisher == nil {
 		return
 	}
-	if err := publisher.Emit(ctx, audit.Event{Action: event}); err != nil && logger != nil {
+
+	// Extract subject from common identifier fields (ip, identifier, user_id, client_id, api_key_id)
+	subject := attrs.ExtractString(attrList, "identifier")
+	if subject == "" {
+		subject = attrs.ExtractString(attrList, "ip")
+	}
+	if subject == "" {
+		subject = attrs.ExtractString(attrList, "user_id")
+	}
+	if subject == "" {
+		subject = attrs.ExtractString(attrList, "client_id")
+	}
+	if subject == "" {
+		subject = attrs.ExtractString(attrList, "api_key_id")
+	}
+
+	// Extract user_id if available
+	userIDStr := attrs.ExtractString(attrList, "user_id")
+	userID, _ := id.ParseUserID(userIDStr)
+
+	// Extract reason from common fields
+	reason := attrs.ExtractString(attrList, "reason")
+	if reason == "" {
+		reason = attrs.ExtractString(attrList, "bypass_type")
+	}
+
+	if err := publisher.Emit(ctx, audit.Event{
+		Action:    event,
+		Subject:   subject,
+		UserID:    userID,
+		RequestID: requestID,
+		Reason:    reason,
+		Decision:  "denied", // Rate limit events are typically denials
+	}); err != nil && logger != nil {
 		logger.WarnContext(ctx, "failed to emit audit event", "event", event, "error", err)
 	}
 }
