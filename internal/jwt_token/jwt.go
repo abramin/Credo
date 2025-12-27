@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	dErrors "credo/pkg/domain-errors"
@@ -111,6 +112,10 @@ func (s *JWTService) GenerateAccessToken(
 	tenantID string,
 	scopes []string,
 ) (string, error) {
+	if len(scopes) == 0 {
+		return "", dErrors.New(dErrors.CodeInvalidInput, "scopes cannot be empty")
+	}
+
 	b := make([]byte, 16)
 	_, err := rand.Read(b)
 	if err != nil {
@@ -142,6 +147,20 @@ func (s *JWTService) GenerateAccessToken(
 	return signedToken, nil
 }
 
+// ParseTokenSkipClaimsValidation parses a token WITHOUT validating expiration or standard claims.
+//
+// SECURITY WARNING: This method should ONLY be used in specific scenarios:
+//   - Token refresh flows where the old token may be expired
+//   - Token revocation where we need to extract JTI from expired tokens
+//
+// This method STILL validates:
+//   - Signature (token must be signed with our key)
+//   - Algorithm (must be HS256)
+//
+// Callers MUST perform additional business validation:
+//   - Check refresh token validity in database
+//   - Verify session is still active
+//   - Apply rate limiting to prevent abuse
 func (s *JWTService) ParseTokenSkipClaimsValidation(tokenString string) (*AccessTokenClaims, error) {
 	if tokenString == "" {
 		return nil, dErrors.New(dErrors.CodeInvalidInput, "empty token")
@@ -226,6 +245,11 @@ func (s *JWTService) ValidateToken(tokenString string) (*AccessTokenClaims, erro
 	claims, ok := parsed.Claims.(*AccessTokenClaims)
 	if !ok {
 		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token claims")
+	}
+
+	// Explicit issuer validation: token issuer must match our configured base URL
+	if !strings.HasPrefix(claims.Issuer, s.issuerBaseURL) {
+		return nil, dErrors.New(dErrors.CodeInvalidInput, "invalid token issuer")
 	}
 
 	return claims, nil

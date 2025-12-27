@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -65,6 +66,13 @@ func GetClientID(ctx context.Context) string {
 	return clientID
 }
 
+// writeJSONError writes a JSON error response with the given status code and error details.
+func writeJSONError(w http.ResponseWriter, status int, errCode, errDesc string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(fmt.Appendf(nil, `{"error":"%s","error_description":"%s"}`, errCode, errDesc))
+}
+
 func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecker, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,15 +88,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 						"error", err,
 						"request_id", requestID,
 					)
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusUnauthorized)
-					_, err = w.Write([]byte(`{"error":"unauthorized","error_description":"Invalid or expired token"}`))
-					if err != nil {
-						logger.ErrorContext(ctx, "failed to write unauthorized response",
-							"error", err,
-							"request_id", requestID,
-						)
-					}
+					writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
 					return
 				}
 
@@ -101,9 +101,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 						logger.WarnContext(ctx, "unauthorized access - missing token jti",
 							"request_id", requestID,
 						)
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(http.StatusUnauthorized)
-						_, _ = w.Write([]byte(`{"error":"unauthorized","error_description":"Invalid or expired token"}`))
+						writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
 						return
 					}
 
@@ -114,9 +112,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 							"error", err,
 							"request_id", requestID,
 						)
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(http.StatusInternalServerError)
-						_, _ = w.Write([]byte(`{"error":"internal_error","error_description":"Failed to validate token"}`))
+						writeJSONError(w, http.StatusInternalServerError, "internal_error", "Failed to validate token")
 						return
 					}
 					if revoked {
@@ -125,9 +121,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 							"jti", claims.JTI,
 							"request_id", requestID,
 						)
-						w.Header().Set("Content-Type", "application/json")
-						w.WriteHeader(http.StatusUnauthorized)
-						_, _ = w.Write([]byte(`{"error":"unauthorized","error_description":"Token has been revoked"}`))
+						writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Token has been revoked")
 						return
 					}
 				}
@@ -146,15 +140,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 			logger.WarnContext(ctx, "unauthorized access - missing token",
 				"request_id", requestID,
 			)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, err := w.Write([]byte(`{"error":"unauthorized","error_description":"Missing or invalid Authorization header"}`))
-			if err != nil {
-				logger.ErrorContext(ctx, "failed to write unauthorized response",
-					"error", err,
-					"request_id", requestID,
-				)
-			}
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid Authorization header")
 		})
 	}
 }

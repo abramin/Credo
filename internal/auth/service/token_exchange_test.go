@@ -134,6 +134,7 @@ func (s *ServiceSuite) TestToken_Exchange() {
 	s.T().Run("code store lookup error", func(t *testing.T) {
 		req := baseReq
 		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, errors.New("db error"))
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.Token(context.Background(), &req)
 		s.Error(err)

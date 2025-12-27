@@ -245,6 +245,36 @@ func Test_ExtractTenantFromIssuer(t *testing.T) {
 	})
 }
 
+func Test_ValidateToken_RejectsInvalidIssuer(t *testing.T) {
+	ctx := context.Background()
+	// Create service with different issuer
+	otherService := NewJWTService("test-signing-key", "https://other.issuer.com", "test-audience", time.Hour)
+	token, err := otherService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read"})
+	require.NoError(t, err)
+
+	// Validate with original service (different issuer base URL)
+	_, err = jwtService.ValidateToken(token)
+	require.Error(t, err)
+	assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
+	assert.Contains(t, err.Error(), "invalid token issuer")
+}
+
+func Test_GenerateAccessToken_RejectsEmptyScopes(t *testing.T) {
+	ctx := context.Background()
+	_, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{})
+	require.Error(t, err)
+	assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
+	assert.Contains(t, err.Error(), "scopes cannot be empty")
+}
+
+func Test_GenerateAccessToken_RejectsNilScopes(t *testing.T) {
+	ctx := context.Background()
+	_, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, nil)
+	require.Error(t, err)
+	assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
+	assert.Contains(t, err.Error(), "scopes cannot be empty")
+}
+
 func Test_PerTenantIssuerInToken(t *testing.T) {
 	ctx := context.Background()
 	service := NewJWTService("signing-key", "https://auth.example.com", "audience", time.Hour)

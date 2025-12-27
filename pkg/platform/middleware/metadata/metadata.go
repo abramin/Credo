@@ -90,8 +90,8 @@ func (m *Middleware) extractClientIP(r *http.Request) string {
 
 	// Parse first IP in XFF chain (original client)
 	var clientIP string
-	if idx := strings.Index(xff, ","); idx != -1 {
-		clientIP = strings.TrimSpace(xff[:idx])
+	if before, _, ok := strings.Cut(xff, ","); ok {
+		clientIP = strings.TrimSpace(before)
 	} else {
 		clientIP = strings.TrimSpace(xff)
 	}
