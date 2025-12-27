@@ -49,10 +49,9 @@ func parseSanctionsResponse(statusCode int, body []byte) (*providers.Evidence, e
 		return nil, fmt.Errorf("failed to unmarshal sanctions response: %w", err)
 	}
 
-	checkedAt, err := time.Parse(time.RFC3339, resp.CheckedAt)
-	if err != nil {
-		checkedAt = time.Now()
-	}
+	// Parse timestamp from response. If parsing fails, leave zero and let the
+	// adapter set it from context (maintains domain purity - no time.Now() here).
+	checkedAt, _ := time.Parse(time.RFC3339, resp.CheckedAt)
 
 	// Convert to generic Evidence structure
 	evidence := &providers.Evidence{
