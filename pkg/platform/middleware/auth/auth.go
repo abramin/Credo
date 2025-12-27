@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	id "credo/pkg/domain"
 	request "credo/pkg/platform/middleware/request"
 )
 
@@ -28,42 +29,43 @@ type JWTClaims struct {
 	JTI       string // JWT ID for revocation tracking
 }
 
-// Context keys for storing authenticated user information
+// Context keys for storing authenticated user information (typed IDs).
 type contextKeyUserID struct{}
 type contextKeySessionID struct{}
 type contextKeyClientID struct{}
 
-// ContextKeyUserID is exported for use in handlers
+// ContextKeyUserID is exported for use in handlers and tests.
 var (
 	ContextKeyUserID    = contextKeyUserID{}
 	ContextKeySessionID = contextKeySessionID{}
 	ContextKeyClientID  = contextKeyClientID{}
 )
 
-// GetUserID retrieves the authenticated user ID from the context
-func GetUserID(ctx context.Context) string {
-	userID, ok := ctx.Value(ContextKeyUserID).(string)
-	if !ok {
-		return ""
+// GetUserID retrieves the authenticated user ID from the context as a typed ID.
+// Returns the zero value (nil UUID) if not set.
+func GetUserID(ctx context.Context) id.UserID {
+	if userID, ok := ctx.Value(ContextKeyUserID).(id.UserID); ok {
+		return userID
 	}
-	return userID
+	return id.UserID{}
 }
 
-// GetSessionID retrieves the session ID from the context
-func GetSessionID(ctx context.Context) string {
-	sessionID, ok := ctx.Value(ContextKeySessionID).(string)
-	if !ok {
-		return ""
+// GetSessionID retrieves the session ID from the context as a typed ID.
+// Returns the zero value (nil UUID) if not set.
+func GetSessionID(ctx context.Context) id.SessionID {
+	if sessionID, ok := ctx.Value(ContextKeySessionID).(id.SessionID); ok {
+		return sessionID
 	}
-	return sessionID
+	return id.SessionID{}
 }
 
-func GetClientID(ctx context.Context) string {
-	clientID, ok := ctx.Value(ContextKeyClientID).(string)
-	if !ok {
-		return ""
+// GetClientID retrieves the client ID from the context as a typed ID.
+// Returns the zero value (nil UUID) if not set.
+func GetClientID(ctx context.Context) id.ClientID {
+	if clientID, ok := ctx.Value(ContextKeyClientID).(id.ClientID); ok {
+		return clientID
 	}
-	return clientID
+	return id.ClientID{}
 }
 
 // writeJSONError writes a JSON error response with the given status code and error details.
@@ -73,74 +75,146 @@ func writeJSONError(w http.ResponseWriter, status int, errCode, errDesc string) 
 	_, _ = w.Write(fmt.Appendf(nil, `{"error":"%s","error_description":"%s"}`, errCode, errDesc))
 }
 
+// revocationResult represents the outcome of a token revocation check.
+type revocationResult int
+
+const (
+	revocationOK       revocationResult = iota // Token is valid, not revoked
+	revocationMissingJTI                       // Token missing required JTI claim
+	revocationRevoked                          // Token has been revoked
+	revocationError                            // Error checking revocation status
+)
+
+// checkRevocation verifies that a token has not been revoked.
+// Returns revocationOK if the token is valid, or an appropriate error state.
+func checkRevocation(ctx context.Context, checker TokenRevocationChecker, jti string, logger *slog.Logger) revocationResult {
+	if checker == nil {
+		return revocationOK
+	}
+
+	if jti == "" {
+		requestID := request.GetRequestID(ctx)
+		logger.WarnContext(ctx, "unauthorized access - missing token jti",
+			"request_id", requestID,
+		)
+		return revocationMissingJTI
+	}
+
+	revoked, err := checker.IsTokenRevoked(ctx, jti)
+	if err != nil {
+		requestID := request.GetRequestID(ctx)
+		logger.ErrorContext(ctx, "failed to check token revocation",
+			"error", err,
+			"request_id", requestID,
+		)
+		return revocationError
+	}
+
+	if revoked {
+		requestID := request.GetRequestID(ctx)
+		logger.WarnContext(ctx, "unauthorized access - token revoked",
+			"jti", jti,
+			"request_id", requestID,
+		)
+		return revocationRevoked
+	}
+
+	return revocationOK
+}
+
+// parsedClaims holds the typed IDs parsed from JWT claims.
+type parsedClaims struct {
+	UserID    id.UserID
+	SessionID id.SessionID
+	ClientID  id.ClientID
+}
+
+// parseClaims converts string IDs from JWT claims to typed IDs.
+// Returns an error if any ID has an invalid format.
+func parseClaims(claims *JWTClaims) (*parsedClaims, error) {
+	userID, err := id.ParseUserID(claims.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user_id: %w", err)
+	}
+
+	sessionID, err := id.ParseSessionID(claims.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid session_id: %w", err)
+	}
+
+	// ClientID may be empty for some token types, so only parse if present
+	var clientID id.ClientID
+	if claims.ClientID != "" {
+		clientID, err = id.ParseClientID(claims.ClientID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid client_id: %w", err)
+		}
+	}
+
+	return &parsedClaims{
+		UserID:    userID,
+		SessionID: sessionID,
+		ClientID:  clientID,
+	}, nil
+}
+
+// RequireAuth returns middleware that validates JWT tokens and populates context with typed IDs.
+// It validates the token, checks revocation status, parses claim IDs, and stores typed IDs in context.
 func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecker, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
 			authHeader := r.Header.Get("Authorization")
-			const bearerPrefix = "Bearer "
-			if after, ok := strings.CutPrefix(authHeader, bearerPrefix); ok {
-				token := after
-				claims, err := validator.ValidateToken(token)
-				if err != nil {
-					ctx := r.Context()
-					requestID := request.GetRequestID(ctx)
-					logger.WarnContext(ctx, "unauthorized access - invalid token",
-						"error", err,
-						"request_id", requestID,
-					)
-					writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
-					return
-				}
 
-				ctx := r.Context()
-
-				// TR-4: Middleware revocation check (PRD-016).
-				if revocationChecker != nil {
-					if claims.JTI == "" {
-						requestID := request.GetRequestID(ctx)
-						logger.WarnContext(ctx, "unauthorized access - missing token jti",
-							"request_id", requestID,
-						)
-						writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
-						return
-					}
-
-					revoked, err := revocationChecker.IsTokenRevoked(ctx, claims.JTI)
-					if err != nil {
-						requestID := request.GetRequestID(ctx)
-						logger.ErrorContext(ctx, "failed to check token revocation",
-							"error", err,
-							"request_id", requestID,
-						)
-						writeJSONError(w, http.StatusInternalServerError, "internal_error", "Failed to validate token")
-						return
-					}
-					if revoked {
-						requestID := request.GetRequestID(ctx)
-						logger.WarnContext(ctx, "unauthorized access - token revoked",
-							"jti", claims.JTI,
-							"request_id", requestID,
-						)
-						writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Token has been revoked")
-						return
-					}
-				}
-
-				ctx = context.WithValue(ctx, ContextKeyUserID, claims.UserID)
-				ctx = context.WithValue(ctx, ContextKeySessionID, claims.SessionID)
-				ctx = context.WithValue(ctx, ContextKeyClientID, claims.ClientID)
-
-				next.ServeHTTP(w, r.WithContext(ctx))
+			token, ok := strings.CutPrefix(authHeader, "Bearer ")
+			if !ok {
+				requestID := request.GetRequestID(ctx)
+				logger.WarnContext(ctx, "unauthorized access - missing token",
+					"request_id", requestID,
+				)
+				writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid Authorization header")
 				return
 			}
 
-			// No Authorization header or invalid format
-			ctx := r.Context()
-			requestID := request.GetRequestID(ctx)
-			logger.WarnContext(ctx, "unauthorized access - missing token",
-				"request_id", requestID,
-			)
-			writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid Authorization header")
+			claims, err := validator.ValidateToken(token)
+			if err != nil {
+				requestID := request.GetRequestID(ctx)
+				logger.WarnContext(ctx, "unauthorized access - invalid token",
+					"error", err,
+					"request_id", requestID,
+				)
+				writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
+				return
+			}
+
+			// TR-4: Middleware revocation check (PRD-016).
+			switch checkRevocation(ctx, revocationChecker, claims.JTI, logger) {
+			case revocationMissingJTI, revocationRevoked:
+				writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Token has been revoked")
+				return
+			case revocationError:
+				writeJSONError(w, http.StatusInternalServerError, "internal_error", "Failed to validate token")
+				return
+			}
+
+			// Parse string IDs to typed IDs
+			parsed, err := parseClaims(claims)
+			if err != nil {
+				requestID := request.GetRequestID(ctx)
+				logger.WarnContext(ctx, "unauthorized access - malformed token claims",
+					"error", err,
+					"request_id", requestID,
+				)
+				writeJSONError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired token")
+				return
+			}
+
+			// Store typed IDs in context
+			ctx = context.WithValue(ctx, ContextKeyUserID, parsed.UserID)
+			ctx = context.WithValue(ctx, ContextKeySessionID, parsed.SessionID)
+			ctx = context.WithValue(ctx, ContextKeyClientID, parsed.ClientID)
+
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

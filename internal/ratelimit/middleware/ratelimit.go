@@ -174,7 +174,7 @@ func (m *Middleware) RateLimitAuthenticated(class models.EndpointClass) func(htt
 
 			ctx := r.Context()
 			ip := metadata.GetClientIP(ctx)
-			userID := auth.GetUserID(ctx)
+			userID := auth.GetUserID(ctx).String()
 
 			result, degraded, err := m.checkBothLimits(ctx, ip, userID, class)
 			if err != nil && !degraded {

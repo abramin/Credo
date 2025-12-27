@@ -12,6 +12,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	id "credo/pkg/domain"
+)
+
+// Test UUIDs for consistent testing
+const (
+	testUserID    = "550e8400-e29b-41d4-a716-446655440001"
+	testSessionID = "550e8400-e29b-41d4-a716-446655440002"
+	testClientID  = "550e8400-e29b-41d4-a716-446655440003"
 )
 
 // MockJWTValidator is a testify mock for JWTValidator
@@ -89,9 +98,9 @@ func (s *AuthMiddlewareTestSuite) makeRequest(authHeader string) *httptest.Respo
 
 func (s *AuthMiddlewareTestSuite) TestValidToken() {
 	expectedClaims := &JWTClaims{
-		UserID:    "user-123",
-		SessionID: "session-456",
-		ClientID:  "client-789",
+		UserID:    testUserID,
+		SessionID: testSessionID,
+		ClientID:  testClientID,
 		JTI:       "jti-123",
 	}
 	s.validator.On("ValidateToken", "valid-token").Return(expectedClaims, nil)
@@ -101,17 +110,17 @@ func (s *AuthMiddlewareTestSuite) TestValidToken() {
 	require.True(s.T(), s.nextHandler.called, "next handler should be called")
 	assert.Equal(s.T(), http.StatusOK, w.Code)
 
-	// Verify context values were set correctly
-	assert.Equal(s.T(), "user-123", GetUserID(s.nextHandler.context))
-	assert.Equal(s.T(), "session-456", GetSessionID(s.nextHandler.context))
-	assert.Equal(s.T(), "client-789", GetClientID(s.nextHandler.context))
+	// Verify context values were set correctly as typed IDs
+	assert.Equal(s.T(), testUserID, GetUserID(s.nextHandler.context).String())
+	assert.Equal(s.T(), testSessionID, GetSessionID(s.nextHandler.context).String())
+	assert.Equal(s.T(), testClientID, GetClientID(s.nextHandler.context).String())
 }
 
 func (s *AuthMiddlewareTestSuite) TestRevokedToken() {
 	expectedClaims := &JWTClaims{
-		UserID:    "user-123",
-		SessionID: "session-456",
-		ClientID:  "client-789",
+		UserID:    testUserID,
+		SessionID: testSessionID,
+		ClientID:  testClientID,
 		JTI:       "jti-123",
 	}
 	s.validator.On("ValidateToken", "valid-token").Return(expectedClaims, nil)
@@ -133,9 +142,9 @@ func (s *AuthMiddlewareTestSuite) TestRevokedToken() {
 
 func (s *AuthMiddlewareTestSuite) TestRevocationCheckMissingJTI() {
 	expectedClaims := &JWTClaims{
-		UserID:    "user-123",
-		SessionID: "session-456",
-		ClientID:  "client-789",
+		UserID:    testUserID,
+		SessionID: testSessionID,
+		ClientID:  testClientID,
 	}
 	s.validator.On("ValidateToken", "valid-token").Return(expectedClaims, nil)
 
@@ -148,16 +157,16 @@ func (s *AuthMiddlewareTestSuite) TestRevocationCheckMissingJTI() {
 	assert.False(s.T(), s.nextHandler.called, "next handler should not be called")
 	assert.Equal(s.T(), http.StatusUnauthorized, w.Code)
 	assert.JSONEq(s.T(),
-		`{"error":"unauthorized","error_description":"Invalid or expired token"}`,
+		`{"error":"unauthorized","error_description":"Token has been revoked"}`,
 		w.Body.String(),
 	)
 }
 
 func (s *AuthMiddlewareTestSuite) TestRevocationCheckError() {
 	expectedClaims := &JWTClaims{
-		UserID:    "user-123",
-		SessionID: "session-456",
-		ClientID:  "client-789",
+		UserID:    testUserID,
+		SessionID: testSessionID,
+		ClientID:  testClientID,
 		JTI:       "jti-123",
 	}
 	s.validator.On("ValidateToken", "valid-token").Return(expectedClaims, nil)
@@ -173,6 +182,25 @@ func (s *AuthMiddlewareTestSuite) TestRevocationCheckError() {
 	assert.Equal(s.T(), http.StatusInternalServerError, w.Code)
 	assert.JSONEq(s.T(),
 		`{"error":"internal_error","error_description":"Failed to validate token"}`,
+		w.Body.String(),
+	)
+}
+
+func (s *AuthMiddlewareTestSuite) TestMalformedUserIDInClaims() {
+	expectedClaims := &JWTClaims{
+		UserID:    "not-a-valid-uuid",
+		SessionID: testSessionID,
+		ClientID:  testClientID,
+		JTI:       "jti-123",
+	}
+	s.validator.On("ValidateToken", "valid-token").Return(expectedClaims, nil)
+
+	w := s.makeRequest("Bearer valid-token")
+
+	assert.False(s.T(), s.nextHandler.called, "next handler should not be called for malformed claims")
+	assert.Equal(s.T(), http.StatusUnauthorized, w.Code)
+	assert.JSONEq(s.T(),
+		`{"error":"unauthorized","error_description":"Invalid or expired token"}`,
 		w.Body.String(),
 	)
 }
@@ -267,99 +295,123 @@ type ContextGettersTestSuite struct {
 }
 
 func (s *ContextGettersTestSuite) TestGetUserID() {
+	parsedUserID, _ := id.ParseUserID(testUserID)
+
 	testCases := []struct {
-		name     string
-		ctx      context.Context
-		expected string
+		name       string
+		ctx        context.Context
+		expectedNil bool
+		expected   string
 	}{
 		{
-			name:     "valid user ID",
-			ctx:      context.WithValue(context.Background(), ContextKeyUserID, "user-123"),
-			expected: "user-123",
+			name:       "valid user ID",
+			ctx:        context.WithValue(context.Background(), ContextKeyUserID, parsedUserID),
+			expectedNil: false,
+			expected:   testUserID,
 		},
 		{
-			name:     "missing user ID",
-			ctx:      context.Background(),
-			expected: "",
+			name:       "missing user ID",
+			ctx:        context.Background(),
+			expectedNil: true,
 		},
 		{
-			name:     "wrong type (int)",
-			ctx:      context.WithValue(context.Background(), ContextKeyUserID, 123),
-			expected: "",
+			name:       "wrong type (string)",
+			ctx:        context.WithValue(context.Background(), ContextKeyUserID, "user-123"),
+			expectedNil: true,
 		},
 		{
-			name:     "wrong type (nil)",
-			ctx:      context.WithValue(context.Background(), ContextKeyUserID, nil),
-			expected: "",
+			name:       "wrong type (int)",
+			ctx:        context.WithValue(context.Background(), ContextKeyUserID, 123),
+			expectedNil: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		s.Run(tc.name, func() {
 			result := GetUserID(tc.ctx)
-			assert.Equal(s.T(), tc.expected, result)
+			if tc.expectedNil {
+				assert.True(s.T(), result.IsNil())
+			} else {
+				assert.Equal(s.T(), tc.expected, result.String())
+			}
 		})
 	}
 }
 
 func (s *ContextGettersTestSuite) TestGetSessionID() {
+	parsedSessionID, _ := id.ParseSessionID(testSessionID)
+
 	testCases := []struct {
-		name     string
-		ctx      context.Context
-		expected string
+		name       string
+		ctx        context.Context
+		expectedNil bool
+		expected   string
 	}{
 		{
-			name:     "valid session ID",
-			ctx:      context.WithValue(context.Background(), ContextKeySessionID, "session-456"),
-			expected: "session-456",
+			name:       "valid session ID",
+			ctx:        context.WithValue(context.Background(), ContextKeySessionID, parsedSessionID),
+			expectedNil: false,
+			expected:   testSessionID,
 		},
 		{
-			name:     "missing session ID",
-			ctx:      context.Background(),
-			expected: "",
+			name:       "missing session ID",
+			ctx:        context.Background(),
+			expectedNil: true,
 		},
 		{
-			name:     "wrong type (int)",
-			ctx:      context.WithValue(context.Background(), ContextKeySessionID, 456),
-			expected: "",
+			name:       "wrong type (string)",
+			ctx:        context.WithValue(context.Background(), ContextKeySessionID, "session-456"),
+			expectedNil: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		s.Run(tc.name, func() {
 			result := GetSessionID(tc.ctx)
-			assert.Equal(s.T(), tc.expected, result)
+			if tc.expectedNil {
+				assert.True(s.T(), result.IsNil())
+			} else {
+				assert.Equal(s.T(), tc.expected, result.String())
+			}
 		})
 	}
 }
 
 func (s *ContextGettersTestSuite) TestGetClientID() {
+	parsedClientID, _ := id.ParseClientID(testClientID)
+
 	testCases := []struct {
-		name     string
-		ctx      context.Context
-		expected string
+		name       string
+		ctx        context.Context
+		expectedNil bool
+		expected   string
 	}{
 		{
-			name:     "valid client ID",
-			ctx:      context.WithValue(context.Background(), ContextKeyClientID, "client-789"),
-			expected: "client-789",
+			name:       "valid client ID",
+			ctx:        context.WithValue(context.Background(), ContextKeyClientID, parsedClientID),
+			expectedNil: false,
+			expected:   testClientID,
 		},
 		{
-			name:     "missing client ID",
-			ctx:      context.Background(),
-			expected: "",
+			name:       "missing client ID",
+			ctx:        context.Background(),
+			expectedNil: true,
 		},
 		{
-			name:     "wrong type (int)",
-			ctx:      context.WithValue(context.Background(), ContextKeyClientID, 789),
-			expected: "",
+			name:       "wrong type (string)",
+			ctx:        context.WithValue(context.Background(), ContextKeyClientID, "client-789"),
+			expectedNil: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		s.Run(tc.name, func() {
 			result := GetClientID(tc.ctx)
-			assert.Equal(s.T(), tc.expected, result)
+			if tc.expectedNil {
+				assert.True(s.T(), result.IsNil())
+			} else {
+				assert.Equal(s.T(), tc.expected, result.String())
+			}
 		})
 	}
 }
