@@ -75,12 +75,17 @@ func newConsentTestHarness(userIDStr string) *consentTestHarness {
 	)
 	h := handler.New(svc, logger, nil)
 
+	// Parse typed IDs for context injection (simulating auth middleware)
+	parsedUserID, _ := id.ParseUserID(userIDStr)
+	parsedSessionID, _ := id.ParseSessionID("550e8400-e29b-41d4-a716-446655440010")
+	parsedClientID, _ := id.ParseClientID("550e8400-e29b-41d4-a716-446655440020")
+
 	router := chi.NewRouter()
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), authmw.ContextKeyUserID, userIDStr)
-			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, "session-"+userIDStr)
-			ctx = context.WithValue(ctx, authmw.ContextKeyClientID, "client-"+userIDStr)
+			ctx := context.WithValue(r.Context(), authmw.ContextKeyUserID, parsedUserID)
+			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, parsedSessionID)
+			ctx = context.WithValue(ctx, authmw.ContextKeyClientID, parsedClientID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})

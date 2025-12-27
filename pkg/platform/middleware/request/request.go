@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"regexp"
 	"runtime/debug"
 	"time"
 
@@ -13,6 +14,14 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// MaxRequestIDLength is the maximum allowed length for X-Request-ID header
+// to prevent header injection and log pollution attacks.
+const MaxRequestIDLength = 128
+
+// validRequestID matches alphanumeric characters, dashes, underscores, and periods.
+// This prevents log injection and header manipulation attacks.
+var validRequestID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 // Recovery recovers from panics and returns a 500 error, preventing server crashes.
 func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
@@ -37,11 +46,13 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // RequestID adds a unique request ID to the context and response headers.
-// If the client provides an X-Request-ID header, it will be used; otherwise a new UUID is generated.
+// If the client provides a valid X-Request-ID header, it will be used; otherwise a new UUID is generated.
+// Client-provided IDs are validated: max 128 chars, alphanumeric/dash/underscore/period only.
+// Invalid IDs are replaced with generated UUIDs to prevent log injection attacks.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
+		if !isValidRequestID(requestID) {
 			requestID = uuid.New().String()
 		}
 
@@ -50,6 +61,15 @@ func RequestID(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// isValidRequestID checks if a request ID is safe to use.
+// Returns false for empty strings, oversized values, or values with invalid characters.
+func isValidRequestID(id string) bool {
+	if id == "" || len(id) > MaxRequestIDLength {
+		return false
+	}
+	return validRequestID.MatchString(id)
 }
 
 type requestIDKey struct{}

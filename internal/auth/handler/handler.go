@@ -185,14 +185,18 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
-	sessionIDStr := auth.GetSessionID(ctx)
 
-	res, err := h.auth.UserInfo(ctx, sessionIDStr)
+	sessionID, ok := h.requireSessionIDFromContext(ctx, w, requestID)
+	if !ok {
+		return
+	}
+
+	res, err := h.auth.UserInfo(ctx, sessionID.String())
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to get user info",
 			"error", err,
 			"request_id", requestID,
-			"session_id", sessionIDStr,
+			"session_id", sessionID.String(),
 		)
 		httputil.WriteError(w, err)
 		return
@@ -200,7 +204,7 @@ func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.InfoContext(ctx, "user info retrieved successfully",
 		"request_id", requestID,
-		"session_id", sessionIDStr,
+		"session_id", sessionID.String(),
 	)
 
 	httputil.WriteJSON(w, http.StatusOK, res)
@@ -438,15 +442,13 @@ func (h *Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// requireUserIDFromContext parses user ID from auth context.
-// Returns false if parsing fails (error response already written).
+// requireUserIDFromContext retrieves the typed user ID from auth context.
+// Returns false if not set (error response already written).
 // Uses 401 Unauthorized since context IDs come from the JWT token.
 func (h *Handler) requireUserIDFromContext(ctx context.Context, w http.ResponseWriter, requestID string) (id.UserID, bool) {
-	userIDStr := auth.GetUserID(ctx)
-	userID, err := id.ParseUserID(userIDStr)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid user_id in auth context",
-			"user_id", userIDStr,
+	userID := auth.GetUserID(ctx)
+	if userID.IsNil() {
+		h.logger.WarnContext(ctx, "user_id missing from auth context",
 			"request_id", requestID,
 		)
 		httputil.WriteError(w, dErrors.New(dErrors.CodeUnauthorized, "invalid token"))
@@ -455,15 +457,13 @@ func (h *Handler) requireUserIDFromContext(ctx context.Context, w http.ResponseW
 	return userID, true
 }
 
-// requireSessionIDFromContext parses session ID from auth context.
-// Returns false if parsing fails (error response already written).
+// requireSessionIDFromContext retrieves the typed session ID from auth context.
+// Returns false if not set (error response already written).
 // Uses 401 Unauthorized since context IDs come from the JWT token.
 func (h *Handler) requireSessionIDFromContext(ctx context.Context, w http.ResponseWriter, requestID string) (id.SessionID, bool) {
-	sessionIDStr := auth.GetSessionID(ctx)
-	sessionID, err := id.ParseSessionID(sessionIDStr)
-	if err != nil {
-		h.logger.WarnContext(ctx, "invalid session_id in auth context",
-			"session_id", sessionIDStr,
+	sessionID := auth.GetSessionID(ctx)
+	if sessionID.IsNil() {
+		h.logger.WarnContext(ctx, "session_id missing from auth context",
 			"request_id", requestID,
 		)
 		httputil.WriteError(w, dErrors.New(dErrors.CodeUnauthorized, "invalid token"))

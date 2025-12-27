@@ -14,12 +14,16 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	id "credo/pkg/domain"
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/store/allowlist"
 	authmw "credo/pkg/platform/middleware/auth"
 	"credo/pkg/platform/middleware/metadata"
 )
+
+// Test UUID for user ID in authenticated tests
+const testUserID = "550e8400-e29b-41d4-a716-446655440001"
 
 // =============================================================================
 // Rate Limit Middleware Security Test Suite
@@ -247,7 +251,8 @@ func (s *MiddlewareSecuritySuite) TestNormalOperation() {
 		})
 
 		req := withClientMetadata(httptest.NewRequest(http.MethodGet, "/test", nil))
-		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, "user-123")
+		parsedUserID, _ := id.ParseUserID(testUserID)
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, parsedUserID)
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()

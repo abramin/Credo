@@ -12,11 +12,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/suite"
 
-	auditstore "credo/pkg/platform/audit/store/memory"
 	"credo/internal/auth/service"
 	"credo/internal/evidence/registry/handler"
 	"credo/internal/evidence/registry/service/mocks"
 	"credo/internal/evidence/registry/store"
+	id "credo/pkg/domain"
+	auditstore "credo/pkg/platform/audit/store/memory"
 	authmw "credo/pkg/platform/middleware/auth"
 )
 
@@ -54,14 +55,19 @@ func (s *RegistryIntegrationSuite) SetupTest() {
 	// TODO: Initialize handler when complete
 	// s.handler = handler.New(s.service, s.logger, auditpublisher.NewPublisher(s.auditStore))
 
+	// Parse typed IDs for context injection (simulating auth middleware)
+	testUserID, _ := id.ParseUserID("550e8400-e29b-41d4-a716-446655440001")
+	testSessionID, _ := id.ParseSessionID("550e8400-e29b-41d4-a716-446655440002")
+	testClientID, _ := id.ParseClientID("550e8400-e29b-41d4-a716-446655440003")
+
 	// Setup router with middleware
 	s.router = chi.NewRouter()
 	s.router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Inject test user context
-			ctx := context.WithValue(r.Context(), authmw.ContextKeyUserID, "test-user-123")
-			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, "test-session-123")
-			ctx = context.WithValue(ctx, authmw.ContextKeyClientID, "test-client-123")
+			ctx := context.WithValue(r.Context(), authmw.ContextKeyUserID, testUserID)
+			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, testSessionID)
+			ctx = context.WithValue(ctx, authmw.ContextKeyClientID, testClientID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})
