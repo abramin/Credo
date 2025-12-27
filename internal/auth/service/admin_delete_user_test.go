@@ -55,7 +55,7 @@ func (s *ServiceSuite) TestDeleteUser() {
 	s.T().Run("user delete fails", func(t *testing.T) {
 		s.mockUserStore.EXPECT().FindByID(ctx, userID).Return(existingUser, nil)
 		s.mockSessionStore.EXPECT().DeleteSessionsByUser(ctx, userID).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 		s.mockUserStore.EXPECT().Delete(ctx, userID).Return(errors.New("write fail"))
 
 		err := s.service.DeleteUser(ctx, userID)

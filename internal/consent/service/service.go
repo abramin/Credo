@@ -15,9 +15,10 @@ import (
 	pkgerrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	auditpublisher "credo/pkg/platform/audit/publisher"
+	request "credo/pkg/platform/middleware/request"
 	requesttime "credo/pkg/platform/middleware/requesttime"
-	platformsync "credo/pkg/platform/sync"
 	"credo/pkg/platform/sentinel"
+	platformsync "credo/pkg/platform/sync"
 )
 
 // Store defines the persistence interface for consent records.
@@ -385,6 +386,10 @@ func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.
 func (s *Service) emitAudit(ctx context.Context, event audit.Event) {
 	if s.auditor == nil {
 		return
+	}
+	// Enrich with RequestID for correlation
+	if event.RequestID == "" {
+		event.RequestID = request.GetRequestID(ctx)
 	}
 	if err := s.auditor.Emit(ctx, event); err != nil {
 		// Log audit failures but don't fail the operation - audit is best-effort

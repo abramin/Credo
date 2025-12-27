@@ -45,6 +45,7 @@ func (s *Service) logAudit(ctx context.Context, event string, attributes ...any)
 
 func (s *Service) authFailure(ctx context.Context, reason string, isError bool, attributes ...any) {
 	s.logAuthFailure(ctx, reason, isError, attributes...)
+	s.emitAuthFailure(ctx, reason, attributes...)
 	if s.metrics != nil {
 		s.metrics.IncrementAuthFailures()
 	}
@@ -64,6 +65,32 @@ func (s *Service) logAuthFailure(ctx context.Context, reason string, isError boo
 		return
 	}
 	s.logger.WarnContext(ctx, string(audit.EventAuthFailed), args...)
+}
+
+// emitAuthFailure emits auth failure events to the audit store for compliance tracking.
+func (s *Service) emitAuthFailure(ctx context.Context, reason string, attributes ...any) {
+	if s.auditPublisher == nil {
+		return
+	}
+
+	requestID := request.GetRequestID(ctx)
+	userIDStr := attrs.ExtractString(attributes, "user_id")
+	userID, _ := id.ParseUserID(userIDStr)
+	email := attrs.ExtractString(attributes, "email")
+	clientID := attrs.ExtractString(attributes, "client_id")
+
+	if err := s.auditPublisher.Emit(ctx, audit.Event{
+		UserID:          userID,
+		Subject:         userIDStr,
+		Action:          string(audit.EventAuthFailed),
+		Reason:          reason,
+		Decision:        "denied",
+		RequestingParty: clientID,
+		Email:           email,
+		RequestID:       requestID,
+	}); err != nil && s.logger != nil {
+		s.logger.ErrorContext(ctx, "failed to emit auth failure audit event", "error", err)
+	}
 }
 
 // incrementUserCreated increments the users created metric if metrics are enabled

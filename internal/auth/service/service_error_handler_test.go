@@ -8,6 +8,8 @@ import (
 	sessionStore "credo/internal/auth/store/session"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/sentinel"
+
+	"go.uber.org/mock/gomock"
 )
 
 func (s *ServiceSuite) TestHandleTokenError() {
@@ -149,6 +151,7 @@ func (s *ServiceSuite) TestHandleTokenError() {
 	for _, tt := range tests {
 		s.T().Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
+			s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 			result := s.service.handleTokenError(ctx, tt.err, clientID, &recordID, tt.flow)
 
@@ -164,6 +167,7 @@ func (s *ServiceSuite) TestHandleTokenError_AuditAttributes() {
 		ctx := context.Background()
 		clientID := "client-123"
 		recordID := "record-456"
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.handleTokenError(ctx, sentinel.ErrAlreadyUsed, clientID, &recordID, TokenFlowCode)
 		s.Error(err)
@@ -172,6 +176,7 @@ func (s *ServiceSuite) TestHandleTokenError_AuditAttributes() {
 	s.T().Run("excludes record_id when nil", func(t *testing.T) {
 		ctx := context.Background()
 		clientID := "client-123"
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.handleTokenError(ctx, sentinel.ErrAlreadyUsed, clientID, nil, TokenFlowCode)
 		s.Error(err)

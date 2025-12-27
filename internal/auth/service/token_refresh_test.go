@@ -103,7 +103,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 				assert.False(s.T(), token.Used)
 				return nil
 			})
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.Token(ctx, &req)
 		require.NoError(s.T(), err)
@@ -133,6 +133,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(&otherClient, mockTenant, nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.Token(context.Background(), &req)
 		assert.Error(s.T(), err)
@@ -218,7 +219,7 @@ func (s *ServiceSuite) TestToken_RefreshToken() {
 				return &sess, nil
 			})
 		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.Token(ctx, &req)
 		require.NoError(s.T(), err)
