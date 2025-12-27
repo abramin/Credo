@@ -19,16 +19,22 @@ import (
 	"log/slog"
 
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/observability"
 	"credo/internal/ratelimit/ports"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit"
 )
 
 // Type aliases for shared interfaces.
 type (
-	Store          = ports.QuotaStore
-	AuditPublisher = ports.AuditPublisher
+	Store = ports.QuotaStore
 )
+
+// AuditPublisher emits audit events for security-relevant operations.
+type AuditPublisher interface {
+	Emit(ctx context.Context, event audit.Event) error
+}
 
 // Service manages API key quota tracking and enforcement.
 type Service struct {
@@ -94,7 +100,7 @@ func (s *Service) Increment(ctx context.Context, apiKeyID id.APIKeyID, count int
 
 	// Log if quota exceeded
 	if quota != nil && quota.CurrentUsage > quota.MonthlyLimit && quota.MonthlyLimit > 0 {
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "api_key_quota_exceeded",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "api_key_quota_exceeded",
 			"api_key_id", apiKeyID,
 			"current_usage", quota.CurrentUsage,
 			"monthly_limit", quota.MonthlyLimit,
@@ -115,7 +121,7 @@ func (s *Service) Reset(ctx context.Context, apiKeyID id.APIKeyID) error {
 		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to reset quota")
 	}
 
-	ports.LogAudit(ctx, s.logger, s.auditPublisher, "api_key_quota_reset",
+	observability.LogAudit(ctx, s.logger, s.auditPublisher, "api_key_quota_reset",
 		"api_key_id", apiKeyID,
 	)
 
@@ -145,7 +151,7 @@ func (s *Service) UpdateTier(ctx context.Context, apiKeyID id.APIKeyID, tier mod
 		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tier")
 	}
 
-	ports.LogAudit(ctx, s.logger, s.auditPublisher, "api_key_tier_updated",
+	observability.LogAudit(ctx, s.logger, s.auditPublisher, "api_key_tier_updated",
 		"api_key_id", apiKeyID,
 		"tier", tier,
 	)

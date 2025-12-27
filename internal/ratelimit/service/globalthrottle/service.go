@@ -6,15 +6,19 @@ import (
 	"log/slog"
 
 	"credo/internal/ratelimit/config"
+	"credo/internal/ratelimit/observability"
 	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit"
 )
 
 // Store is an alias to the shared interface.
 type Store = ports.GlobalThrottleStore
 
-// AuditPublisher is an alias to the shared interface.
-type AuditPublisher = ports.AuditPublisher
+// AuditPublisher emits audit events for security-relevant operations.
+type AuditPublisher interface {
+	Emit(ctx context.Context, event audit.Event) error
+}
 
 type Service struct {
 	store          Store
@@ -70,7 +74,7 @@ func (s *Service) Check(ctx context.Context) (bool, error) {
 	}
 
 	if blocked {
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "global_throttle_triggered",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "global_throttle_triggered",
 			"current_count", count,
 			"global_limit", s.config.GlobalPerSecond,
 		)

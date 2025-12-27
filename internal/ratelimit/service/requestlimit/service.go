@@ -25,8 +25,10 @@ import (
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/metrics"
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/observability"
 	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit"
 	requesttime "credo/pkg/platform/middleware/requesttime"
 	"credo/pkg/platform/privacy"
 )
@@ -36,8 +38,12 @@ import (
 type (
 	BucketStore    = ports.BucketStore
 	AllowlistStore = ports.AllowlistStore
-	AuditPublisher = ports.AuditPublisher
 )
+
+// AuditPublisher emits audit events for security-relevant operations.
+type AuditPublisher interface {
+	Emit(ctx context.Context, event audit.Event) error
+}
 
 // Service enforces per-IP and per-user rate limits using sliding window counters.
 // Thread-safe for concurrent use by HTTP middleware.
@@ -115,7 +121,7 @@ func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointC
 	requestsPerWindow, window, ok := s.config.GetIPLimit(class)
 	if !ok {
 		// Default-deny: no limit configured for this class (PRD-017 FR-1)
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
 			"identifier", privacy.AnonymizeIP(ip),
 			"endpoint_class", class,
 			"limit_type", models.KeyPrefixIP,
@@ -138,7 +144,7 @@ func (s *Service) CheckUser(ctx context.Context, userID string, class models.End
 	requestsPerWindow, window, ok := s.config.GetUserLimit(class)
 	if !ok {
 		// Default-deny: no limit configured for this class (PRD-017 FR-1)
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
 			"identifier", userID,
 			"endpoint_class", class,
 			"limit_type", models.KeyPrefixUser,
@@ -184,7 +190,7 @@ func (s *Service) checkRateLimit(
 		if s.metrics != nil {
 			s.metrics.RecordAllowlistBypass(bypassType)
 		}
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "allowlist_bypass",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "allowlist_bypass",
 			"identifier", logIdentifier,
 			"endpoint_class", class,
 			"bypass_type", bypassType,
@@ -206,7 +212,7 @@ func (s *Service) checkRateLimit(
 	}
 
 	if !result.Allowed {
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, string(keyPrefix)+"_rate_limit_exceeded",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, string(keyPrefix)+"_rate_limit_exceeded",
 			"identifier", logIdentifier,
 			"endpoint_class", class,
 			"limit", requestsPerWindow,
@@ -226,7 +232,7 @@ func (s *Service) checkSingleLimit(ctx context.Context, p limitParams, class mod
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to check "+string(p.prefix)+" rate limit")
 	}
 	if !res.Allowed {
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, string(p.prefix)+"_rate_limit_exceeded",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, string(p.prefix)+"_rate_limit_exceeded",
 			"identifier", p.logIdentifier,
 			"endpoint_class", class,
 			"limit", p.limit,
@@ -294,7 +300,7 @@ func (s *Service) getBothLimits(ctx context.Context, ip, userID string, class mo
 
 	ipRequestsPerWindow, ipWindow, ipOk := s.config.GetIPLimit(class)
 	if !ipOk {
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
 			"identifier", privacy.AnonymizeIP(ip),
 			"endpoint_class", class,
 			"limit_type", models.KeyPrefixIP,
@@ -304,7 +310,7 @@ func (s *Service) getBothLimits(ctx context.Context, ip, userID string, class mo
 
 	userRequestsPerWindow, userWindow, userOk := s.config.GetUserLimit(class)
 	if !userOk {
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "rate_limit_config_missing",
 			"identifier", userID,
 			"endpoint_class", class,
 			"limit_type", models.KeyPrefixUser,
@@ -351,7 +357,7 @@ func (s *Service) checkAllowlistBypass(ctx context.Context, ip, userID string, c
 	if s.metrics != nil {
 		s.metrics.RecordAllowlistBypass(bypassType)
 	}
-	ports.LogAudit(ctx, s.logger, s.auditPublisher, "allowlist_bypass",
+	observability.LogAudit(ctx, s.logger, s.auditPublisher, "allowlist_bypass",
 		"ip", privacy.AnonymizeIP(ip),
 		"user_id", userID,
 		"endpoint_class", class,

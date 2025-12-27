@@ -9,8 +9,10 @@ import (
 
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/observability"
 	"credo/internal/ratelimit/ports"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit"
 	"credo/pkg/platform/middleware/requesttime"
 )
 
@@ -19,10 +21,14 @@ type BucketStore interface {
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (*models.RateLimitResult, error)
 }
 
+// AuditPublisher emits audit events for security-relevant operations.
+type AuditPublisher interface {
+	Emit(ctx context.Context, event audit.Event) error
+}
+
 // Type aliases for shared interfaces.
 type (
-	ClientLookup   = ports.ClientLookup
-	AuditPublisher = ports.AuditPublisher
+	ClientLookup = ports.ClientLookup
 )
 
 type Service struct {
@@ -115,7 +121,7 @@ func (s *Service) Check(ctx context.Context, clientID, endpoint string) (*models
 	}
 
 	if !result.Allowed {
-		ports.LogAudit(ctx, s.logger, s.auditPublisher, "client_rate_limit_exceeded",
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "client_rate_limit_exceeded",
 			"client_id", anonymizeClientID(clientID),
 			"client_type", clientType,
 			"endpoint", endpoint,
