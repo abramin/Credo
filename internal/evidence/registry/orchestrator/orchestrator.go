@@ -365,16 +365,6 @@ func (o *Orchestrator) lookupVoting(ctx context.Context, req LookupRequest) (*Lo
 	return result, nil
 }
 
-// tryProvider attempts to get evidence from a specific provider
-func (o *Orchestrator) tryProvider(ctx context.Context, providerID string, filters map[string]string) (*providers.Evidence, error) {
-	provider, ok := o.registry.Get(providerID)
-	if !ok {
-		return nil, providers.ErrProviderNotFound
-	}
-
-	return provider.Lookup(ctx, filters)
-}
-
 // tryProviderWithBackoff attempts to get evidence with exponential backoff for retryable errors.
 //
 // The method retries up to MaxRetries times for errors marked as retryable (timeouts, rate limits,

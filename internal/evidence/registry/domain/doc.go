@@ -18,10 +18,11 @@
 // # Shared Kernel (shared/)
 //
 // Contains domain primitives shared between Citizen and Sanctions subdomains:
-//   - NationalID: Validated lookup key for registry queries
 //   - Confidence: Evidence reliability score (0.0-1.0)
 //   - CheckedAt: Verification timestamp with TTL checking
 //   - ProviderID: Evidence source identifier
+//
+// Note: NationalID is defined in pkg/domain to avoid duplication across the codebase.
 //
 // # Citizen Subdomain (citizen/)
 //
@@ -73,7 +74,7 @@
 //	─────────────────────      ─────────────────────────────
 //	citizen.CitizenVerification   →   models.CitizenRecord
 //	sanctions.SanctionsCheck      →   models.SanctionsRecord
-//	shared.NationalID             →   providers.Evidence.Data
+//	pkg/domain.NationalID         →   providers.Evidence.Data
 //
 // The service layer contains converters that translate between these layers,
 // keeping the domain pure and the infrastructure concerns isolated.

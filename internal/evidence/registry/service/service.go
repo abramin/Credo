@@ -187,34 +187,34 @@ func (s *Service) fetchMissing(ctx context.Context, nationalID id.NationalID, ci
 	return result, nil
 }
 
-// convertEvidence transforms orchestrator evidence into domain models.
-// Applies regulated mode minimization to citizen records.
+// convertEvidence transforms orchestrator evidence into domain models via domain aggregates.
+// Applies regulated mode minimization using the domain aggregate's Minimized() method.
+//
+// Flow: providers.Evidence → domain aggregate (validates invariants) → models.*Record
 func (s *Service) convertEvidence(result *orchestrator.LookupResult) (*models.CitizenRecord, *models.SanctionsRecord, error) {
-	var citizen *models.CitizenRecord
-	var sanction *models.SanctionsRecord
+	var citizenRecord *models.CitizenRecord
+	var sanctionRecord *models.SanctionsRecord
 
 	for _, ev := range result.Evidence {
 		switch ev.ProviderType {
 		case providers.ProviderTypeCitizen:
-			record := EvidenceToCitizenRecord(ev)
-			if record == nil {
-				return nil, nil, dErrors.New(dErrors.CodeInternal, "failed to convert citizen evidence")
-			}
+			// Convert to domain aggregate first (enforces invariants)
+			verification := EvidenceToCitizenVerification(ev)
+			// Apply full minimization (including NationalID) for GDPR compliance
 			if s.regulated {
-				minimized := models.MinimizeCitizenRecord(*record)
-				record = &minimized
+				verification = verification.WithoutNationalID()
 			}
-			citizen = record
+			// Convert domain aggregate to infrastructure model
+			citizenRecord = CitizenVerificationToRecord(verification)
 		case providers.ProviderTypeSanctions:
-			record := EvidenceToSanctionsRecord(ev)
-			if record == nil {
-				return nil, nil, dErrors.New(dErrors.CodeInternal, "failed to convert sanctions evidence")
-			}
-			sanction = record
+			// Convert to domain aggregate first (enforces invariants)
+			check := EvidenceToSanctionsCheck(ev)
+			// Convert domain aggregate to infrastructure model
+			sanctionRecord = SanctionsCheckToRecord(check)
 		}
 	}
 
-	return citizen, sanction, nil
+	return citizenRecord, sanctionRecord, nil
 }
 
 // commitCache saves records to cache. Only caches records that weren't already cached.
@@ -264,22 +264,24 @@ func (s *Service) Citizen(ctx context.Context, userID id.UserID, nationalID id.N
 		return nil, s.translateOrchestratorError(err, result)
 	}
 
-	// Find citizen evidence in result
+	// Find citizen evidence and convert via domain aggregate
 	var record *models.CitizenRecord
 	for _, ev := range result.Evidence {
 		if ev.ProviderType == providers.ProviderTypeCitizen {
-			record = EvidenceToCitizenRecord(ev)
+			// Convert to domain aggregate first (enforces invariants)
+			verification := EvidenceToCitizenVerification(ev)
+			// Apply full minimization (including NationalID) for GDPR compliance
+			if s.regulated {
+				verification = verification.WithoutNationalID()
+			}
+			// Convert domain aggregate to infrastructure model
+			record = CitizenVerificationToRecord(verification)
 			break
 		}
 	}
 
 	if record == nil {
 		return nil, s.translateOrchestratorError(providers.ErrAllProvidersFailed, result)
-	}
-
-	if s.regulated {
-		minimized := models.MinimizeCitizenRecord(*record)
-		record = &minimized
 	}
 
 	if s.cache != nil {
@@ -321,11 +323,14 @@ func (s *Service) Sanctions(ctx context.Context, userID id.UserID, nationalID id
 		return nil, s.translateOrchestratorError(err, result)
 	}
 
-	// Find sanctions evidence in result
+	// Find sanctions evidence and convert via domain aggregate
 	var record *models.SanctionsRecord
 	for _, ev := range result.Evidence {
 		if ev.ProviderType == providers.ProviderTypeSanctions {
-			record = EvidenceToSanctionsRecord(ev)
+			// Convert to domain aggregate first (enforces invariants)
+			check := EvidenceToSanctionsCheck(ev)
+			// Convert domain aggregate to infrastructure model
+			record = SanctionsCheckToRecord(check)
 			break
 		}
 	}

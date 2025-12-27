@@ -4,6 +4,9 @@
 // Citizen and Sanctions subdomains. These types form the common vocabulary
 // for identity evidence within the Registry context.
 //
+// Note: NationalID is defined in pkg/domain to avoid duplication. This package
+// provides evidence-specific types (Confidence, CheckedAt, ProviderID).
+//
 // Domain Purity: This package contains only pure domain types with no I/O,
 // no context.Context, and no time.Now() calls. Time is always received as
 // a parameter from the application layer.
@@ -11,54 +14,8 @@ package shared
 
 import (
 	"errors"
-	"regexp"
 	"time"
 )
-
-// NationalID is a validated national identifier used as a lookup key for
-// both Citizen and Sanctions registry lookups.
-//
-// Invariants:
-//   - Non-empty
-//   - Alphanumeric only (A-Z, 0-9)
-//   - Length between 6 and 20 characters
-type NationalID struct {
-	value string
-}
-
-var nationalIDPattern = regexp.MustCompile(`^[A-Z0-9]{6,20}$`)
-
-// ErrInvalidNationalID indicates the national ID failed validation.
-var ErrInvalidNationalID = errors.New("invalid national ID: must be 6-20 alphanumeric characters")
-
-// NewNationalID creates a validated NationalID.
-// Returns an error if the value doesn't match the required pattern.
-func NewNationalID(value string) (NationalID, error) {
-	if !nationalIDPattern.MatchString(value) {
-		return NationalID{}, ErrInvalidNationalID
-	}
-	return NationalID{value: value}, nil
-}
-
-// MustNationalID creates a NationalID, panicking if invalid.
-// Use only in tests or when the value is known to be valid.
-func MustNationalID(value string) NationalID {
-	id, err := NewNationalID(value)
-	if err != nil {
-		panic(err)
-	}
-	return id
-}
-
-// String returns the national ID value.
-func (n NationalID) String() string {
-	return n.value
-}
-
-// IsZero returns true if this is the zero value (uninitialized).
-func (n NationalID) IsZero() bool {
-	return n.value == ""
-}
 
 // Confidence represents the reliability score of evidence from a provider.
 // Range: 0.0 (no confidence) to 1.0 (authoritative source).

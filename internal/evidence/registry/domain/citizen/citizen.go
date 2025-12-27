@@ -15,6 +15,7 @@ package citizen
 
 import (
 	"credo/internal/evidence/registry/domain/shared"
+	id "credo/pkg/domain"
 )
 
 // PersonalDetails is a value object containing PII from the citizen registry.
@@ -48,7 +49,7 @@ func (v VerificationStatus) IsValid() bool {
 // CitizenVerification is the aggregate root for citizen identity verification.
 //
 // This aggregate encapsulates:
-//   - The lookup key (NationalID from shared kernel)
+//   - The lookup key (NationalID from pkg/domain)
 //   - Personal details (PII that can be minimized)
 //   - Verification status (validity and timestamp)
 //   - Evidence provenance (which provider, confidence level)
@@ -58,7 +59,7 @@ func (v VerificationStatus) IsValid() bool {
 //   - CheckedAt is always set
 //   - Minimized records have empty PersonalDetails
 type CitizenVerification struct {
-	nationalID shared.NationalID
+	nationalID id.NationalID
 	details    PersonalDetails
 	status     VerificationStatus
 	providerID shared.ProviderID
@@ -69,7 +70,7 @@ type CitizenVerification struct {
 // NewCitizenVerification creates a new citizen verification record.
 // This is the only way to construct a valid CitizenVerification.
 func NewCitizenVerification(
-	nationalID shared.NationalID,
+	nationalID id.NationalID,
 	details PersonalDetails,
 	valid bool,
 	checkedAt shared.CheckedAt,
@@ -90,7 +91,7 @@ func NewCitizenVerification(
 }
 
 // NationalID returns the lookup key.
-func (c CitizenVerification) NationalID() shared.NationalID {
+func (c CitizenVerification) NationalID() id.NationalID {
 	return c.nationalID
 }
 
@@ -163,6 +164,6 @@ func (c CitizenVerification) Minimized() CitizenVerification {
 // Use this for maximum data minimization where even the lookup key should be hidden.
 func (c CitizenVerification) WithoutNationalID() CitizenVerification {
 	minimized := c.Minimized()
-	minimized.nationalID = shared.NationalID{} // Zero value
+	minimized.nationalID = id.NationalID{} // Zero value
 	return minimized
 }

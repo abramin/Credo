@@ -15,6 +15,7 @@ package sanctions
 
 import (
 	"credo/internal/evidence/registry/domain/shared"
+	id "credo/pkg/domain"
 )
 
 // ListType categorizes the type of sanctions/watchlist entry.
@@ -88,7 +89,7 @@ func (s Source) IsZero() bool {
 // SanctionsCheck is the aggregate root for sanctions/PEP screening.
 //
 // This aggregate encapsulates:
-//   - The subject identifier (NationalID from shared kernel)
+//   - The subject identifier (NationalID from pkg/domain)
 //   - Listing status (whether the subject is on any list)
 //   - Listing details (type, reason, date - only if listed)
 //   - Source of the check
@@ -101,7 +102,7 @@ func (s Source) IsZero() bool {
 //   - If Listed is true, ListType must be set (not ListTypeNone)
 //   - If Listed is false, ListingDetails should be empty
 type SanctionsCheck struct {
-	nationalID shared.NationalID
+	nationalID id.NationalID
 	listed     bool
 	details    ListingDetails
 	source     Source
@@ -112,7 +113,7 @@ type SanctionsCheck struct {
 
 // NewSanctionsCheck creates a new sanctions check result for a non-listed subject.
 func NewSanctionsCheck(
-	nationalID shared.NationalID,
+	nationalID id.NationalID,
 	source Source,
 	checkedAt shared.CheckedAt,
 	providerID shared.ProviderID,
@@ -132,7 +133,7 @@ func NewSanctionsCheck(
 // NewListedSanctionsCheck creates a sanctions check result for a listed subject.
 // This constructor enforces the invariant that listed subjects must have a ListType.
 func NewListedSanctionsCheck(
-	nationalID shared.NationalID,
+	nationalID id.NationalID,
 	listType ListType,
 	reason string,
 	listedDate string,
@@ -162,7 +163,7 @@ func NewListedSanctionsCheck(
 }
 
 // NationalID returns the subject identifier.
-func (s SanctionsCheck) NationalID() shared.NationalID {
+func (s SanctionsCheck) NationalID() id.NationalID {
 	return s.nationalID
 }
 
