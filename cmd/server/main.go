@@ -451,7 +451,7 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 	}
 
 	// Create orchestrator
-	orch := orchestrator.NewOrchestrator(orchestrator.OrchestratorConfig{
+	orch := orchestrator.New(orchestrator.OrchestratorConfig{
 		Registry:        registry,
 		DefaultStrategy: orchestrator.StrategyFallback,
 		DefaultTimeout:  infra.Cfg.Registry.RegistryTimeout,
