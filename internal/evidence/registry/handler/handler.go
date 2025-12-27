@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"credo/internal/evidence/registry/models"
-	"credo/internal/evidence/registry/tracer"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
@@ -17,6 +19,9 @@ import (
 	auth "credo/pkg/platform/middleware/auth"
 	"credo/pkg/platform/middleware/request"
 )
+
+// Tracer for distributed tracing of handler operations.
+var handlerTracer = otel.Tracer("credo/registry/handler")
 
 // RegistryService defines the interface for registry operations used by handlers.
 // Methods accept type-safe NationalID to enforce validation at parse time.
@@ -36,31 +41,15 @@ type Handler struct {
 	service   RegistryService
 	auditPort AuditPublisher
 	logger    *slog.Logger
-	tracer    tracer.Tracer
-}
-
-// HandlerOption configures the Handler.
-type HandlerOption func(*Handler)
-
-// WithHandlerTracer sets the tracer for the handler.
-// When set, the handler emits audit.emitted span events after audit publishing.
-func WithHandlerTracer(t tracer.Tracer) HandlerOption {
-	return func(h *Handler) {
-		h.tracer = t
-	}
 }
 
 // New creates a new registry handler.
-func New(service RegistryService, auditPort AuditPublisher, logger *slog.Logger, opts ...HandlerOption) *Handler {
-	h := &Handler{
+func New(service RegistryService, auditPort AuditPublisher, logger *slog.Logger) *Handler {
+	return &Handler{
 		service:   service,
 		auditPort: auditPort,
 		logger:    logger,
 	}
-	for _, opt := range opts {
-		opt(h)
-	}
-	return h
 }
 
 // Register mounts the handler routes on the given router.
@@ -313,22 +302,19 @@ func redactNationalID(nid id.NationalID) string {
 	return "****" + s[len(s)-4:]
 }
 
-// emitAuditSpanEvent adds an audit.emitted span event to the current trace if a tracer is configured.
+// emitAuditSpanEvent adds an audit.emitted span event to the current trace.
 // This correlates audit logs with distributed traces for compliance analysis.
 func (h *Handler) emitAuditSpanEvent(ctx context.Context, action string) {
-	if h.tracer == nil {
-		return
-	}
-	// Get or create a span from context to add the event
-	// Since we're adding an event to an existing span, we start a minimal span
-	// that ends immediately after adding the event
-	_, span := h.tracer.Start(ctx, "audit.publish",
-		tracer.String("audit.action", action),
+	// Start a minimal span that ends immediately after adding the event
+	_, span := handlerTracer.Start(ctx, "audit.publish",
+		trace.WithAttributes(
+			attribute.String("audit.action", action),
+		),
 	)
-	if span != nil {
-		span.AddEvent(tracer.EventAuditEmitted,
-			tracer.String("audit.action", action),
-		)
-		span.End(nil)
-	}
+	span.AddEvent("audit.emitted",
+		trace.WithAttributes(
+			attribute.String("audit.action", action),
+		),
+	)
+	span.End()
 }
