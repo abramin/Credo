@@ -89,16 +89,16 @@ func (s *Service) Check(ctx context.Context, userID id.UserID, nationalID id.Nat
 	}
 
 	// Phase 2: Check cache
-	citizen, sanction, citizenCached, sanctionsCached, err := s.checkCache(ctx, nationalID)
+	cached, err := s.checkCache(ctx, nationalID)
 	if err != nil {
 		return nil, err
 	}
-	if citizenCached && sanctionsCached {
-		return &models.RegistryResult{Citizen: citizen, Sanction: sanction}, nil
+	if cached.AllCached() {
+		return &models.RegistryResult{Citizen: cached.citizen, Sanction: cached.sanction}, nil
 	}
 
 	// Phase 3: Fetch missing from orchestrator
-	result, err := s.fetchMissing(ctx, nationalID, citizenCached, sanctionsCached)
+	result, err := s.fetchMissing(ctx, nationalID, cached.citizenCached, cached.sanctionsCached)
 	if err != nil {
 		return nil, err
 	}
@@ -110,10 +110,12 @@ func (s *Service) Check(ctx context.Context, userID id.UserID, nationalID id.Nat
 	}
 
 	// Merge cached and fetched records
-	if !citizenCached {
+	citizen := cached.citizen
+	sanction := cached.sanction
+	if !cached.citizenCached {
 		citizen = fetchedCitizen
 	}
-	if !sanctionsCached {
+	if !cached.sanctionsCached {
 		sanction = fetchedSanction
 	}
 
@@ -123,9 +125,23 @@ func (s *Service) Check(ctx context.Context, userID id.UserID, nationalID id.Nat
 	}
 
 	// Phase 4: Atomic cache commit - only cache if both lookups succeeded
-	s.commitCache(ctx, citizen, sanction, citizenCached, sanctionsCached)
+	s.commitCache(ctx, citizen, sanction, cached.citizenCached, cached.sanctionsCached)
 
 	return &models.RegistryResult{Citizen: citizen, Sanction: sanction}, nil
+}
+
+// cacheCheckResult holds the results of a cache lookup for both citizen and sanctions.
+// This struct reduces the cognitive load of tracking multiple return values.
+type cacheCheckResult struct {
+	citizen         *models.CitizenRecord
+	sanction        *models.SanctionsRecord
+	citizenCached   bool
+	sanctionsCached bool
+}
+
+// AllCached returns true if both citizen and sanctions records were found in cache.
+func (r cacheCheckResult) AllCached() bool {
+	return r.citizenCached && r.sanctionsCached
 }
 
 // requireConsent checks consent for registry_check purpose.
@@ -138,32 +154,29 @@ func (s *Service) requireConsent(ctx context.Context, userID id.UserID) error {
 }
 
 // checkCache retrieves cached citizen and sanctions records.
-// Returns the records (if cached), flags indicating cache hits, and any error.
-func (s *Service) checkCache(ctx context.Context, nationalID id.NationalID) (
-	citizen *models.CitizenRecord,
-	sanction *models.SanctionsRecord,
-	citizenCached, sanctionsCached bool,
-	err error,
-) {
+// Returns a cacheCheckResult with records and cache hit flags, or an error.
+func (s *Service) checkCache(ctx context.Context, nationalID id.NationalID) (cacheCheckResult, error) {
+	var result cacheCheckResult
+
 	if s.cache == nil {
-		return nil, nil, false, false, nil
+		return result, nil
 	}
 
 	if cached, cacheErr := s.cache.FindCitizen(ctx, nationalID, s.regulated); cacheErr == nil {
-		citizen = cached
-		citizenCached = true
+		result.citizen = cached
+		result.citizenCached = true
 	} else if !errors.Is(cacheErr, store.ErrNotFound) {
-		return nil, nil, false, false, cacheErr
+		return cacheCheckResult{}, cacheErr
 	}
 
 	if cached, cacheErr := s.cache.FindSanction(ctx, nationalID); cacheErr == nil {
-		sanction = cached
-		sanctionsCached = true
+		result.sanction = cached
+		result.sanctionsCached = true
 	} else if !errors.Is(cacheErr, store.ErrNotFound) {
-		return nil, nil, false, false, cacheErr
+		return cacheCheckResult{}, cacheErr
 	}
 
-	return citizen, sanction, citizenCached, sanctionsCached, nil
+	return result, nil
 }
 
 // fetchMissing retrieves records not found in cache from the orchestrator.

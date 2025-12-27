@@ -308,29 +308,37 @@ func (o *Orchestrator) lookupParallel(ctx context.Context, req LookupRequest) (*
 
 	wg.Wait()
 
-	// Apply correlation rules to merge evidence
-	if len(o.rules) > 0 && len(result.Evidence) > 1 {
-		types := make([]providers.ProviderType, 0, len(req.Types))
-		for _, e := range result.Evidence {
-			types = append(types, e.ProviderType)
-		}
-
-		for _, rule := range o.rules {
-			if rule.Applicable(types) {
-				merged, err := rule.Merge(result.Evidence)
-				if err == nil {
-					result.Evidence = []*providers.Evidence{merged}
-					break
-				}
-			}
-		}
-	}
+	// Apply correlation rules to merge evidence from multiple sources
+	o.applyCorrelationRules(result)
 
 	if len(result.Evidence) == 0 && len(result.Errors) > 0 {
 		return result, providers.ErrAllProvidersFailed
 	}
 
 	return result, nil
+}
+
+// applyCorrelationRules merges evidence from multiple providers using configured rules.
+// If multiple evidence records exist and an applicable rule succeeds, the evidence is
+// replaced with the merged result. This separates correlation logic from concurrency concerns.
+func (o *Orchestrator) applyCorrelationRules(result *LookupResult) {
+	if len(o.rules) == 0 || len(result.Evidence) < 2 {
+		return
+	}
+
+	types := make([]providers.ProviderType, 0, len(result.Evidence))
+	for _, e := range result.Evidence {
+		types = append(types, e.ProviderType)
+	}
+
+	for _, rule := range o.rules {
+		if rule.Applicable(types) {
+			if merged, err := rule.Merge(result.Evidence); err == nil {
+				result.Evidence = []*providers.Evidence{merged}
+				return
+			}
+		}
+	}
 }
 
 // lookupVoting queries multiple providers and selects evidence by highest confidence per type.
