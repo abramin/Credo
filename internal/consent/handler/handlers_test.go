@@ -139,7 +139,7 @@ func (s *ConsentHandlerSuite) TestHandleGetConsents_ErrorMapping() {
 			Return(nil, dErrors.New(dErrors.CodeInternal, "storage system unavailable"))
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/consent", nil)
-		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, testUserIDStr)
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, userID)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -151,8 +151,9 @@ func (s *ConsentHandlerSuite) TestHandleGetConsents_ErrorMapping() {
 	s.T().Run("invalid status filter returns 400", func(t *testing.T) {
 		// Handler-level validation of query param
 		handler, _ := newTestHandler(t)
+		userID, _ := id.ParseUserID("550e8400-e29b-41d4-a716-446655440000")
 		req := httptest.NewRequest(http.MethodGet, "/auth/consent?status=unknown", nil)
-		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, "550e8400-e29b-41d4-a716-446655440000")
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, userID)
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 
@@ -226,7 +227,7 @@ func newTestHandler(t *testing.T) (*Handler, *mocks.MockService) {
 }
 
 // newRequestWithBody creates an HTTP request with the given method, endpoint, and JSON body.
-// If userID is not empty, it adds the userID to the request context.
+// If userID is not empty and valid, it adds the typed userID to the request context.
 func newRequestWithBody(method, endpoint string, body interface{}, userID string) (*http.Request, error) {
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
@@ -234,8 +235,10 @@ func newRequestWithBody(method, endpoint string, body interface{}, userID string
 	}
 	req := httptest.NewRequest(method, endpoint, bytes.NewReader(bodyBytes))
 	if userID != "" {
-		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, userID)
-		req = req.WithContext(ctx)
+		if parsedUserID, parseErr := id.ParseUserID(userID); parseErr == nil {
+			ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, parsedUserID)
+			req = req.WithContext(ctx)
+		}
 	}
 	return req, nil
 }

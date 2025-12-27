@@ -185,7 +185,11 @@ func (h *Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := request.GetRequestID(ctx)
-	sessionID := auth.GetSessionID(ctx)
+
+	sessionID, ok := h.requireSessionIDFromContext(ctx, w, requestID)
+	if !ok {
+		return
+	}
 
 	res, err := h.auth.UserInfo(ctx, sessionID.String())
 	if err != nil {

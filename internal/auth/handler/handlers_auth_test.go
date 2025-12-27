@@ -98,21 +98,20 @@ func (s *AuthHandlerSuite) TestHandler_Token() {
 func (s *AuthHandlerSuite) TestHandler_UserInfo() {
 	validSessionID := uuid.New()
 
-	s.T().Run("missing or invalid authorization header - 401", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
-		mockService.EXPECT().UserInfo(gomock.Any(), "").Return(nil, dErrors.New(dErrors.CodeUnauthorized, "missing or invalid session"))
+	s.T().Run("missing session id in context - 401", func(t *testing.T) {
+		_, router := s.newHandler(t)
+		// Service should NOT be called - handler validates session before calling service
 
 		status, got, errBody := s.doUserInfoRequest(t, router, "")
 
 		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
 	})
 
-	s.T().Run("invalid session identifier format - 401", func(t *testing.T) {
-		mockService, router := s.newHandler(t)
-		invalidSession := "not-a-uuid"
-		mockService.EXPECT().UserInfo(gomock.Any(), invalidSession).Return(nil, dErrors.New(dErrors.CodeUnauthorized, "invalid session ID"))
+	s.T().Run("invalid session id in context - 401", func(t *testing.T) {
+		_, router := s.newHandler(t)
+		// Service should NOT be called - invalid session ID won't be injected into context
 
-		status, got, errBody := s.doUserInfoRequest(t, router, invalidSession)
+		status, got, errBody := s.doUserInfoRequest(t, router, "not-a-uuid")
 
 		s.assertErrorResponse(t, status, got, errBody, http.StatusUnauthorized, string(dErrors.CodeUnauthorized))
 	})
@@ -285,10 +284,13 @@ func (s *AuthHandlerSuite) doUserInfoRequest(t *testing.T, router *chi.Mux, sess
 	httpReq := httptest.NewRequest(http.MethodGet, "/auth/userinfo", nil)
 
 	// Inject session ID into context (simulating what the auth middleware would do)
+	// Only inject if it parses to a valid typed ID (mirrors real middleware behavior)
 	if sessionID != "" {
-		ctx := httpReq.Context()
-		ctx = context.WithValue(ctx, authmw.ContextKeySessionID, sessionID)
-		httpReq = httpReq.WithContext(ctx)
+		if parsedSessionID, err := id.ParseSessionID(sessionID); err == nil {
+			ctx := httpReq.Context()
+			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, parsedSessionID)
+			httpReq = httpReq.WithContext(ctx)
+		}
 	}
 
 	rr := httptest.NewRecorder()
@@ -312,12 +314,18 @@ func (s *AuthHandlerSuite) doListSessionsRequest(t *testing.T, router *chi.Mux, 
 	t.Helper()
 	httpReq := httptest.NewRequest(http.MethodGet, "/auth/sessions", nil)
 
+	// Inject typed IDs into context (simulating what the auth middleware would do)
+	// Only inject if they parse to valid typed IDs (mirrors real middleware behavior)
 	ctx := httpReq.Context()
 	if userID != "" {
-		ctx = context.WithValue(ctx, authmw.ContextKeyUserID, userID)
+		if parsedUserID, err := id.ParseUserID(userID); err == nil {
+			ctx = context.WithValue(ctx, authmw.ContextKeyUserID, parsedUserID)
+		}
 	}
 	if sessionID != "" {
-		ctx = context.WithValue(ctx, authmw.ContextKeySessionID, sessionID)
+		if parsedSessionID, err := id.ParseSessionID(sessionID); err == nil {
+			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, parsedSessionID)
+		}
 	}
 	httpReq = httpReq.WithContext(ctx)
 
@@ -342,9 +350,13 @@ func (s *AuthHandlerSuite) doRevokeSessionRequest(t *testing.T, router *chi.Mux,
 	t.Helper()
 	httpReq := httptest.NewRequest(http.MethodDelete, path, nil)
 
+	// Inject typed IDs into context (simulating what the auth middleware would do)
+	// Only inject if they parse to valid typed IDs (mirrors real middleware behavior)
 	ctx := httpReq.Context()
 	if userID != "" {
-		ctx = context.WithValue(ctx, authmw.ContextKeyUserID, userID)
+		if parsedUserID, err := id.ParseUserID(userID); err == nil {
+			ctx = context.WithValue(ctx, authmw.ContextKeyUserID, parsedUserID)
+		}
 	}
 	httpReq = httpReq.WithContext(ctx)
 
@@ -370,12 +382,18 @@ func (s *AuthHandlerSuite) doLogoutAllRequest(t *testing.T, router *chi.Mux, use
 	path := "/auth/logout-all?except_current=" + exceptCurrent
 	httpReq := httptest.NewRequest(http.MethodPost, path, nil)
 
+	// Inject typed IDs into context (simulating what the auth middleware would do)
+	// Only inject if they parse to valid typed IDs (mirrors real middleware behavior)
 	ctx := httpReq.Context()
 	if userID != "" {
-		ctx = context.WithValue(ctx, authmw.ContextKeyUserID, userID)
+		if parsedUserID, err := id.ParseUserID(userID); err == nil {
+			ctx = context.WithValue(ctx, authmw.ContextKeyUserID, parsedUserID)
+		}
 	}
 	if sessionID != "" {
-		ctx = context.WithValue(ctx, authmw.ContextKeySessionID, sessionID)
+		if parsedSessionID, err := id.ParseSessionID(sessionID); err == nil {
+			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, parsedSessionID)
+		}
 	}
 	httpReq = httpReq.WithContext(ctx)
 

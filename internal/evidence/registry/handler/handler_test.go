@@ -14,6 +14,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"credo/internal/evidence/registry/handler/mocks"
+	id "credo/pkg/domain"
 	authmw "credo/pkg/platform/middleware/auth"
 )
 
@@ -202,6 +203,9 @@ func makeRequest(method, path string, body interface{}) *http.Request {
 }
 
 func addUserContext(req *http.Request, userID string) *http.Request {
-	ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, userID)
-	return req.WithContext(ctx)
+	if parsedUserID, err := id.ParseUserID(userID); err == nil {
+		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, parsedUserID)
+		return req.WithContext(ctx)
+	}
+	return req
 }
