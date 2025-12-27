@@ -451,7 +451,7 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 	}
 
 	// Create orchestrator
-	orch := orchestrator.NewOrchestrator(orchestrator.OrchestratorConfig{
+	orch := orchestrator.New(orchestrator.OrchestratorConfig{
 		Registry:        registry,
 		DefaultStrategy: orchestrator.StrategyFallback,
 		DefaultTimeout:  infra.Cfg.Registry.RegistryTimeout,
@@ -460,16 +460,17 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 	// Create cache store
 	cache := registryStore.NewInMemoryCache(infra.Cfg.Registry.CacheTTL)
 
-	// Create registry service with orchestrator
+	// Create consent adapter (needed by both service and handler)
+	consentAdapter := registryAdapters.NewConsentAdapter(consentSvc)
+
+	// Create registry service with orchestrator and consent port for atomic consent checks
 	svc := registryService.New(
 		orch,
 		cache,
+		consentAdapter,
 		infra.Cfg.Security.RegulatedMode,
 		registryService.WithLogger(infra.Log),
 	)
-
-	// Create consent adapter
-	consentAdapter := registryAdapters.NewConsentAdapter(consentSvc)
 
 	// Create audit publisher for handler
 	auditPort := auditpublisher.NewPublisher(
@@ -479,8 +480,7 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 		auditpublisher.WithPublisherLogger(infra.Log),
 	)
 
-	// Create handler
-	handler := registryHandler.New(svc, consentAdapter, auditPort, infra.Log)
+	handler := registryHandler.New(svc, auditPort, infra.Log)
 
 	return &registryModule{
 		Service: svc,

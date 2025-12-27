@@ -19,7 +19,6 @@ type citizenHTTPResponse struct {
 	CheckedAt   string `json:"checked_at"`
 }
 
-// New creates a citizen registry provider using HTTP
 func New(id, baseURL, apiKey string, timeout time.Duration) providers.Provider {
 	return NewWithClient(id, baseURL, apiKey, timeout, nil)
 }
@@ -30,7 +29,7 @@ func NewWithClient(
 	timeout time.Duration,
 	client adapters.HTTPDoer,
 ) providers.Provider {
-	return adapters.NewHTTPAdapter(adapters.HTTPAdapterConfig{
+	return adapters.New(adapters.HTTPAdapterConfig{
 		ID:         id,
 		BaseURL:    baseURL,
 		APIKey:     apiKey,
@@ -63,10 +62,9 @@ func parseCitizenResponse(statusCode int, body []byte) (*providers.Evidence, err
 		return nil, fmt.Errorf("failed to unmarshal citizen response: %w", err)
 	}
 
-	checkedAt, err := time.Parse(time.RFC3339, resp.CheckedAt)
-	if err != nil {
-		checkedAt = time.Now()
-	}
+	// Parse timestamp from response. If parsing fails, leave zero and let the
+	// adapter set it from context (maintains domain purity - no time.Now() here).
+	checkedAt, _ := time.Parse(time.RFC3339, resp.CheckedAt)
 
 	// Convert to generic Evidence structure
 	evidence := &providers.Evidence{
