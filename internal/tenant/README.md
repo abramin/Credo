@@ -18,14 +18,14 @@ Multi-tenancy and OAuth 2.0 client management for the Credo platform.
 
 ### Ubiquitous Language
 
-| Domain Term       | Code Location                                |
-| ----------------- | -------------------------------------------- |
-| **Tenant**        | `models.Tenant`                              |
-| **Client**        | `models.Client`                              |
-| **TenantDetails** | `models.TenantDetails` (read model)          |
-| **Create Tenant** | `service.TenantService.CreateTenant()`       |
-| **Create Client** | `service.ClientService.CreateClient()`       |
-| **Resolve Client**| `service.ClientService.ResolveClient()`      |
+| Domain Term        | Code Location                                |
+| ------------------ | -------------------------------------------- |
+| **Tenant**         | `models.Tenant`                              |
+| **Client**         | `models.Client`                              |
+| **TenantDetails**  | `models.TenantDetails` (read model)          |
+| **Create Tenant**  | `service.TenantService.CreateTenant()`       |
+| **Create Client**  | `service.ClientService.CreateClient()`       |
+| **Resolve Client** | `service.ClientService.ResolveClient()`      |
 | **Secret Rotation**| `service.ClientService.RotateClientSecret()` |
 
 ---
@@ -62,7 +62,7 @@ Multi-tenancy and OAuth 2.0 client management for the Credo platform.
 - RedirectURIs cannot be empty and must be HTTPS or localhost
 - AllowedGrants cannot be empty and must be valid grant types
 - AllowedScopes cannot be empty
-- Confidential clients (with secret) required for `client_credentials` grant
+- Confidential clients required for `client_credentials` grant
 - Public clients cannot use `client_credentials` grant
 - Cannot deactivate already-inactive client
 - Cannot reactivate already-active client
@@ -109,20 +109,20 @@ If tenant or client is inactive, OAuth flows are blocked.
 
 **TenantService** - Tenant lifecycle orchestration
 ```go
-CreateTenant(ctx, name)        // Creates new tenant, validates uniqueness
-GetTenant(ctx, tenantID)       // Loads tenant with validation
+CreateTenant(ctx, name)         // Creates new tenant, validates uniqueness
+GetTenant(ctx, tenantID)        // Loads tenant details + counts
 DeactivateTenant(ctx, tenantID) // Transitions to inactive, emits audit
 ReactivateTenant(ctx, tenantID) // Transitions to active, emits audit
 ```
 
 **ClientService** - Client registration and lifecycle
 ```go
-CreateClient(ctx, cmd)                    // Registers client, returns secret once
-GetClient(ctx, clientID)                  // Platform admin scope
+CreateClient(ctx, cmd)                     // Registers client, returns secret once
+GetClient(ctx, clientID)                   // Platform admin scope
 GetClientForTenant(ctx, tenantID, clientID) // Tenant scoped
-UpdateClient(ctx, clientID, cmd)          // Updates mutable fields
-RotateClientSecret(ctx, clientID)         // Generates new secret (confidential only)
-ResolveClient(ctx, oauthClientID)         // OAuth choke point
+UpdateClient(ctx, clientID, cmd)           // Updates mutable fields
+RotateClientSecret(ctx, clientID)          // Generates new secret (confidential only)
+ResolveClient(ctx, oauthClientID)          // OAuth choke point
 ```
 
 ### Ports (Interfaces)
@@ -199,18 +199,64 @@ func (c *CreateClientCommand) Normalize() { ... }
 func (c *CreateClientCommand) Validate() error { ... }
 ```
 
-### Audit Events
+Validation order: size -> required -> syntax -> semantic.
+
+---
+
+## Audit Events
 
 Events emitted at lifecycle transitions:
-- `tenant.created`, `tenant.deactivated`, `tenant.reactivated`
-- `client.created`, `client.updated`, `client.deactivated`, `client.reactivated`
-- `client.secret_rotated`
+- `tenant_created`, `tenant_deactivated`, `tenant_reactivated`
+- `client_created`, `client_deactivated`, `client_reactivated`
+- `client_secret_rotated` (and `client.secret_rotated` when rotation happens via UpdateClient)
 
-### Error Handling
+---
+
+## Error Handling
 
 - Stores return sentinel errors (`ErrNotFound`)
 - Services translate to domain errors at boundary
 - Internal errors never exposed to clients
+
+---
+
+## Product Notes
+
+- Tenant isolation is enforced in service/store methods rather than handlers.
+- Auth relies on `ResolveClient` as the canonical client -> tenant lookup.
+- Public clients have no secret and cannot use `client_credentials`.
+
+---
+
+## Observability
+
+- Metric: `credo_tenants_created_total` for tenant creation volume.
+- Metric: `credo_resolve_client_duration_seconds` histogram for OAuth critical path latency.
+
+---
+
+## Integration Points
+
+- Auth service uses `ResolveClient` for OAuth flows.
+- HTTP endpoints (admin-only):
+  - `POST /admin/tenants`
+  - `GET /admin/tenants/{id}`
+  - `POST /admin/tenants/{id}/deactivate`
+  - `POST /admin/tenants/{id}/reactivate`
+  - `POST /admin/clients`
+  - `GET /admin/clients/{id}`
+  - `PUT /admin/clients/{id}`
+  - `POST /admin/clients/{id}/deactivate`
+  - `POST /admin/clients/{id}/reactivate`
+  - `POST /admin/clients/{id}/rotate-secret`
+
+---
+
+## Known Gaps / Follow-ups
+
+- Tenant-admin auth is not yet wired; handlers use platform-admin access paths.
+- Persistence is demo-only (in-memory stores).
+- Consider argon2id for new installations; bcrypt is CPU-bound.
 
 ---
 
@@ -225,5 +271,6 @@ go test ./internal/tenant/...
 
 ## References
 
-- PRD: [PRD-026-Multi-Tenancy.md](../../docs/prd/PRD-026-Multi-Tenancy.md)
-- Architecture: [docs/engineering/architecture.md](../../docs/engineering/architecture.md)
+- PRD: `docs/prd/PRD-026A-Tenant-Client-Management.md`
+- PRD: `docs/prd/PRD-026B-Tenant-Client-Lifecycle.md`
+- Architecture: `docs/engineering/architecture.md`

@@ -6,50 +6,40 @@
 
 ## Architecture
 
-This module follows **hexagonal architecture** (ports-and-adapters) pattern:
+This module follows **hexagonal architecture** (ports-and-adapters):
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    External Layer                        │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  HTTP Handler (transport/http/handlers_consent.go)│  │
-│  │  - POST /auth/consent                             │  │
-│  │  - POST /auth/consent/revoke                      │  │
-│  │  - GET /auth/consent                              │  │
-│  └────────────────────┬──────────────────────────────┘  │
-└───────────────────────┼─────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Domain Layer (Core)                     │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  consent.Service                                  │  │
-│  │  - Grant(ctx, userID, purposes)                   │  │
-│  │  - Revoke(ctx, userID, purposes)                  │  │
-│  │  - Require(ctx, userID, purpose) -> error         │  │
-│  │  - List(ctx, userID, filter)                      │  │
-│  └───────────────┬───────────────────────────────────┘  │
-│                  │                                       │
-│                  │ Depends on                            │
-│                  ▼                                       │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  Ports (Interfaces)                               │  │
-│  │  - Store interface                                │  │
-│  │  - audit.Publisher interface                      │  │
-│  └───────────────────────────────────────────────────┘  │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-                       │ Implemented by
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│               Infrastructure Layer                       │
-│  ┌──────────────────┐    ┌──────────────────────────┐   │
-│  │ Adapters         │    │  Storage                 │   │
-│  │  - gRPC Server   │    │  - InMemoryStore         │   │
-│  │    (inbound)     │    │  - PostgresStore (V2)    │   │
-│  └──────────────────┘    └──────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│                   Transport                        │
+│  HTTP handlers (internal/consent/handler)          │
+│  - POST /auth/consent                              │
+│  - POST /auth/consent/revoke                       │
+│  - GET /auth/consent                               │
+│  - DELETE /auth/consent                            │
+│  - POST /admin/consent/users/{user_id}/revoke-all  │
+└──────────────────────────┬─────────────────────────┘
+                           │
+                           ▼
+┌────────────────────────────────────────────────────┐
+│                Domain (Service + Models)           │
+│  consent.Service                                   │
+│  - Grant(ctx, userID, purposes)                    │
+│  - Revoke(ctx, userID, purposes)                   │
+│  - RevokeAll(ctx, userID)                          │
+│  - DeleteAll(ctx, userID)                          │
+│  - Require(ctx, userID, purpose)                   │
+│  - List(ctx, userID, filter)                       │
+└──────────────────────────┬─────────────────────────┘
+                           │
+            ┌──────────────┴──────────────┐
+            ▼                             ▼
+┌──────────────────────────┐   ┌──────────────────────┐
+│ Store (ports.Store)      │   │ Audit Publisher       │
+│ - in-memory adapter      │   │ - audit events        │
+└──────────────────────────┘   └──────────────────────┘
 ```
+
+Other modules integrate via **in-process adapters** (e.g., `internal/registry/adapters/consent_adapter.go`).
 
 ---
 
@@ -77,25 +67,25 @@ This is a distinct bounded context because consent management has its own langua
 | **Grant**          | `service.Grant()` - create or renew consent                                |
 | **Revoke**         | `service.Revoke()` - withdraw consent                                      |
 | **Require**        | `service.Require()` - verify consent exists and is active                  |
-| **Audit Event**    | emitted via `audit.Publisher` at lifecycle transitions                     |
+| **Audit Event**    | emitted via audit publisher at lifecycle transitions                       |
 
 ### Aggregate Root and Invariants
 
 **Aggregate Root:** `Record`
 - One record per (UserID, Purpose) pair (upsert semantics)
-- ID format: `consent_{uuid}`
+- ID is a UUID (`id.ConsentID`), reused across grant/revoke cycles
 
 **Domain Invariants** (must always hold for stored state):
 1. A `Record` must have non-empty `ID`, `UserID`, `Purpose`, `GrantedAt`
-2. `Purpose` must be a valid enum value (login, registry_check, vc_issuance, decision_evaluation)
+2. `Purpose` must be a valid enum value
 3. An active record must NOT have `RevokedAt` set
 4. An active record must have `ExpiresAt` in the future (or nil for no expiry)
 5. A revoked record must have `RevokedAt` set
 6. `Status` is computed from `RevokedAt` and `ExpiresAt` at read time
 
 **Policy / API-input Rules** (can change without corrupting stored data):
-- Consent TTL duration (default: 1 year)
-- Grant idempotency window (default: 5 minutes)
+- Consent TTL duration (default: 1 year; configurable)
+- Grant idempotency window (default: 5 minutes; configurable)
 - Allowed purposes list
 
 ### Transactional Boundaries
@@ -103,8 +93,8 @@ This is a distinct bounded context because consent management has its own langua
 Per `AGENTS.md`: "All multi-write operations must be atomic."
 
 The consent service uses `ConsentStoreTx.RunInTx` to wrap multi-purpose operations:
-- `service.Grant()` - multiple purposes in single request
-- `service.Revoke()` - multiple purposes in single request
+- `service.Grant()` - multiple purposes in a single request
+- `service.Revoke()` - multiple purposes in a single request
 
 This prevents partial state if one purpose fails mid-operation.
 
@@ -116,10 +106,11 @@ Audit emissions behave like domain events (emitted on lifecycle transitions):
 | -------------------- | ---------------------- | --------- |
 | Consent granted      | `consent_granted`      | `granted` |
 | Consent revoked      | `consent_revoked`      | `revoked` |
+| Consent deleted      | `consent_deleted`      | `revoked` |
 | Consent check passed | `consent_check_passed` | `granted` |
 | Consent check failed | `consent_check_failed` | `denied`  |
 
-All events include: `user_id`, `purpose`, `reason`, `timestamp`
+All events include: `user_id`, `purpose`, `reason`, `timestamp`.
 
 ---
 
@@ -135,59 +126,31 @@ All events include: `user_id`, `purpose`, `reason`, `timestamp`
 - Apply idempotency rules (5-minute window)
 - Emit audit events
 
-**No dependencies on:** gRPC/Protobuf, HTTP/JSON, Database implementation
+**No dependencies on:** HTTP/JSON, database implementation
 
 ### 2. Ports (Interfaces)
 
 **Location:** `service/service.go`
 
 **Interfaces:**
-- `Store` - Consent persistence
-- `audit.Publisher` - Audit event emission
+- `Store` - consent persistence
+- `audit.Publisher` - audit event emission
 
 ### 3. Adapters (Infrastructure)
 
-#### HTTP Adapter (Outbound - to clients)
-**Location:** `internal/transport/http/handlers_consent.go`
-- Translates HTTP/JSON → Domain calls
-- Maps domain errors → HTTP status codes
+**HTTP Adapter (Inbound - from clients)**
+- `internal/consent/handler`
+- Translates HTTP/JSON -> domain calls
+- Maps domain errors -> HTTP status codes
 - Extracts user from JWT context
 
-#### gRPC Server Adapter (Inbound - from other services)
-**Location:** `adapters/grpc/server.go`
-- Exposes consent service over gRPC
-- Implements `consentpb.ConsentServiceServer`
-- Translates Protobuf <-> Domain models
-- Used by: registry, decision, vc services
+**In-process Adapters (Inbound - from other modules)**
+- `internal/registry/adapters/consent_adapter.go`
+- Modules such as registry/decision call `ConsentPort` which delegates to the consent service
 
-#### Storage Adapter
-**Location:** `store/store_memory.go`
-- Implements `Store` interface
-- Handles persistence details
-
----
-
-## Interservice Communication
-
-### Consumed by (Inbound gRPC Calls)
-
-Other services call consent service via gRPC:
-
-1. **Registry Service** - Check consent before citizen/sanctions lookup
-2. **VC Service** - Check consent before issuing credentials
-3. **Decision Service** - Check consent before evaluation
-4. **Biometric Service** - Check consent before face matching
-
-### Provides (gRPC API)
-
-**Service:** `ConsentService` (defined in `api/proto/consent.proto`)
-
-**Methods:**
-- `HasConsent(userID, purpose) -> bool`
-- `RequireConsent(userID, purpose) -> error`
-- `GrantConsent(userID, purposes[]) -> ConsentRecord[]`
-- `RevokeConsent(userID, purposes[]) -> ConsentRecord[]`
-- `ListConsents(userID) -> ConsentRecord[]`
+**Storage Adapter**
+- `internal/consent/store/store_memory.go`
+- In-memory persistence for demo/dev
 
 ---
 
@@ -199,11 +162,10 @@ Consent is granted per-purpose, not globally:
 
 ```go
 const (
-    PurposeLogin                = "login"
-    PurposeRegistryCheck        = "registry_check"
-    PurposeVCIssuance           = "vc_issuance"
-    PurposeDecisionEvaluation   = "decision_evaluation"
-    PurposeBiometricVerification = "biometric_verification"
+    PurposeLogin          = "login"
+    PurposeRegistryCheck  = "registry_check"
+    PurposeVCIssuance     = "vc_issuance"
+    PurposeDecision       = "decision_evaluation"
 )
 ```
 
@@ -217,7 +179,7 @@ const (
 
 ### Idempotency
 
-Repeated grant requests within 5 minutes return existing consent without:
+Repeated grant requests within the idempotency window return existing consent without:
 - Updating timestamps
 - Emitting audit events
 
@@ -228,7 +190,7 @@ This prevents audit noise from double-clicks/retries.
 One consent ID per user+purpose combination:
 - Active consent: reuse ID, extend TTL
 - Expired consent: reuse ID, renew
-- Revoked consent: reuse ID, clear RevokedAt
+- Revoked consent: reuse ID, clear `RevokedAt`
 
 ---
 
@@ -246,6 +208,32 @@ The `Store` interface defines error behavior:
 The service maps store errors to domain errors:
 - `store.ErrNotFound` -> handled as "missing consent"
 - Other errors -> `CodeInternal`
+
+---
+
+## Product Notes
+
+- Consent is purpose-based and time-bound (1 year by default).
+- Grant is idempotent within a 5-minute window to reduce audit noise.
+- ID reuse keeps one record per user+purpose while audit logs preserve history.
+
+---
+
+## HTTP Endpoints
+
+- `POST /auth/consent` - Grant consent for purposes
+- `POST /auth/consent/revoke` - Revoke specific consents
+- `GET /auth/consent` - List user's consents
+- `DELETE /auth/consent` - Delete all consents (GDPR)
+- `POST /admin/consent/users/{user_id}/revoke-all` - Admin revoke-all
+
+---
+
+## Known Gaps / Follow-ups
+
+- CQRS projection path deferred until Postgres migration.
+- Per-purpose expiry configuration not yet supported.
+- Consent cascading/dependencies not yet supported.
 
 ---
 
@@ -274,9 +262,8 @@ Unit tests exist only to:
 
 - **Microservices Migration:**
   - Extract consent service to separate process
-  - Run gRPC server on port 9091
-  - Other services connect via `consent-service:9091`
-  - No code changes to domain logic
+  - Add gRPC server adapter
+  - No changes to domain logic
 
 ---
 
@@ -322,6 +309,6 @@ CREATE INDEX idx_consents_purpose ON consents (purpose);
 
 ## References
 
-- PRD: [PRD-002-Consent-Management.md](../../docs/prd/PRD-002-Consent-Management.md)
-- API Contract: [api/proto/consent.proto](../../api/proto/consent.proto)
-- Architecture: [docs/engineering/architecture.md](../../docs/engineering/architecture.md#consent)
+- PRD: `docs/prd/PRD-002-Consent-Management.md`
+- API Contract: `api/proto/consent.proto`
+- Architecture: `docs/engineering/architecture.md#consent`

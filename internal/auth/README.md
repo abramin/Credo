@@ -16,25 +16,25 @@ This document describes the Domain-Driven Design (DDD) approach applied to the `
 - Userinfo is served for authenticated sessions
 - Audit/security telemetry is emitted for key transitions
 
-This is a distinct bounded context because its language and invariants are specific: codes, sessions, refresh tokens, consent and revocation are not generic "user management" concerns.
+This is a distinct bounded context because its language and invariants are specific: codes, sessions, refresh tokens, device binding, and revocation are not generic "user management" concerns.
 
 ---
 
 ## Ubiquitous Language
 
-| Domain Term              | Code Location                                  |
-| ------------------------ | ---------------------------------------------- |
-| **User**                 | `models.User`                                  |
-| **Session**              | `models.Session`                               |
-| **Authorization Code**   | `models.AuthorizationCodeRecord`               |
-| **Refresh Token**        | `models.RefreshTokenRecord`                    |
-| **Authorize**            | `service/authorize.go`                         |
-| **Token exchange**       | `service/token_exchange.go`                    |
-| **Token refresh**        | `service/token_refresh.go`                     |
-| **Revocation**           | `service/token_revocation.go`, `service/session_revoke.go` |
-| **UserInfo**             | `service/userinfo.go`                          |
-| **Device Binding**       | `device/device.go`, `service/device_binding.go` |
-| **Audit events**         | emitted via `service/service.go#logAudit`      |
+| Domain Term            | Code Location                                  |
+| ---------------------- | ---------------------------------------------- |
+| **User**               | `models.User`                                  |
+| **Session**            | `models.Session`                               |
+| **Authorization Code** | `models.AuthorizationCodeRecord`              |
+| **Refresh Token**      | `models.RefreshTokenRecord`                    |
+| **Authorize**          | `service/authorize.go`                         |
+| **Token exchange**     | `service/token_exchange.go`                    |
+| **Token refresh**      | `service/token_refresh.go`                     |
+| **Revocation**         | `service/token_revocation.go`, `service/session_revoke.go` |
+| **UserInfo**           | `service/userinfo.go`                          |
+| **Device Binding**     | `device/device.go`, `service/device_binding.go` |
+| **Audit events**       | emitted via `service/observability.go#logAudit` |
 
 ---
 
@@ -66,32 +66,37 @@ internal/auth/
 ### Session Aggregate (Root)
 
 The **Session** is the primary aggregate root, owning:
-- Session lifecycle: `pending_consent` → `active` → `revoked`/`expired`
+- Session lifecycle: `pending_consent` -> `active` -> `revoked` (terminal)
 - Token issuance/refresh coupling (access token JTI tracking, refresh token rotation)
 - Device binding state (device ID + fingerprint expectations)
+
+**Expiration model:** Sessions are time-bound via `ExpiresAt` and rejected by store checks when expired. Expiration is not a status value; the cleanup worker deletes expired sessions.
 
 **Intent-revealing methods:**
 - `IsActive()`, `IsPendingConsent()`, `IsRevoked()`
 - `Activate()` - transitions from pending_consent to active
-- `GetDeviceBinding()`, `SetDeviceBinding()` - device binding value object access
+- `CanAdvance(allowPending)` - checks state for token operations
+- `GetDeviceBinding()`, `SetDeviceBinding()`
 
 **Constructor:** `NewSession()` enforces:
 - Scopes cannot be empty
 - Status must be valid enum
-- ExpiresAt must be after CreatedAt
+- `ExpiresAt` must be after `CreatedAt`
+
+**Default TTLs (configurable):**
+- Session TTL: 24 hours (`SESSION_TTL`)
 
 ### Authorization Code (Child Entity)
 
 **AuthorizationCodeRecord** is a child of Session with strict invariants:
 - Code is single-use (Used flag prevents replay)
-- Expires in 10 minutes
+- Expires in 10 minutes (hard-coded in `Authorize`)
 - RedirectURI must match at token exchange
 
 **Constructor:** `NewAuthorizationCode()` enforces:
-- Code cannot be empty
-- Code is prefixed with `authz_`
+- Code cannot be empty (no required prefix)
 - RedirectURI cannot be empty
-- ExpiresAt must be after CreatedAt and in the future
+- `ExpiresAt` must be after `CreatedAt` and not in the past
 
 **Intent-revealing methods:**
 - `IsValid(now)` - not used AND not expired
@@ -101,12 +106,12 @@ The **Session** is the primary aggregate root, owning:
 
 **RefreshTokenRecord** is a child of Session supporting rotation:
 - Token rotates (consume-once via Used flag)
-- Expires in 30 days
-- Replay of used token indicates potential theft
+- Expires in 30 days by default (configurable via service config)
+- Replay of used token indicates potential theft (revokes session)
 
 **Constructor:** `NewRefreshToken()` enforces:
 - Token cannot be empty
-- ExpiresAt must be after CreatedAt and in the future
+- `ExpiresAt` must be after `CreatedAt` and not in the past
 
 **Intent-revealing methods:**
 - `IsValid(now)` - not used AND not expired
@@ -128,7 +133,10 @@ The **Session** is the primary aggregate root, owning:
 
 - **Token Generation** via `TokenGenerator` (`service/token.go`)
 - **Device Binding Policy** via `device/device.go` and `service/device_binding.go`
-- **Revocation List** via `store/revocation/revocation.go`
+  - Device binding is logging-only unless `DeviceBindingEnabled` is true.
+  - Fingerprints are hashed; no IP is stored.
+- **Revocation List** via `store/revocation/revocation.go` (in-memory by default)
+  - `TRLFailureMode` controls whether TRL write failures warn or fail.
 
 These express domain behavior that doesn't naturally live on a single entity.
 
@@ -142,7 +150,7 @@ The auth service uses transaction boundaries for multi-write operations:
   - `service/token_exchange.go` (consume code + activate session + create refresh token)
   - `service/token_refresh.go` (consume refresh + advance session + create refresh token)
 
-This aligns with Credo's "all multi-write operations must be atomic" rule.
+Token artifacts are generated before writes to avoid partial state if token creation fails.
 
 ---
 
@@ -161,7 +169,7 @@ func (r *AuthorizationRequest) Validate() error {
     // Phase 1: Size validation (fail fast)
     // Phase 2: Required fields
     // Phase 3: Syntax validation (format checks)
-    // Phase 4: Semantic validation (in service layer)
+    // Phase 4: Semantic validation (service layer)
 }
 ```
 
@@ -169,17 +177,33 @@ This separates API-input rules (on request structs) from domain invariants (in c
 
 ---
 
+## Security Features
+
+- **Redirect URI validation**: scheme allowlist (`AllowedRedirectSchemes`, defaults to https; http allowed in local/demo) and exact match against registered client URIs.
+- **Authorization code replay protection**: used codes revoke the session to mitigate theft.
+- **Refresh token rotation**: used tokens revoke the session (replay detection).
+- **Access token revocation**: JTI stored in TRL with TTL; failures default to warn mode.
+- **Device binding signals**: cookie device ID + hashed fingerprint; drift/mismatch logged when enabled.
+- **Consistent error handling**: domain errors map to safe HTTP responses; internal errors are not exposed.
+
+---
+
 ## Domain Events / Audit
 
 Audit emissions behave like domain events (emitted on lifecycle transitions):
 
-| Transition            | Audit Action         |
-| --------------------- | -------------------- |
-| Session created       | `session_created`    |
-| Code exchanged        | `token_issued`       |
-| Token refreshed       | `token_refreshed`    |
-| Token revoked         | `token_revoked`      |
-| Session revoked       | `session_revoked`    |
+| Transition                | Audit Action          |
+| ------------------------- | --------------------- |
+| User created              | `user_created`        |
+| Session created           | `session_created`     |
+| Token issued              | `token_issued`        |
+| Token refreshed           | `token_refreshed`     |
+| Token revoked             | `token_revoked`       |
+| Session revoked           | `session_revoked`     |
+| Sessions revoked (admin)  | `sessions_revoked`    |
+| User deleted              | `user_deleted`        |
+| Userinfo accessed         | `userinfo_accessed`   |
+| Auth failure              | `auth_failed`         |
 
 Events are emitted by the service at domain transitions, not by handlers.
 
@@ -196,17 +220,60 @@ Services translate these to domain errors at their boundary.
 
 ---
 
+## Product Notes
+
+- OAuth 2.0 authorization code flow issues JWT access tokens (15 minutes by default) and rotating refresh tokens (30 days by default).
+- Per-tenant issuer URLs are derived from `JWT_ISSUER_BASE_URL` and tenant ID.
+- Device binding signals are collected for drift/mismatch detection; enforcement is opt-in.
+
+---
+
+## HTTP Endpoints
+
+- `POST /auth/authorize`
+- `POST /auth/token`
+- `POST /auth/revoke`
+- `GET /auth/userinfo`
+- `GET /auth/sessions`
+- `DELETE /auth/sessions/{session_id}`
+- `DELETE /admin/auth/users/{user_id}`
+
+---
+
+## Design Rationale
+
+- Authorization codes prevent tokens from appearing in browser logs and history.
+- Separate models for sessions, codes, and refresh tokens keep lifetimes and invariants clear.
+- Device fingerprints are hashed to avoid storing raw browser data.
+
+---
+
+## Known Gaps / Follow-ups
+
+- Password authentication not implemented (email-only demo flow).
+- Multi-factor authentication deferred.
+- Self-service account deletion deferred.
+- Device binding is logging-only unless `DeviceBindingEnabled` is true.
+- Admin deletion is not transactional in the in-memory stores.
+
+---
+
 ## Testing
 
-| Layer                   | Location                              | Purpose                              |
-| ----------------------- | ------------------------------------- | ------------------------------------ |
-| Primary (Gherkin)       | `e2e/features/oauth_*.feature`        | Published behavior contracts         |
-| Secondary (Integration) | `internal/auth/integration_test.go`   | Multi-component flows                |
-| Tertiary (Unit)         | `internal/auth/service/*_test.go`     | Error propagation, edge cases        |
+| Layer                   | Location                               | Purpose                              |
+| ----------------------- | -------------------------------------- | ------------------------------------ |
+| Primary (Gherkin)       | `e2e/features/auth_*.feature`          | Published behavior contracts         |
+| Secondary (Integration) | `internal/auth/integration_test.go`    | Multi-component flows                |
+| Tertiary (Unit)         | `internal/auth/service/*_test.go`      | Error propagation, edge cases        |
+
+Primary tests include:
+- `e2e/features/auth_normal_flow.feature`
+- `e2e/features/auth_token_lifecycle.feature`
+- `e2e/features/auth_security.feature`
 
 ---
 
 ## References
 
-- Device Binding: See `../../docs/security/DEVICE_BINDING.md` for the full security model
-- Architecture: [docs/engineering/architecture.md](../../docs/engineering/architecture.md)
+- Device Binding: See `docs/security/DEVICE_BINDING.md`
+- Architecture: `docs/engineering/architecture.md`
