@@ -35,11 +35,6 @@ paths:
         When rate limited, the response includes a `Retry-After` header indicating
         when to retry. After repeated failures, the account may be temporarily locked.
 
-        **Idempotency:**
-        Include an `Idempotency-Key` header (UUID recommended) to safely retry requests.
-        If the same key is used within 24 hours, the original response is returned
-        without creating duplicate sessions or authorization codes.
-
         **Error Handling (RFC 6749 §4.1.2.1):**
         Per RFC 6749, if client_id is unknown/invalid or redirect_uri is mismatched,
         the server MUST NOT redirect and should return an error directly:
@@ -47,17 +42,6 @@ paths:
         - Inactive client → 400 `invalid_client`
         - redirect_uri not in registered URIs → 400 `bad_request`
         - Inactive tenant → 400 `access_denied`
-      parameters:
-        - in: header
-          name: Idempotency-Key
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: |
-            Optional idempotency key to ensure safe retries. If the same key is
-            provided within 24 hours, the original response is returned without
-            processing the request again. Recommended: use a UUID.
       requestBody:
         required: true
         content:
