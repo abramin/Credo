@@ -64,7 +64,7 @@ func (s *ServiceSuite) TestAuthorizationCodeFlow() {
 		s.service.DeviceBindingEnabled = true
 		deviceSvc := authdevice.NewService(true)
 		s.service.deviceService = deviceSvc
-		t.Cleanup(func() {
+		s.T().Cleanup(func() {
 			s.service.DeviceBindingEnabled = prevBinding
 			s.service.deviceService = prevDeviceSvc
 		})
