@@ -82,7 +82,7 @@ type AuthCodeStore interface {
 // RefreshTokenStore defines persistence operations for refresh tokens, including rotation.
 type RefreshTokenStore interface {
 	Create(ctx context.Context, token *models.RefreshTokenRecord) error
-	FindBySessionID(ctx context.Context, sessionID id.SessionID) (*models.RefreshTokenRecord, error)
+	FindBySessionID(ctx context.Context, sessionID id.SessionID, now time.Time) (*models.RefreshTokenRecord, error)
 	Find(ctx context.Context, tokenString string) (*models.RefreshTokenRecord, error)
 	ConsumeRefreshToken(ctx context.Context, token string, now time.Time) (*models.RefreshTokenRecord, error)
 	DeleteBySessionID(ctx context.Context, sessionID id.SessionID) error

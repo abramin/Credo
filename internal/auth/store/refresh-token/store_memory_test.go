@@ -25,33 +25,35 @@ func (s *InMemoryRefreshTokenStoreSuite) SetupTest() {
 }
 
 func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_PersistAndLookup() {
+	now := time.Now()
 	sessionID := id.SessionID(uuid.New())
 	record := &models.RefreshTokenRecord{
 		ID:        uuid.New(),
 		Token:     "ref_123",
 		SessionID: sessionID,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(time.Hour),
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
 	}
 
 	err := s.store.Create(context.Background(), record)
 	s.Require().NoError(err)
 
-	foundByID, err := s.store.FindBySessionID(context.Background(), sessionID)
+	foundByID, err := s.store.FindBySessionID(context.Background(), sessionID, now)
 	s.Require().NoError(err)
 	s.Equal(record, foundByID)
 }
 
 func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_NotFound() {
-	_, err := s.store.FindBySessionID(context.Background(), id.SessionID(uuid.New()))
+	_, err := s.store.FindBySessionID(context.Background(), id.SessionID(uuid.New()), time.Now())
 	s.Require().ErrorIs(err, sentinel.ErrNotFound)
 }
 
 func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_DeleteBySession() {
+	now := time.Now()
 	sessionID := id.SessionID(uuid.New())
 	otherSessionID := id.SessionID(uuid.New())
-	matching := &models.RefreshTokenRecord{ID: uuid.New(), Token: "ref_match", SessionID: sessionID}
-	other := &models.RefreshTokenRecord{ID: uuid.New(), Token: "ref_other", SessionID: otherSessionID}
+	matching := &models.RefreshTokenRecord{ID: uuid.New(), Token: "ref_match", SessionID: sessionID, ExpiresAt: now.Add(time.Hour)}
+	other := &models.RefreshTokenRecord{ID: uuid.New(), Token: "ref_other", SessionID: otherSessionID, ExpiresAt: now.Add(time.Hour)}
 
 	s.Require().NoError(s.store.Create(context.Background(), matching))
 	s.Require().NoError(s.store.Create(context.Background(), other))
@@ -59,10 +61,10 @@ func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_DeleteBySession()
 	err := s.store.DeleteBySessionID(context.Background(), sessionID)
 	s.Require().NoError(err)
 
-	_, err = s.store.FindBySessionID(context.Background(), matching.SessionID)
+	_, err = s.store.FindBySessionID(context.Background(), matching.SessionID, now)
 	s.Require().ErrorIs(err, sentinel.ErrNotFound)
 
-	fetchedOther, err := s.store.FindBySessionID(context.Background(), other.SessionID)
+	fetchedOther, err := s.store.FindBySessionID(context.Background(), other.SessionID, now)
 	s.Require().NoError(err)
 	s.Equal(other, fetchedOther)
 
@@ -120,14 +122,14 @@ func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_NewestActiveSelec
 	s.Require().NoError(s.store.Create(context.Background(), old))
 	s.Require().NoError(s.store.Create(context.Background(), newer))
 
-	found, err := s.store.FindBySessionID(context.Background(), sessionID)
+	found, err := s.store.FindBySessionID(context.Background(), sessionID, now)
 	s.Require().NoError(err)
 	s.Equal(newer, found)
 
 	// Once the newest is used, it should return the remaining active token.
 	_, err = s.store.ConsumeRefreshToken(context.Background(), newer.Token, now)
 	s.Require().NoError(err)
-	found, err = s.store.FindBySessionID(context.Background(), sessionID)
+	found, err = s.store.FindBySessionID(context.Background(), sessionID, now)
 	s.Require().NoError(err)
 	s.Equal(old, found)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,14 +102,11 @@ func (s *InMemorySessionStore) RevokeSessionIfActive(_ context.Context, sessionI
 	if !ok {
 		return sentinel.ErrNotFound
 	}
-	if session.Status == models.SessionStatusRevoked {
+
+	if !session.Revoke(now) {
 		return ErrSessionRevoked
 	}
 
-	session.Status = models.SessionStatusRevoked
-	if session.RevokedAt == nil || now.After(*session.RevokedAt) {
-		session.RevokedAt = &now
-	}
 	s.sessions[sessionID] = session
 	return nil
 }
@@ -139,39 +137,35 @@ func (s *InMemorySessionStore) ListAll(_ context.Context) (map[id.SessionID]*mod
 	return result, nil
 }
 
-// validateForAdvance checks session client matches, status is valid, and not expired.
-// allowPending=true permits pending_consent status (for code exchange activation).
-func (s *InMemorySessionStore) validateForAdvance(session *models.Session, clientID string, at time.Time, allowPending bool) error {
-	if session.ClientID.String() != clientID {
-		return fmt.Errorf("client_id mismatch: %w", sentinel.ErrInvalidState)
+// translateSessionError converts domain errors from Session.ValidateForAdvance to sentinel errors.
+// Store boundary contract: return sentinel errors for infrastructure/store callers.
+func translateSessionError(err error) error {
+	if err == nil {
+		return nil
 	}
-	if session.IsRevoked() {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "expired"):
+		return fmt.Errorf("%s: %w", msg, sentinel.ErrExpired)
+	case strings.Contains(msg, "revoked"):
 		return ErrSessionRevoked
+	default:
+		return fmt.Errorf("%s: %w", msg, sentinel.ErrInvalidState)
 	}
-	if !session.CanAdvance(allowPending) {
-		return fmt.Errorf("session in invalid state: %w", sentinel.ErrInvalidState)
-	}
-	if at.After(session.ExpiresAt) {
-		return fmt.Errorf("session expired: %w", sentinel.ErrExpired)
+}
+
+// validateForAdvance calls the domain validation method and translates errors to sentinel errors.
+// allowPending=true permits pending_consent status (for code exchange activation).
+func validateForAdvance(session *models.Session, clientID string, at time.Time, allowPending bool) error {
+	if err := session.ValidateForAdvance(clientID, at, allowPending); err != nil {
+		return translateSessionError(err)
 	}
 	return nil
 }
 
-// applyDeviceFields updates device-related fields if non-empty.
-func applyDeviceFields(session *models.Session, accessTokenJTI, deviceID, deviceFingerprintHash string) {
-	if accessTokenJTI != "" {
-		session.LastAccessTokenJTI = accessTokenJTI
-	}
-	if deviceID != "" {
-		session.DeviceID = deviceID
-	}
-	if deviceFingerprintHash != "" {
-		session.DeviceFingerprintHash = deviceFingerprintHash
-	}
-}
-
 // AdvanceLastSeen updates the session's last seen time and other optional fields.
-// It validates the session's existence, client ID, status, and expiry before updating.
+// It validates the session using domain logic, then applies updates via domain methods.
+// Errors are returned as sentinel errors per store boundary contract.
 func (s *InMemorySessionStore) AdvanceLastSeen(_ context.Context, sessionID id.SessionID, clientID string, at time.Time, accessTokenJTI string, activate bool, deviceID string, deviceFingerprintHash string) (*models.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -180,22 +174,26 @@ func (s *InMemorySessionStore) AdvanceLastSeen(_ context.Context, sessionID id.S
 	if !ok {
 		return nil, fmt.Errorf("session not found: %w", sentinel.ErrNotFound)
 	}
-	if err := s.validateForAdvance(session, clientID, at, true); err != nil {
+
+	// Validate using domain checks, return sentinel errors per store contract
+	if err := validateForAdvance(session, clientID, at, true); err != nil {
 		return nil, err
 	}
 
-	if at.After(session.LastSeenAt) {
-		session.LastSeenAt = at
+	// Apply updates using domain methods
+	session.RecordActivity(at)
+	if activate {
+		session.Activate()
 	}
-	if activate && session.Status == models.SessionStatusPendingConsent {
-		session.Status = models.SessionStatusActive
-	}
-	applyDeviceFields(session, accessTokenJTI, deviceID, deviceFingerprintHash)
+	session.ApplyTokenJTI(accessTokenJTI)
+	session.ApplyDeviceInfo(deviceID, deviceFingerprintHash)
 
 	s.sessions[sessionID] = session
 	return session, nil
 }
 
+// AdvanceLastRefreshed updates the session's refresh timestamp and activity time.
+// Errors are returned as sentinel errors per store boundary contract.
 func (s *InMemorySessionStore) AdvanceLastRefreshed(_ context.Context, sessionID id.SessionID, clientID string, at time.Time, accessTokenJTI string, deviceID string, deviceFingerprintHash string) (*models.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -204,17 +202,16 @@ func (s *InMemorySessionStore) AdvanceLastRefreshed(_ context.Context, sessionID
 	if !ok {
 		return nil, fmt.Errorf("session not found: %w", sentinel.ErrNotFound)
 	}
-	if err := s.validateForAdvance(session, clientID, at, false); err != nil {
+
+	// Validate using domain checks, return sentinel errors per store contract
+	if err := validateForAdvance(session, clientID, at, false); err != nil {
 		return nil, err
 	}
 
-	if session.LastRefreshedAt == nil || at.After(*session.LastRefreshedAt) {
-		session.LastRefreshedAt = &at
-	}
-	if at.After(session.LastSeenAt) {
-		session.LastSeenAt = at
-	}
-	applyDeviceFields(session, accessTokenJTI, deviceID, deviceFingerprintHash)
+	// Apply updates using domain methods
+	session.RecordRefresh(at)
+	session.ApplyTokenJTI(accessTokenJTI)
+	session.ApplyDeviceInfo(deviceID, deviceFingerprintHash)
 
 	s.sessions[sessionID] = session
 	return session, nil

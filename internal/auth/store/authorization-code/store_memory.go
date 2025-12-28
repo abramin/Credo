@@ -3,12 +3,29 @@ package authorizationcode
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"credo/internal/auth/models"
 	"credo/pkg/platform/sentinel"
 )
+
+// translateAuthCodeError converts domain errors from ValidateForConsume to sentinel errors.
+func translateAuthCodeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "expired"):
+		return fmt.Errorf("%s: %w", msg, sentinel.ErrExpired)
+	case strings.Contains(msg, "already used"):
+		return fmt.Errorf("%s: %w", msg, sentinel.ErrAlreadyUsed)
+	default:
+		return fmt.Errorf("%s: %w", msg, sentinel.ErrInvalidState)
+	}
+}
 
 // Error Contract:
 // All store methods follow this error pattern:
@@ -49,16 +66,18 @@ func (s *InMemoryAuthorizationCodeStore) FindByCode(_ context.Context, code stri
 func (s *InMemoryAuthorizationCodeStore) MarkUsed(_ context.Context, code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if record, ok := s.authCodes[code]; ok {
-		record.Used = true
-		return nil
+	record, ok := s.authCodes[code]
+	if !ok {
+		return fmt.Errorf("authorization code not found: %w", sentinel.ErrNotFound)
 	}
-	return fmt.Errorf("authorization code not found: %w", sentinel.ErrNotFound)
+	record.MarkUsed()
+	return nil
 }
 
 // ConsumeAuthCode marks the authorization code as used if valid.
-// It checks for existence, redirect URI match, expiry, and usage status.
+// It validates using domain logic, then marks the code as used via domain method.
 // Returns the code record and an error if any validation fails.
+// Errors are returned as sentinel errors per store boundary contract.
 func (s *InMemoryAuthorizationCodeStore) ConsumeAuthCode(_ context.Context, code string, redirectURI string, now time.Time) (*models.AuthorizationCodeRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,17 +86,14 @@ func (s *InMemoryAuthorizationCodeStore) ConsumeAuthCode(_ context.Context, code
 	if !ok {
 		return nil, fmt.Errorf("authorization code not found: %w", sentinel.ErrNotFound)
 	}
-	if record.RedirectURI != redirectURI {
-		return record, fmt.Errorf("redirect_uri mismatch: %w", sentinel.ErrInvalidState)
-	}
-	if now.After(record.ExpiresAt) {
-		return record, fmt.Errorf("authorization code expired: %w", sentinel.ErrExpired)
-	}
-	if record.Used {
-		return record, fmt.Errorf("authorization code already used: %w", sentinel.ErrAlreadyUsed)
+
+	// Validate using domain method, translate to sentinel errors per store contract
+	if err := record.ValidateForConsume(redirectURI, now); err != nil {
+		return record, translateAuthCodeError(err)
 	}
 
-	record.Used = true
+	// Mark as used via domain method
+	record.MarkUsed()
 	return record, nil
 }
 
