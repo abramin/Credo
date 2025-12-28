@@ -28,6 +28,24 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Run race tests (concurrent packages)
+        run: |
+          go test -race \
+            ./internal/evidence/registry/... \
+            ./internal/ratelimit/store/globalthrottle \
+            ./internal/ratelimit/store/bucket \
+            ./internal/ratelimit/store/quota \
+            ./internal/ratelimit/store/authlockout \
+            ./internal/ratelimit/store/allowlist \
+            ./internal/ratelimit/workers/cleanup \
+            ./internal/auth/service \
+            ./internal/auth/store/session \
+            ./internal/auth/store/revocation \
+            ./internal/consent/store \
+            ./pkg/platform/audit/publisher \
+            ./pkg/platform/audit/store/memory \
+            ./pkg/platform/sync
+
   e2e:
     name: E2E Tests
     permissions:

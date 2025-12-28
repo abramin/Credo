@@ -6,121 +6,102 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
 )
 
-func TestCreate_IndexesByClientID(t *testing.T) {
-	store := NewInMemory()
-	ctx := context.Background()
+type ClientStoreSuite struct {
+	suite.Suite
+	store *InMemory
+	ctx   context.Context
+}
 
-	client := &models.Client{
+func (s *ClientStoreSuite) SetupTest() {
+	s.store = NewInMemory()
+	s.ctx = context.Background()
+}
+
+func TestClientStoreSuite(t *testing.T) {
+	suite.Run(t, new(ClientStoreSuite))
+}
+
+func (s *ClientStoreSuite) newClient(tenantID id.TenantID) *models.Client {
+	return &models.Client{
 		ID:            id.ClientID(uuid.New()),
-		TenantID:      id.TenantID(uuid.New()),
+		TenantID:      tenantID,
 		Name:          "Test Client",
-		OAuthClientID: "test-client-id",
+		OAuthClientID: uuid.NewString(),
 		Status:        "active",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
-
-	require.NoError(t, store.Create(ctx, client))
-
-	// Should be findable by ClientID
-	found, err := store.FindByOAuthClientID(ctx, "test-client-id")
-	require.NoError(t, err)
-	assert.Equal(t, client.ID, found.ID)
 }
 
-func TestFindByTenantAndID_WrongTenant(t *testing.T) {
-	store := NewInMemory()
-	ctx := context.Background()
+// TestLookups verifies the store correctly indexes and retrieves clients.
+func (s *ClientStoreSuite) TestLookups() {
+	s.Run("finds by OAuth client ID after creation", func() {
+		client := s.newClient(id.TenantID(uuid.New()))
+		client.OAuthClientID = "test-client-id"
+		s.Require().NoError(s.store.Create(s.ctx, client))
 
-	tenantA := id.TenantID(uuid.New())
-	tenantB := id.TenantID(uuid.New())
+		found, err := s.store.FindByOAuthClientID(s.ctx, "test-client-id")
+		s.Require().NoError(err)
+		s.Equal(client.ID, found.ID)
+	})
 
-	client := &models.Client{
-		ID:            id.ClientID(uuid.New()),
-		TenantID:      tenantA,
-		Name:          "Client A",
-		OAuthClientID: "client-a",
-		Status:        "active",
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
-	}
+	s.Run("returns ErrNotFound for unknown ID", func() {
+		_, err := s.store.FindByID(s.ctx, id.ClientID(uuid.New()))
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
+	})
 
-	require.NoError(t, store.Create(ctx, client))
-
-	// Should find with correct tenant
-	found, err := store.FindByTenantAndID(ctx, tenantA, client.ID)
-	require.NoError(t, err)
-	assert.Equal(t, client.ID, found.ID)
-
-	// Should NOT find with wrong tenant
-	_, err = store.FindByTenantAndID(ctx, tenantB, client.ID)
-	require.ErrorIs(t, err, sentinel.ErrNotFound)
+	s.Run("returns ErrNotFound for unknown OAuth client ID", func() {
+		_, err := s.store.FindByOAuthClientID(s.ctx, "nonexistent")
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
+	})
 }
 
-func TestFindByID_NotFound(t *testing.T) {
-	store := NewInMemory()
-	ctx := context.Background()
+// TestTenantIsolation verifies clients are properly scoped to their tenant.
+func (s *ClientStoreSuite) TestTenantIsolation() {
+	s.Run("scoped lookup rejects wrong tenant", func() {
+		tenantA := id.TenantID(uuid.New())
+		tenantB := id.TenantID(uuid.New())
 
-	_, err := store.FindByID(ctx, id.ClientID(uuid.New()))
-	require.ErrorIs(t, err, sentinel.ErrNotFound)
-}
+		client := s.newClient(tenantA)
+		s.Require().NoError(s.store.Create(s.ctx, client))
 
-func TestFindByClientID_NotFound(t *testing.T) {
-	store := NewInMemory()
-	ctx := context.Background()
+		// Should find with correct tenant
+		found, err := s.store.FindByTenantAndID(s.ctx, tenantA, client.ID)
+		s.Require().NoError(err)
+		s.Equal(client.ID, found.ID)
 
-	_, err := store.FindByOAuthClientID(ctx, "nonexistent")
-	require.ErrorIs(t, err, sentinel.ErrNotFound)
-}
+		// Should NOT find with wrong tenant
+		_, err = s.store.FindByTenantAndID(s.ctx, tenantB, client.ID)
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
+	})
 
-func TestCountByTenant_OnlyCountsMatchingTenant(t *testing.T) {
-	store := NewInMemory()
-	ctx := context.Background()
+	s.Run("count only includes matching tenant", func() {
+		tenantA := id.TenantID(uuid.New())
+		tenantB := id.TenantID(uuid.New())
 
-	tenantA := id.TenantID(uuid.New())
-	tenantB := id.TenantID(uuid.New())
-
-	// Create 2 clients for tenant A
-	for i := 0; i < 2; i++ {
-		client := &models.Client{
-			ID:            id.ClientID(uuid.New()),
-			TenantID:      tenantA,
-			Name:          "Client A",
-			OAuthClientID: uuid.NewString(),
-			Status:        "active",
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
+		// Create 2 clients for tenant A
+		for i := 0; i < 2; i++ {
+			s.Require().NoError(s.store.Create(s.ctx, s.newClient(tenantA)))
 		}
-		require.NoError(t, store.Create(ctx, client))
-	}
 
-	// Create 3 clients for tenant B
-	for i := 0; i < 3; i++ {
-		client := &models.Client{
-			ID:            id.ClientID(uuid.New()),
-			TenantID:      tenantB,
-			Name:          "Client B",
-			OAuthClientID: uuid.NewString(),
-			Status:        "active",
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
+		// Create 3 clients for tenant B
+		for i := 0; i < 3; i++ {
+			s.Require().NoError(s.store.Create(s.ctx, s.newClient(tenantB)))
 		}
-		require.NoError(t, store.Create(ctx, client))
-	}
 
-	countA, err := store.CountByTenant(ctx, tenantA)
-	require.NoError(t, err)
-	assert.Equal(t, 2, countA)
+		countA, err := s.store.CountByTenant(s.ctx, tenantA)
+		s.Require().NoError(err)
+		s.Equal(2, countA)
 
-	countB, err := store.CountByTenant(ctx, tenantB)
-	require.NoError(t, err)
-	assert.Equal(t, 3, countB)
+		countB, err := s.store.CountByTenant(s.ctx, tenantB)
+		s.Require().NoError(err)
+		s.Equal(3, countB)
+	})
 }
