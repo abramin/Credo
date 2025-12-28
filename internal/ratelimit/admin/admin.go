@@ -10,6 +10,8 @@ import (
 	id "credo/pkg/domain"
 	"credo/pkg/platform/audit"
 	"credo/pkg/platform/middleware/requesttime"
+
+	"github.com/google/uuid"
 )
 
 // AllowlistStore is the subset of ports.AllowlistStore needed by admin (excludes IsAllowlisted).
@@ -81,7 +83,7 @@ func (s *Service) AddToAllowlist(ctx context.Context, req *models.AddAllowlistRe
 		return nil, fmt.Errorf("invalid add allowlist request: %w", err)
 	}
 
-	entry, err := models.NewAllowlistEntry(req.Type, req.Identifier, req.Reason, adminUserID, req.ExpiresAt, requesttime.Now(ctx))
+	entry, err := models.NewAllowlistEntry(uuid.NewString(), req.Type, req.Identifier, req.Reason, adminUserID, req.ExpiresAt, requesttime.Now(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create allowlist entry: %w", err)
 	}
