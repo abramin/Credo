@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"credo/internal/auth/models"
+	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/sentinel"
 )
 
 // tokenFlowTxParams captures the inputs for token transaction execution.
@@ -82,4 +85,25 @@ func (s *Service) executeTokenFlowTx(
 	return &tokenFlowTxResult{
 		Session: session,
 	}, nil
+}
+
+// revokeSessionOnReplay handles replay attack detection by revoking the associated session.
+// Returns true if a replay attack was detected and the session was revoked.
+// This is called when a token/code consumption fails with ErrAlreadyUsed.
+func revokeSessionOnReplay(
+	ctx context.Context,
+	stores txAuthStores,
+	err error,
+	sessionID id.SessionID,
+	now time.Time,
+) error {
+	if !errors.Is(err, sentinel.ErrAlreadyUsed) {
+		return nil
+	}
+
+	// Replay attack detected: revoke the session created with this token/code
+	if revokeErr := stores.Sessions.RevokeSessionIfActive(ctx, sessionID, now); revokeErr != nil {
+		return dErrors.Wrap(revokeErr, dErrors.CodeInternal, "failed to revoke session on replay attack")
+	}
+	return nil
 }

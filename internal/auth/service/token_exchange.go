@@ -2,15 +2,12 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"credo/internal/auth/models"
-	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	"credo/pkg/platform/middleware/requesttime"
-	"credo/pkg/platform/sentinel"
 )
 
 // exchangeAuthorizationCode handles the token exchange flow for authorization codes.
@@ -100,10 +97,9 @@ func (s *Service) consumeCodeWithReplayProtection(
 ) (*models.AuthorizationCodeRecord, error) {
 	codeRecord, err := stores.Codes.ConsumeAuthCode(ctx, code, redirectURI, now)
 	if err != nil {
-		if errors.Is(err, sentinel.ErrAlreadyUsed) && codeRecord != nil {
-			// Replay attack detected: revoke the session created with this code
-			if revokeErr := stores.Sessions.RevokeSessionIfActive(ctx, codeRecord.SessionID, now); revokeErr != nil {
-				return nil, dErrors.Wrap(revokeErr, dErrors.CodeInternal, "failed to revoke session for used code")
+		if codeRecord != nil {
+			if revokeErr := revokeSessionOnReplay(ctx, stores, err, codeRecord.SessionID, now); revokeErr != nil {
+				return nil, revokeErr
 			}
 		}
 		return nil, fmt.Errorf("consume authorization code: %w", err)

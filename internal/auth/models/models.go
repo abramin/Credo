@@ -52,8 +52,8 @@ type Session struct {
 
 	// Lifecycle timestamps
 	CreatedAt  time.Time
-	ExpiresAt  time.Time  // Session expiry (30+ days)
-	LastSeenAt time.Time  // Last activity timestamp
+	ExpiresAt  time.Time // Session expiry (30+ days)
+	LastSeenAt time.Time // Last activity timestamp
 	RevokedAt  *time.Time
 }
 

@@ -304,8 +304,7 @@ func (h *Handler) HandleLogoutAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse except_current query param (default: true)
-	exceptCurrent := r.URL.Query().Get("except_current") != "false"
+	exceptCurrent := parseExceptCurrentFlag(r)
 
 	res, err := h.auth.LogoutAll(ctx, userID, currentSessionID, exceptCurrent)
 	if err != nil {
@@ -336,6 +335,12 @@ func (h *Handler) HandleLogoutAll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// parseExceptCurrentFlag parses the except_current query parameter.
+// Returns true (exclude current session) unless explicitly set to "false".
+func parseExceptCurrentFlag(r *http.Request) bool {
+	return r.URL.Query().Get("except_current") != "false"
+}
+
 // rateLimitResult holds the outcome of a rate limit check.
 type rateLimitResult struct {
 	Allowed    bool
@@ -344,12 +349,13 @@ type rateLimitResult struct {
 
 // checkRateLimit checks if a request is within rate limits.
 // Returns allowed=true on success or if rate limiter is unavailable (fail-open).
-func (h *Handler) checkRateLimit(ctx context.Context, requestID, key1, key2, endpoint string) rateLimitResult {
+// identifier is typically a user ID or email; clientIP is the request source IP.
+func (h *Handler) checkRateLimit(ctx context.Context, requestID, identifier, clientIP, endpoint string) rateLimitResult {
 	if h.ratelimit == nil {
 		return rateLimitResult{Allowed: true}
 	}
 
-	result, err := h.ratelimit.CheckAuthRateLimit(ctx, key1, key2)
+	result, err := h.ratelimit.CheckAuthRateLimit(ctx, identifier, clientIP)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "failed to check rate limit",
 			"error", err,
