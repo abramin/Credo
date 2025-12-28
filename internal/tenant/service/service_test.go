@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/crypto/bcrypt"
 
@@ -41,7 +39,7 @@ func TestServiceSuite(t *testing.T) {
 
 func (s *ServiceSuite) createTestTenant(name string) *tenant.Tenant {
 	t, err := s.service.CreateTenant(context.Background(), name)
-	require.NoError(s.T(), err)
+	s.Require().NoError(err)
 	return t
 }
 
@@ -53,7 +51,7 @@ func (s *ServiceSuite) createTestClient(tenantID id.TenantID) *tenant.Client {
 		AllowedGrants: []tenant.GrantType{tenant.GrantTypeAuthorizationCode},
 		AllowedScopes: []string{"openid"},
 	})
-	require.NoError(s.T(), err)
+	s.Require().NoError(err)
 	return client
 }
 
@@ -64,33 +62,33 @@ func (s *ServiceSuite) createTestClient(tenantID id.TenantID) *tenant.Client {
 // these tests verify the specific error CODE (CodeInvariantViolation) and the
 // exact boundary (129 chars) that cannot be easily asserted in Gherkin.
 func (s *ServiceSuite) TestCreateTenantValidation() {
-	s.T().Run("validates empty name", func(t *testing.T) {
+	s.Run("validates empty name", func() {
 		_, err := s.service.CreateTenant(context.Background(), "")
-		require.Error(s.T(), err)
-		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeInvariantViolation))
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeInvariantViolation))
 	})
 
-	s.T().Run("validates name length", func(t *testing.T) {
+	s.Run("validates name length", func() {
 		longName := make([]byte, 129)
 		_, err := s.service.CreateTenant(context.Background(), string(longName))
-		require.Error(s.T(), err)
-		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeInvariantViolation))
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeInvariantViolation))
 	})
 }
 
 func (s *ServiceSuite) TestCreateTenantSuccess() {
 	tenantObj, err := s.service.CreateTenant(context.Background(), "Acme")
-	require.NoError(s.T(), err)
-	assert.NotEqual(s.T(), uuid.Nil, tenantObj.ID)
-	assert.Equal(s.T(), "Acme", tenantObj.Name)
+	s.Require().NoError(err)
+	s.NotEqual(uuid.Nil, tenantObj.ID)
+	s.Equal("Acme", tenantObj.Name)
 }
 
 func (s *ServiceSuite) TestCreateTenantEnforcesUniqueName() {
 	_, err := s.service.CreateTenant(context.Background(), "UniqueTest")
-	require.NoError(s.T(), err)
+	s.Require().NoError(err)
 
 	_, err = s.service.CreateTenant(context.Background(), "uniquetest")
-	require.Error(s.T(), err, "expected conflict for duplicate name")
+	s.Require().Error(err, "expected conflict for duplicate name")
 }
 
 // Client Tests
@@ -107,13 +105,13 @@ func (s *ServiceSuite) TestCreateAndGetClient() {
 	}
 
 	created, secret, err := s.service.CreateClient(context.Background(), cmd)
-	require.NoError(s.T(), err)
-	assert.NotEmpty(s.T(), secret, "expected client secret for confidential client")
-	assert.NotEqual(s.T(), uuid.Nil, created.ID)
+	s.Require().NoError(err)
+	s.NotEmpty(secret, "expected client secret for confidential client")
+	s.NotEqual(uuid.Nil, created.ID)
 
 	fetched, err := s.service.GetClient(context.Background(), created.ID)
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), cmd.Name, fetched.Name)
+	s.Require().NoError(err)
+	s.Equal(cmd.Name, fetched.Name)
 }
 
 func (s *ServiceSuite) TestUpdateClient() {
@@ -128,9 +126,9 @@ func (s *ServiceSuite) TestUpdateClient() {
 	cmd.SetRedirectURIs([]string{"https://app.example.com/new"})
 
 	updated, secret, err := s.service.UpdateClient(context.Background(), created.ID, cmd)
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), newName, updated.Name)
-	assert.NotEmpty(s.T(), secret, "expected rotated secret to be returned")
+	s.Require().NoError(err)
+	s.Equal(newName, updated.Name)
+	s.NotEmpty(secret, "expected rotated secret to be returned")
 }
 
 func (s *ServiceSuite) TestGetTenantCounts() {
@@ -138,23 +136,23 @@ func (s *ServiceSuite) TestGetTenantCounts() {
 	s.createTestClient(tenantRecord.ID)
 
 	details, err := s.service.GetTenant(context.Background(), tenantRecord.ID)
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), 1, details.ClientCount)
-	assert.Equal(s.T(), tenantRecord.ID, details.ID)
+	s.Require().NoError(err)
+	s.Equal(1, details.ClientCount)
+	s.Equal(tenantRecord.ID, details.ID)
 }
 
 func (s *ServiceSuite) TestValidationErrors() {
-	s.T().Run("create client with missing fields", func(t *testing.T) {
+	s.Run("create client with missing fields", func() {
 		_, _, err := s.service.CreateClient(context.Background(), &CreateClientCommand{TenantID: id.TenantID(uuid.New())})
-		require.Error(s.T(), err)
-		assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeValidation) || dErrors.HasCode(err, dErrors.CodeNotFound))
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeValidation) || dErrors.HasCode(err, dErrors.CodeNotFound))
 	})
 
-	s.T().Run("update client with invalid redirect uri", func(t *testing.T) {
+	s.Run("update client with invalid redirect uri", func() {
 		cmd := &UpdateClientCommand{}
 		cmd.SetRedirectURIs([]string{"invalid"})
 		_, _, err := s.service.UpdateClient(context.Background(), id.ClientID(uuid.New()), cmd)
-		require.Error(s.T(), err)
+		s.Require().Error(err)
 	})
 }
 
@@ -171,17 +169,20 @@ func (s *ServiceSuite) TestCreateClientHashesSecret() {
 		AllowedGrants: []tenant.GrantType{tenant.GrantTypeAuthorizationCode},
 		AllowedScopes: []string{"openid"},
 	})
-	require.NoError(s.T(), err)
-	assert.NotEmpty(s.T(), secret, "expected secret for confidential client")
+	s.Require().NoError(err)
+	s.NotEmpty(secret, "expected secret for confidential client")
 
 	stored, err := s.clientStore.FindByID(context.Background(), client.ID)
-	require.NoError(s.T(), err)
-	assert.NotEmpty(s.T(), stored.ClientSecretHash, "expected stored client secret hash")
+	s.Require().NoError(err)
+	s.NotEmpty(stored.ClientSecretHash, "expected stored client secret hash")
 
 	err = bcrypt.CompareHashAndPassword([]byte(stored.ClientSecretHash), []byte(secret))
-	assert.NoError(s.T(), err, "stored hash should match client secret")
+	s.NoError(err, "stored hash should match client secret")
 }
 
+// TestPublicClientValidation verifies the exact error code (CodeValidation) returned
+// for public client with client_credentials grant. Feature files can only assert HTTP
+// status codes, not the specific domain error codes.
 func (s *ServiceSuite) TestPublicClientValidation() {
 	tenantRecord := s.createTestTenant("Acme")
 
@@ -193,8 +194,8 @@ func (s *ServiceSuite) TestPublicClientValidation() {
 		AllowedScopes: []string{"openid"},
 		Public:        true,
 	})
-	require.Error(s.T(), err)
-	assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeValidation), "expected validation error for public client with client_credentials")
+	s.Require().Error(err)
+	s.True(dErrors.HasCode(err, dErrors.CodeValidation), "expected validation error for public client with client_credentials")
 }
 
 func (s *ServiceSuite) TestRedirectURIRequiresHost() {
@@ -207,8 +208,8 @@ func (s *ServiceSuite) TestRedirectURIRequiresHost() {
 		AllowedGrants: []tenant.GrantType{tenant.GrantTypeAuthorizationCode},
 		AllowedScopes: []string{"openid"},
 	})
-	require.Error(s.T(), err)
-	assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeValidation), "expected validation error for redirect without host")
+	s.Require().Error(err)
+	s.True(dErrors.HasCode(err, dErrors.CodeValidation), "expected validation error for redirect without host")
 }
 
 // TestTenantScopedClientAccess verifies the multi-tenancy security invariant:
@@ -222,8 +223,8 @@ func (s *ServiceSuite) TestTenantScopedClientAccess() {
 	created := s.createTestClient(t1.ID)
 
 	_, err := s.service.GetClientForTenant(context.Background(), t2.ID, created.ID)
-	require.Error(s.T(), err)
-	assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeNotFound), "expected not found when tenant mismatched")
+	s.Require().Error(err)
+	s.True(dErrors.HasCode(err, dErrors.CodeNotFound), "expected not found when tenant mismatched")
 }
 
 func (s *ServiceSuite) TestResolveClient() {
@@ -231,9 +232,9 @@ func (s *ServiceSuite) TestResolveClient() {
 	created := s.createTestClient(tenantRecord.ID)
 
 	client, tenantObj, err := s.service.ResolveClient(context.Background(), created.OAuthClientID)
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), tenantRecord.ID, tenantObj.ID)
-	assert.Equal(s.T(), created.ID, client.ID)
+	s.Require().NoError(err)
+	s.Equal(tenantRecord.ID, tenantObj.ID)
+	s.Equal(created.ID, client.ID)
 }
 
 func (s *ServiceSuite) TestCreateClientWithValidInput() {
@@ -246,13 +247,13 @@ func (s *ServiceSuite) TestCreateClientWithValidInput() {
 		AllowedGrants: []tenant.GrantType{tenant.GrantTypeAuthorizationCode},
 		AllowedScopes: []string{"openid"},
 	})
-	require.NoError(s.T(), err)
-	assert.Equal(s.T(), "Web", client.Name)
-	assert.Len(s.T(), client.RedirectURIs, 1)
-	assert.Equal(s.T(), "https://app.example.com/callback", client.RedirectURIs[0])
-	assert.Len(s.T(), client.AllowedGrants, 1)
-	assert.Equal(s.T(), "authorization_code", client.AllowedGrants[0])
-	assert.Len(s.T(), client.AllowedScopes, 1)
+	s.Require().NoError(err)
+	s.Equal("Web", client.Name)
+	s.Len(client.RedirectURIs, 1)
+	s.Equal("https://app.example.com/callback", client.RedirectURIs[0])
+	s.Len(client.AllowedGrants, 1)
+	s.Equal("authorization_code", client.AllowedGrants[0])
+	s.Len(client.AllowedScopes, 1)
 }
 
 // TestUpdateClientRejectsClientCredentialsForPublicClient verifies the security invariant
@@ -270,21 +271,22 @@ func (s *ServiceSuite) TestUpdateClientRejectsClientCredentialsForPublicClient()
 		AllowedScopes: []string{"openid"},
 		Public:        true,
 	})
-	require.NoError(s.T(), err)
-	assert.False(s.T(), publicClient.IsConfidential(), "expected public client")
+	s.Require().NoError(err)
+	s.False(publicClient.IsConfidential(), "expected public client")
 
 	// Attempt to update with client_credentials grant - should fail
 	cmd := &UpdateClientCommand{}
 	cmd.SetAllowedGrants([]tenant.GrantType{tenant.GrantTypeClientCredentials})
 	_, _, err = s.service.UpdateClient(context.Background(), publicClient.ID, cmd)
-	require.Error(s.T(), err)
-	assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeValidation),
+	s.Require().Error(err)
+	s.True(dErrors.HasCode(err, dErrors.CodeValidation),
 		"expected validation error when adding client_credentials to public client")
 }
 
 // TestRedirectURIRejectsLocalhostSubdomain verifies that redirect URIs with
 // localhost-like subdomains (e.g., localhost.attacker.com) are rejected.
-// This prevents DNS rebinding attacks.
+// This prevents DNS rebinding attacks. Feature files test HTTP 400, but this
+// verifies the specific CodeValidation error code.
 func (s *ServiceSuite) TestRedirectURIRejectsLocalhostSubdomain() {
 	tenantRecord := s.createTestTenant("Acme")
 
@@ -295,8 +297,8 @@ func (s *ServiceSuite) TestRedirectURIRejectsLocalhostSubdomain() {
 		AllowedGrants: []tenant.GrantType{tenant.GrantTypeAuthorizationCode},
 		AllowedScopes: []string{"openid"},
 	})
-	require.Error(s.T(), err)
-	assert.True(s.T(), dErrors.HasCode(err, dErrors.CodeValidation),
+	s.Require().Error(err)
+	s.True(dErrors.HasCode(err, dErrors.CodeValidation),
 		"expected validation error for localhost subdomain bypass attempt")
 }
 
@@ -304,7 +306,7 @@ func (s *ServiceSuite) TestRedirectURIRejectsLocalhostSubdomain() {
 func (s *ServiceSuite) TestRedirectURIAllowsValidLocalhost() {
 	tenantRecord := s.createTestTenant("Acme")
 
-	s.T().Run("localhost without port", func(t *testing.T) {
+	s.Run("localhost without port", func() {
 		_, _, err := s.service.CreateClient(context.Background(), &CreateClientCommand{
 			TenantID:      tenantRecord.ID,
 			Name:          "Local Dev",
@@ -312,10 +314,10 @@ func (s *ServiceSuite) TestRedirectURIAllowsValidLocalhost() {
 			AllowedGrants: []tenant.GrantType{tenant.GrantTypeAuthorizationCode},
 			AllowedScopes: []string{"openid"},
 		})
-		require.NoError(s.T(), err)
+		s.Require().NoError(err)
 	})
 
-	s.T().Run("localhost with port", func(t *testing.T) {
+	s.Run("localhost with port", func() {
 		_, _, err := s.service.CreateClient(context.Background(), &CreateClientCommand{
 			TenantID:      tenantRecord.ID,
 			Name:          "Local Dev 2",
@@ -323,6 +325,6 @@ func (s *ServiceSuite) TestRedirectURIAllowsValidLocalhost() {
 			AllowedGrants: []tenant.GrantType{tenant.GrantTypeAuthorizationCode},
 			AllowedScopes: []string{"openid"},
 		})
-		require.NoError(s.T(), err)
+		s.Require().NoError(err)
 	})
 }
