@@ -15,7 +15,6 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
-	auth "credo/pkg/platform/middleware/auth"
 	request "credo/pkg/platform/middleware/request"
 	"credo/pkg/platform/middleware/requesttime"
 )
@@ -267,11 +266,5 @@ func formatActionMessage(template string, count int) string {
 // requireUserID retrieves the typed user ID from auth context.
 // Returns a domain error suitable for HTTP response on failure.
 func (h *Handler) requireUserID(ctx context.Context, requestID string) (id.UserID, error) {
-	userID := auth.GetUserID(ctx)
-	if userID.IsNil() {
-		h.logger.ErrorContext(ctx, "userID missing from context despite auth middleware",
-			"request_id", requestID)
-		return id.UserID{}, dErrors.New(dErrors.CodeInternal, "authentication context error")
-	}
-	return userID, nil
+	return httputil.RequireUserID(ctx, h.logger, requestID)
 }

@@ -27,24 +27,7 @@ func (r *GrantRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
-	// Phase 1: Size validation
-	if len(r.Purposes) > validation.MaxPurposes {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many purposes: max %d allowed", validation.MaxPurposes))
-	}
-	// Phase 2: Required fields
-	if len(r.Purposes) == 0 {
-		return dErrors.New(dErrors.CodeValidation, "purposes are required")
-	}
-	// Phase 3: Syntax validation
-	for _, p := range r.Purposes {
-		if p == "" {
-			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
-		}
-		if _, err := models.ParsePurpose(p); err != nil {
-			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
-		}
-	}
-	return nil
+	return validatePurposes(r.Purposes)
 }
 
 // ToPurposes converts validated request purposes into domain purposes.
@@ -73,24 +56,7 @@ func (r *RevokeRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
-	// Phase 1: Size validation
-	if len(r.Purposes) > validation.MaxPurposes {
-		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many purposes: max %d allowed", validation.MaxPurposes))
-	}
-	// Phase 2: Required fields
-	if len(r.Purposes) == 0 {
-		return dErrors.New(dErrors.CodeValidation, "purposes are required")
-	}
-	// Phase 3: Syntax validation
-	for _, p := range r.Purposes {
-		if p == "" {
-			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
-		}
-		if _, err := models.ParsePurpose(p); err != nil {
-			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
-		}
-	}
-	return nil
+	return validatePurposes(r.Purposes)
 }
 
 // ToPurposes converts validated request purposes into domain purposes.
@@ -99,6 +65,29 @@ func (r *RevokeRequest) ToPurposes() ([]models.Purpose, error) {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
 	return toDomainPurposes(r.Purposes)
+}
+
+// validatePurposes validates a list of purpose strings.
+// Enforces size limits, required fields, and syntax validation.
+func validatePurposes(purposes []string) error {
+	// Phase 1: Size validation
+	if len(purposes) > validation.MaxPurposes {
+		return dErrors.New(dErrors.CodeValidation, fmt.Sprintf("too many purposes: max %d allowed", validation.MaxPurposes))
+	}
+	// Phase 2: Required fields
+	if len(purposes) == 0 {
+		return dErrors.New(dErrors.CodeValidation, "purposes are required")
+	}
+	// Phase 3: Syntax validation
+	for _, p := range purposes {
+		if p == "" {
+			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
+		}
+		if _, err := models.ParsePurpose(p); err != nil {
+			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
+		}
+	}
+	return nil
 }
 
 func toDomainPurposes(purposes []string) ([]models.Purpose, error) {
