@@ -3,7 +3,6 @@ package refreshtoken
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -12,21 +11,6 @@ import (
 	"credo/pkg/platform/sentinel"
 )
 
-// translateRefreshTokenError converts domain errors from ValidateForConsume to sentinel errors.
-func translateRefreshTokenError(err error) error {
-	if err == nil {
-		return nil
-	}
-	msg := err.Error()
-	switch {
-	case strings.Contains(msg, "expired"):
-		return fmt.Errorf("%s: %w", msg, sentinel.ErrExpired)
-	case strings.Contains(msg, "already used"):
-		return fmt.Errorf("%s: %w", msg, sentinel.ErrAlreadyUsed)
-	default:
-		return fmt.Errorf("%s: %w", msg, sentinel.ErrInvalidState)
-	}
-}
 
 // Error Contract:
 // All store methods follow this error pattern:
@@ -101,29 +85,6 @@ func (s *InMemoryRefreshTokenStore) DeleteBySessionID(_ context.Context, session
 	return nil
 }
 
-// ConsumeRefreshToken marks the refresh token as used if valid.
-// It validates using domain logic, then marks the token as used via domain method.
-// Returns the token record and an error if any validation fails.
-// Errors are returned as sentinel errors per store boundary contract.
-// IMPORTANT: Returns the record even on ErrAlreadyUsed to enable replay detection.
-func (s *InMemoryRefreshTokenStore) ConsumeRefreshToken(_ context.Context, token string, now time.Time) (*models.RefreshTokenRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record, ok := s.tokens[token]
-	if !ok {
-		return nil, fmt.Errorf("refresh token not found: %w", sentinel.ErrNotFound)
-	}
-
-	// Validate using domain method, translate to sentinel errors per store contract
-	if err := record.ValidateForConsume(now); err != nil {
-		return record, translateRefreshTokenError(err)
-	}
-
-	// Mark as used via domain method (also records LastRefreshedAt)
-	record.MarkUsed(now)
-	return record, nil
-}
 
 // DeleteExpiredTokens removes all refresh tokens that have expired as of the given time.
 // The time parameter is injected for testability (no hidden time.Now() calls).
@@ -151,4 +112,26 @@ func (s *InMemoryRefreshTokenStore) DeleteUsedTokens(ctx context.Context) (int, 
 		}
 	}
 	return deletedCount, nil
+}
+
+// Execute atomically validates and mutates a refresh token under lock.
+// The validate callback runs first; if it returns an error (typically a domain error),
+// that error is returned as-is without translation, along with the record (for replay detection).
+// The mutate callback applies changes to the record after validation passes.
+// Returns sentinel.ErrNotFound if the token doesn't exist.
+func (s *InMemoryRefreshTokenStore) Execute(_ context.Context, token string, validate func(*models.RefreshTokenRecord) error, mutate func(*models.RefreshTokenRecord)) (*models.RefreshTokenRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.tokens[token]
+	if !ok {
+		return nil, sentinel.ErrNotFound
+	}
+
+	if err := validate(record); err != nil {
+		return record, err // Domain error from callback - return record for replay detection
+	}
+
+	mutate(record)
+	return record, nil
 }

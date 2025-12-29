@@ -81,15 +81,25 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientID).Return(mockClient, mockTenant, nil)
 		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
 		// 4. Inside transaction: consume refresh token, re-find session, generate tokens
-		s.mockRefreshStore.EXPECT().ConsumeRefreshToken(gomock.Any(), refreshTokenString, gomock.Any()).Return(&refreshRec, nil)
+		s.mockRefreshStore.EXPECT().Execute(gomock.Any(), refreshTokenString, gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, token string, validate func(*models.RefreshTokenRecord) error, mutate func(*models.RefreshTokenRecord)) (*models.RefreshTokenRecord, error) {
+				if err := validate(&refreshRec); err != nil {
+					return &refreshRec, err
+				}
+				mutate(&refreshRec)
+				return &refreshRec, nil
+			})
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		accessToken, accessTokenJTI, idToken, refreshToken := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
-		// Inside RunInTx: Advance session, create new token
-		s.mockSessionStore.EXPECT().AdvanceLastRefreshed(gomock.Any(), sess.ID, clientUUID, gomock.Any(), accessTokenJTI, sess.DeviceID, sess.DeviceFingerprintHash).DoAndReturn(
-			func(ctx context.Context, sessionID id.SessionID, clientID id.ClientID, ts time.Time, jti string, deviceID string, fingerprint string) (*models.Session, error) {
+		accessToken, _, idToken, refreshToken := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
+		// Inside RunInTx: Execute session validation and mutation
+		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sess.ID, gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, sessionID id.SessionID, validate func(*models.Session) error, mutate func(*models.Session)) (*models.Session, error) {
 				s.Require().Equal(sess.ID, sessionID)
-				s.Require().False(ts.IsZero())
-				s.Require().Equal(accessTokenJTI, jti)
+				// Execute the callbacks to verify they work
+				if err := validate(&sess); err != nil {
+					return nil, err
+				}
+				mutate(&sess)
 				return &sess, nil
 			})
 		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
@@ -206,12 +216,23 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientID).Return(mockClient, mockTenant, nil)
 		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
 		// Inside transaction
-		s.mockRefreshStore.EXPECT().ConsumeRefreshToken(gomock.Any(), refreshTokenString, gomock.Any()).Return(&refreshRec, nil)
+		s.mockRefreshStore.EXPECT().Execute(gomock.Any(), refreshTokenString, gomock.Any(), gomock.Any()).DoAndReturn(
+			func(ctx context.Context, token string, validate func(*models.RefreshTokenRecord) error, mutate func(*models.RefreshTokenRecord)) (*models.RefreshTokenRecord, error) {
+				if err := validate(&refreshRec); err != nil {
+					return &refreshRec, err
+				}
+				mutate(&refreshRec)
+				return &refreshRec, nil
+			})
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		_, accessTokenJTI, _, _ := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
-		s.mockSessionStore.EXPECT().AdvanceLastRefreshed(gomock.Any(), sess.ID, clientUUID, gomock.Any(), accessTokenJTI, sess.DeviceID, sess.DeviceFingerprintHash).
-			DoAndReturn(func(ctx context.Context, sessionID id.SessionID, client id.ClientID, ts time.Time, jti string, deviceID string, fingerprint string) (*models.Session, error) {
-				s.Require().Equal(sess.DeviceID, deviceID)
+		s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
+		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sess.ID, gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, sessionID id.SessionID, validate func(*models.Session) error, mutate func(*models.Session)) (*models.Session, error) {
+				if err := validate(&sess); err != nil {
+					return nil, err
+				}
+				mutate(&sess)
+				s.Require().Equal("session-device", sess.DeviceID)
 				return &sess, nil
 			})
 		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)

@@ -72,7 +72,7 @@ func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_DeleteBySession()
 	s.Require().ErrorIs(err, sentinel.ErrNotFound)
 }
 
-func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_ConsumeMarksUsedAndTouches() {
+func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_ExecuteMarksUsedAndTouches() {
 	sessionID := id.SessionID(uuid.New())
 	now := time.Now()
 	record := &models.RefreshTokenRecord{
@@ -87,15 +87,32 @@ func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_ConsumeMarksUsedA
 	s.Require().NoError(s.store.Create(context.Background(), record))
 
 	consumeAt := now.Add(10 * time.Second)
-	consumed, err := s.store.ConsumeRefreshToken(context.Background(), record.Token, consumeAt)
+	consumed, err := s.store.Execute(context.Background(), record.Token,
+		func(r *models.RefreshTokenRecord) error {
+			return r.ValidateForConsume(consumeAt)
+		},
+		func(r *models.RefreshTokenRecord) {
+			r.MarkUsed(consumeAt)
+		},
+	)
 	s.Require().NoError(err)
 
 	s.True(consumed.Used)
 	s.Require().NotNil(consumed.LastRefreshedAt)
 	s.Equal(consumeAt, *consumed.LastRefreshedAt)
 
-	_, err = s.store.ConsumeRefreshToken(context.Background(), record.Token, consumeAt)
-	s.Require().ErrorIs(err, sentinel.ErrAlreadyUsed)
+	// Already used - returns record for replay detection
+	consumed, err = s.store.Execute(context.Background(), record.Token,
+		func(r *models.RefreshTokenRecord) error {
+			return r.ValidateForConsume(consumeAt)
+		},
+		func(r *models.RefreshTokenRecord) {
+			r.MarkUsed(consumeAt)
+		},
+	)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "already used")
+	s.NotNil(consumed) // Record returned for replay detection
 }
 
 func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_NewestActiveSelection() {
@@ -127,14 +144,21 @@ func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_NewestActiveSelec
 	s.Equal(newer, found)
 
 	// Once the newest is used, it should return the remaining active token.
-	_, err = s.store.ConsumeRefreshToken(context.Background(), newer.Token, now)
+	_, err = s.store.Execute(context.Background(), newer.Token,
+		func(r *models.RefreshTokenRecord) error {
+			return r.ValidateForConsume(now)
+		},
+		func(r *models.RefreshTokenRecord) {
+			r.MarkUsed(now)
+		},
+	)
 	s.Require().NoError(err)
 	found, err = s.store.FindBySessionID(context.Background(), sessionID, now)
 	s.Require().NoError(err)
 	s.Equal(old, found)
 }
 
-func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_RejectsExpired() {
+func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_ExecuteRejectsExpired() {
 	now := time.Now()
 	record := &models.RefreshTokenRecord{
 		ID:        uuid.New(),
@@ -146,8 +170,16 @@ func (s *InMemoryRefreshTokenStoreSuite) TestRefreshTokenStore_RejectsExpired() 
 	}
 	s.Require().NoError(s.store.Create(context.Background(), record))
 
-	_, err := s.store.ConsumeRefreshToken(context.Background(), record.Token, now)
-	s.Require().ErrorIs(err, sentinel.ErrExpired)
+	_, err := s.store.Execute(context.Background(), record.Token,
+		func(r *models.RefreshTokenRecord) error {
+			return r.ValidateForConsume(now)
+		},
+		func(r *models.RefreshTokenRecord) {
+			r.MarkUsed(now)
+		},
+	)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "expired")
 }
 
 func TestInMemoryRefreshTokenStoreSuite(t *testing.T) {

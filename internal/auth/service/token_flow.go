@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"credo/internal/auth/models"
@@ -46,34 +47,32 @@ func (s *Service) executeTokenFlowTx(
 	// Determine if session should be activated (code exchange only)
 	activate := params.ActivateOnFirstUse && params.Session.IsPendingConsent()
 
-	// Advance session state based on flow type
-	var session *models.Session
-	var err error
 	clientID := params.TokenContext.Client.ID
 	artifacts := params.Artifacts
 
-	if params.ActivateOnFirstUse {
-		session, err = stores.Sessions.AdvanceLastSeen(
-			ctx,
-			params.Session.ID,
-			clientID,
-			params.Now,
-			artifacts.accessTokenJTI,
-			activate,
-			deviceState.DeviceID,
-			deviceState.DeviceFingerprintHash,
-		)
-	} else {
-		session, err = stores.Sessions.AdvanceLastRefreshed(
-			ctx,
-			params.Session.ID,
-			clientID,
-			params.Now,
-			artifacts.accessTokenJTI,
-			deviceState.DeviceID,
-			deviceState.DeviceFingerprintHash,
-		)
-	}
+	// Execute atomic session validation and mutation
+	// Domain errors from ValidateForAdvance pass through unchanged (no sentinel translation)
+	session, err := stores.Sessions.Execute(ctx, params.Session.ID,
+		// Validation callback - returns domain errors
+		func(sess *models.Session) error {
+			// allowPending=true for code exchange (allows pending_consent status)
+			// allowPending=false for refresh (requires active status)
+			return sess.ValidateForAdvance(clientID, params.Now, params.ActivateOnFirstUse)
+		},
+		// Mutation callback - applies state changes
+		func(sess *models.Session) {
+			if params.ActivateOnFirstUse {
+				sess.RecordActivity(params.Now)
+				if activate {
+					sess.Activate()
+				}
+			} else {
+				sess.RecordRefresh(params.Now)
+			}
+			sess.ApplyTokenJTI(artifacts.accessTokenJTI)
+			sess.ApplyDeviceInfo(deviceState.DeviceID, deviceState.DeviceFingerprintHash)
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -88,8 +87,8 @@ func (s *Service) executeTokenFlowTx(
 }
 
 // revokeSessionOnReplay handles replay attack detection by revoking the associated session.
-// Returns true if a replay attack was detected and the session was revoked.
-// This is called when a token/code consumption fails with ErrAlreadyUsed.
+// Returns nil if no replay detected. Revokes the session and returns nil on successful revocation.
+// This is called when a token/code consumption fails with an "already used" error.
 func revokeSessionOnReplay(
 	ctx context.Context,
 	stores txAuthStores,
@@ -97,7 +96,7 @@ func revokeSessionOnReplay(
 	sessionID id.SessionID,
 	now time.Time,
 ) error {
-	if !errors.Is(err, sentinel.ErrAlreadyUsed) {
+	if !isAlreadyUsedError(err) {
 		return nil
 	}
 
@@ -106,4 +105,19 @@ func revokeSessionOnReplay(
 		return dErrors.Wrap(revokeErr, dErrors.CodeInternal, "failed to revoke session")
 	}
 	return nil
+}
+
+// isAlreadyUsedError checks if the error indicates a token/code was already used.
+// Supports both sentinel errors (legacy) and domain errors (callback pattern).
+func isAlreadyUsedError(err error) bool {
+	// Legacy sentinel error
+	if errors.Is(err, sentinel.ErrAlreadyUsed) {
+		return true
+	}
+	// Domain error with "already used" message
+	var de *dErrors.Error
+	if errors.As(err, &de) {
+		return strings.Contains(de.Message, "already used")
+	}
+	return false
 }

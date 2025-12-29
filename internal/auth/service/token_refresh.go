@@ -98,7 +98,15 @@ func (s *Service) consumeRefreshTokenWithReplayProtection(
 	token string,
 	now time.Time,
 ) (*models.RefreshTokenRecord, error) {
-	refreshRecord, err := stores.RefreshTokens.ConsumeRefreshToken(ctx, token, now)
+	// Use Execute pattern: domain errors pass through unchanged
+	refreshRecord, err := stores.RefreshTokens.Execute(ctx, token,
+		func(rec *models.RefreshTokenRecord) error {
+			return rec.ValidateForConsume(now)
+		},
+		func(rec *models.RefreshTokenRecord) {
+			rec.MarkUsed(now)
+		},
+	)
 	if err != nil {
 		if refreshRecord != nil {
 			if revokeErr := revokeSessionOnReplay(ctx, stores, err, refreshRecord.SessionID, now); revokeErr != nil {

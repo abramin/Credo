@@ -3,7 +3,6 @@ package authorizationcode
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -11,21 +10,6 @@ import (
 	"credo/pkg/platform/sentinel"
 )
 
-// translateAuthCodeError converts domain errors from ValidateForConsume to sentinel errors.
-func translateAuthCodeError(err error) error {
-	if err == nil {
-		return nil
-	}
-	msg := err.Error()
-	switch {
-	case strings.Contains(msg, "expired"):
-		return fmt.Errorf("%s: %w", msg, sentinel.ErrExpired)
-	case strings.Contains(msg, "already used"):
-		return fmt.Errorf("%s: %w", msg, sentinel.ErrAlreadyUsed)
-	default:
-		return fmt.Errorf("%s: %w", msg, sentinel.ErrInvalidState)
-	}
-}
 
 // Error Contract:
 // All store methods follow this error pattern:
@@ -74,28 +58,6 @@ func (s *InMemoryAuthorizationCodeStore) MarkUsed(_ context.Context, code string
 	return nil
 }
 
-// ConsumeAuthCode marks the authorization code as used if valid.
-// It validates using domain logic, then marks the code as used via domain method.
-// Returns the code record and an error if any validation fails.
-// Errors are returned as sentinel errors per store boundary contract.
-func (s *InMemoryAuthorizationCodeStore) ConsumeAuthCode(_ context.Context, code string, redirectURI string, now time.Time) (*models.AuthorizationCodeRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record, ok := s.authCodes[code]
-	if !ok {
-		return nil, fmt.Errorf("authorization code not found: %w", sentinel.ErrNotFound)
-	}
-
-	// Validate using domain method, translate to sentinel errors per store contract
-	if err := record.ValidateForConsume(redirectURI, now); err != nil {
-		return record, translateAuthCodeError(err)
-	}
-
-	// Mark as used via domain method
-	record.MarkUsed()
-	return record, nil
-}
 
 // DeleteExpiredCodes removes all authorization codes that have expired as of the given time.
 // The time parameter is injected for testability (no hidden time.Now() calls).
@@ -110,4 +72,26 @@ func (s *InMemoryAuthorizationCodeStore) DeleteExpiredCodes(_ context.Context, n
 		}
 	}
 	return deletedCount, nil
+}
+
+// Execute atomically validates and mutates an auth code under lock.
+// The validate callback runs first; if it returns an error (typically a domain error),
+// that error is returned as-is without translation, along with the record (for replay detection).
+// The mutate callback applies changes to the record after validation passes.
+// Returns sentinel.ErrNotFound if the code doesn't exist.
+func (s *InMemoryAuthorizationCodeStore) Execute(_ context.Context, code string, validate func(*models.AuthorizationCodeRecord) error, mutate func(*models.AuthorizationCodeRecord)) (*models.AuthorizationCodeRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.authCodes[code]
+	if !ok {
+		return nil, sentinel.ErrNotFound
+	}
+
+	if err := validate(record); err != nil {
+		return record, err // Domain error from callback - return record for replay detection
+	}
+
+	mutate(record)
+	return record, nil
 }

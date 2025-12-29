@@ -95,7 +95,15 @@ func (s *Service) consumeCodeWithReplayProtection(
 	code, redirectURI string,
 	now time.Time,
 ) (*models.AuthorizationCodeRecord, error) {
-	codeRecord, err := stores.Codes.ConsumeAuthCode(ctx, code, redirectURI, now)
+	// Use Execute pattern: domain errors pass through unchanged
+	codeRecord, err := stores.Codes.Execute(ctx, code,
+		func(rec *models.AuthorizationCodeRecord) error {
+			return rec.ValidateForConsume(redirectURI, now)
+		},
+		func(rec *models.AuthorizationCodeRecord) {
+			rec.MarkUsed()
+		},
+	)
 	if err != nil {
 		if codeRecord != nil {
 			if revokeErr := revokeSessionOnReplay(ctx, stores, err, codeRecord.SessionID, now); revokeErr != nil {
