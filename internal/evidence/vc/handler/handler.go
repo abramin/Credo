@@ -18,7 +18,7 @@ import (
 
 // Service defines the VC issuance operations used by the handler.
 type Service interface {
-	Issue(ctx context.Context, req models.IssueRequest) (*models.VerifiableCredential, error)
+	Issue(ctx context.Context, req models.IssueRequest) (*models.CredentialRecord, error)
 }
 
 // Handler wires VC endpoints to the VC service.

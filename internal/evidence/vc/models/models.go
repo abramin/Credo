@@ -74,8 +74,9 @@ type IssueRequest struct {
 	NationalID id.NationalID
 }
 
-// VerifiableCredential represents an issued credential and its claims.
-type VerifiableCredential struct {
+// CredentialRecord represents an issued credential for persistence and API responses.
+// This is the infrastructure model; see domain/credential.Credential for the domain aggregate.
+type CredentialRecord struct {
 	ID       CredentialID
 	Type     CredentialType
 	Subject  id.UserID
@@ -87,6 +88,6 @@ type VerifiableCredential struct {
 // VerifyResult reports the validity of a credential lookup.
 type VerifyResult struct {
 	Valid      bool
-	Credential *VerifiableCredential
+	Credential *CredentialRecord
 	Reason     string
 }

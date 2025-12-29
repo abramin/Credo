@@ -73,7 +73,7 @@ func WithLogger(logger *slog.Logger) Option {
 }
 
 // Issue issues a new AgeOver18 credential after registry verification.
-func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.VerifiableCredential, error) {
+func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.CredentialRecord, error) {
 	if req.UserID.IsNil() {
 		return nil, dErrors.New(dErrors.CodeUnauthorized, "user ID required")
 	}
@@ -172,7 +172,7 @@ func (s *Service) requireVCIssuanceConsent(ctx context.Context, userID id.UserID
 	return s.consentPort.RequireVCIssuance(ctx, userID)
 }
 
-func (s *Service) emitAudit(ctx context.Context, credential models.VerifiableCredential) {
+func (s *Service) emitAudit(ctx context.Context, credential models.CredentialRecord) {
 	if s.auditor == nil {
 		return
 	}

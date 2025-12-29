@@ -9,10 +9,10 @@ import (
 
 var errUnknownCredentialType = errors.New("unknown credential type")
 
-// ToModel converts a domain Credential to an infrastructure VerifiableCredential model.
+// ToModel converts a domain Credential to an infrastructure CredentialRecord.
 // This is used when persisting credentials to the store.
-func ToModel(c *Credential) models.VerifiableCredential {
-	return models.VerifiableCredential{
+func ToModel(c *Credential) models.CredentialRecord {
+	return models.CredentialRecord{
 		ID:       c.id,
 		Type:     c.credType,
 		Subject:  c.subject,
@@ -22,10 +22,10 @@ func ToModel(c *Credential) models.VerifiableCredential {
 	}
 }
 
-// FromModel converts an infrastructure VerifiableCredential model to a domain Credential.
+// FromModel converts an infrastructure CredentialRecord to a domain Credential.
 // This is used when loading credentials from the store.
 // Returns an error if the model violates domain invariants.
-func FromModel(m models.VerifiableCredential) (*Credential, error) {
+func FromModel(m models.CredentialRecord) (*Credential, error) {
 	issuedAt, err := shared.NewIssuedAt(m.IssuedAt)
 	if err != nil {
 		return nil, err

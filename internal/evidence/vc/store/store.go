@@ -15,6 +15,6 @@ var ErrNotFound = sentinel.ErrNotFound
 // Implementations return sentinel errors (ErrNotFound) for infrastructure facts.
 // Services are responsible for translating these to domain errors.
 type Store interface {
-	Save(ctx context.Context, credential models.VerifiableCredential) error
-	FindByID(ctx context.Context, id models.CredentialID) (models.VerifiableCredential, error)
+	Save(ctx context.Context, credential models.CredentialRecord) error
+	FindByID(ctx context.Context, id models.CredentialID) (models.CredentialRecord, error)
 }
