@@ -106,7 +106,7 @@ Audit emissions behave like domain events (emitted on lifecycle transitions):
 | -------------------- | ---------------------- | --------- |
 | Consent granted      | `consent_granted`      | `granted` |
 | Consent revoked      | `consent_revoked`      | `revoked` |
-| Consent deleted      | `consent_deleted`      | `revoked` |
+| Consent deleted      | `consent_deleted`      | `deleted` |
 | Consent check passed | `consent_check_passed` | `granted` |
 | Consent check failed | `consent_check_failed` | `denied`  |
 

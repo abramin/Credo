@@ -11,6 +11,7 @@ import (
 const (
 	AuditActionConsentGranted     = "consent_granted"
 	AuditActionConsentRevoked     = "consent_revoked"
+	AuditActionConsentDeleted     = "consent_deleted"
 	AuditActionConsentCheckPassed = "consent_check_passed"
 	AuditActionConsentCheckFailed = "consent_check_failed"
 )
@@ -19,6 +20,7 @@ const (
 const (
 	AuditDecisionGranted = "granted"
 	AuditDecisionRevoked = "revoked"
+	AuditDecisionDeleted = "deleted"
 	AuditDecisionDenied  = "denied"
 )
 

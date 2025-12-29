@@ -364,8 +364,8 @@ func (s *Service) DeleteAll(ctx context.Context, userID id.UserID) error {
 	actorID := admin.GetAdminActorID(ctx)
 	s.emitAudit(ctx, audit.Event{
 		UserID:    userID,
-		Action:    "consent_deleted",
-		Decision:  "deleted",
+		Action:    models.AuditActionConsentDeleted,
+		Decision:  models.AuditDecisionDeleted,
 		Reason:    "bulk_deletion",
 		Timestamp: requesttime.Now(ctx),
 		ActorID:   actorID,
