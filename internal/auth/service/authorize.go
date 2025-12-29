@@ -16,9 +16,7 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
-	devicemw "credo/pkg/platform/middleware/device"
-	metadata "credo/pkg/platform/middleware/metadata"
-	"credo/pkg/platform/middleware/requesttime"
+	"credo/pkg/requestcontext"
 )
 
 // validateRequestedScopes checks that all requested scopes are allowed by the client.
@@ -99,10 +97,10 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 		Email:             req.Email,
 		Scopes:            req.Scopes,
 		RedirectURI:       req.RedirectURI,
-		Now:               requesttime.Now(ctx),
+		Now:               requestcontext.Now(ctx),
 		DeviceID:          deviceID,
-		DeviceFingerprint: devicemw.GetDeviceFingerprint(ctx),
-		DeviceDisplayName: device.ParseUserAgent(metadata.GetUserAgent(ctx)),
+		DeviceFingerprint: requestcontext.DeviceFingerprint(ctx),
+		DeviceDisplayName: device.ParseUserAgent(requestcontext.UserAgent(ctx)),
 		Client:            client,
 		Tenant:            tnt,
 	}
@@ -123,7 +121,7 @@ func (s *Service) Authorize(ctx context.Context, req *models.AuthorizationReques
 // resolveDeviceID extracts or generates a device ID for session tracking.
 // Returns (deviceID for session, deviceID to set in cookie).
 func (s *Service) resolveDeviceID(ctx context.Context) (string, string) {
-	deviceID := devicemw.GetDeviceID(ctx)
+	deviceID := requestcontext.DeviceID(ctx)
 	if deviceID != "" {
 		return deviceID, ""
 	}

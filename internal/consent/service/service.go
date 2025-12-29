@@ -15,11 +15,10 @@ import (
 	pkgerrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	auditpublisher "credo/pkg/platform/audit/publisher"
-	admin "credo/pkg/platform/middleware/admin"
-	request "credo/pkg/platform/middleware/request"
-	requesttime "credo/pkg/platform/middleware/requesttime"
+	"credo/pkg/platform/middleware/admin"
 	"credo/pkg/platform/sentinel"
 	platformsync "credo/pkg/platform/sync"
+	"credo/pkg/requestcontext"
 )
 
 // Store defines the persistence interface for consent records.
@@ -176,7 +175,7 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 }
 
 func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID id.UserID, purpose models.Purpose) (*models.Record, error) {
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 	existing, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
 	if err != nil && !errors.Is(err, sentinel.ErrNotFound) {
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to read consent")
@@ -272,7 +271,7 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	}
 
 	var revoked []*models.Record
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 
 	// Wrap multi-purpose revoke in transaction to ensure atomicity
 	// Add user ID to context for sharded locking
@@ -326,7 +325,7 @@ func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) 
 	if userID.IsNil() {
 		return 0, pkgerrors.New(pkgerrors.CodeBadRequest, "user ID required")
 	}
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 	count, err := s.store.RevokeAllByUser(ctx, userID, now)
 	if err != nil {
 		return 0, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke all consents")
@@ -367,7 +366,7 @@ func (s *Service) DeleteAll(ctx context.Context, userID id.UserID) error {
 		Action:    models.AuditActionConsentDeleted,
 		Decision:  models.AuditDecisionDeleted,
 		Reason:    "bulk_deletion",
-		Timestamp: requesttime.Now(ctx),
+		Timestamp: requestcontext.Now(ctx),
 		ActorID:   actorID,
 	})
 
@@ -410,7 +409,7 @@ func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.
 		return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to read consent")
 	}
 
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 	if record.RevokedAt != nil {
 		s.recordConsentCheckOutcome(ctx, userID, purpose, outcomeRevoked)
 		return pkgerrors.New(pkgerrors.CodeInvalidConsent, "consent revoked")
@@ -430,7 +429,7 @@ func (s *Service) emitAudit(ctx context.Context, event audit.Event) {
 	}
 	// Enrich with RequestID for correlation
 	if event.RequestID == "" {
-		event.RequestID = request.GetRequestID(ctx)
+		event.RequestID = requestcontext.RequestID(ctx)
 	}
 	if err := s.auditor.Emit(ctx, event); err != nil {
 		// Log audit failures but don't fail the operation - audit is best-effort
@@ -521,7 +520,7 @@ var (
 
 // recordConsentCheckOutcome emits audit event, logs, and updates metrics for a consent check.
 func (s *Service) recordConsentCheckOutcome(ctx context.Context, userID id.UserID, purpose models.Purpose, outcome consentCheckOutcome) {
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 	action := models.AuditActionConsentCheckPassed
 	logLevel := slog.LevelInfo
 	logMsg := "consent_check_passed"

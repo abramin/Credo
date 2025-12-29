@@ -1,34 +1,31 @@
 package device
 
-import "context"
+import (
+	"context"
 
-type contextKeyDeviceID struct{}
-type contextKeyDeviceFingerprint struct{}
+	"credo/pkg/requestcontext"
+)
 
 // GetDeviceID retrieves the device identifier (cookie value) from the context.
+// Deprecated: Use requestcontext.DeviceID(ctx) instead.
 func GetDeviceID(ctx context.Context) string {
-	if deviceID, ok := ctx.Value(contextKeyDeviceID{}).(string); ok {
-		return deviceID
-	}
-	return ""
+	return requestcontext.DeviceID(ctx)
 }
 
 // WithDeviceID injects a device identifier into a context.
-// Useful for service unit tests that don't run the full HTTP middleware chain.
+// Deprecated: Use requestcontext.WithDeviceID(ctx, deviceID) instead.
 func WithDeviceID(ctx context.Context, deviceID string) context.Context {
-	return context.WithValue(ctx, contextKeyDeviceID{}, deviceID)
+	return requestcontext.WithDeviceID(ctx, deviceID)
 }
 
 // GetDeviceFingerprint retrieves the pre-computed device fingerprint from the context.
+// Deprecated: Use requestcontext.DeviceFingerprint(ctx) instead.
 func GetDeviceFingerprint(ctx context.Context) string {
-	if fp, ok := ctx.Value(contextKeyDeviceFingerprint{}).(string); ok {
-		return fp
-	}
-	return ""
+	return requestcontext.DeviceFingerprint(ctx)
 }
 
 // WithDeviceFingerprint injects a device fingerprint into a context.
-// Useful for service unit tests that don't run the full HTTP middleware chain.
+// Deprecated: Use requestcontext.WithDeviceFingerprint(ctx, fingerprint) instead.
 func WithDeviceFingerprint(ctx context.Context, fingerprint string) context.Context {
-	return context.WithValue(ctx, contextKeyDeviceFingerprint{}, fingerprint)
+	return requestcontext.WithDeviceFingerprint(ctx, fingerprint)
 }

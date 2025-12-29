@@ -3,7 +3,7 @@ package device
 import (
 	"net/http"
 
-	metadata "credo/pkg/platform/middleware/metadata"
+	"credo/pkg/requestcontext"
 )
 
 // DeviceConfig holds configuration for the Device middleware.
@@ -32,16 +32,16 @@ func Device(cfg *DeviceConfig) func(http.Handler) http.Handler {
 			// Extract device ID from cookie (if present)
 			if cfg.CookieName != "" {
 				if cookie, err := r.Cookie(cfg.CookieName); err == nil && cookie != nil {
-					ctx = WithDeviceID(ctx, cookie.Value)
+					ctx = requestcontext.WithDeviceID(ctx, cookie.Value)
 				}
 			}
 
 			// Pre-compute fingerprint from User-Agent (already in context from ClientMetadata)
 			if cfg.FingerprintFn != nil {
-				userAgent := metadata.GetUserAgent(ctx)
+				userAgent := requestcontext.UserAgent(ctx)
 				if userAgent != "" {
 					fingerprint := cfg.FingerprintFn(userAgent)
-					ctx = WithDeviceFingerprint(ctx, fingerprint)
+					ctx = requestcontext.WithDeviceFingerprint(ctx, fingerprint)
 				}
 			}
 

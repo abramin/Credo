@@ -5,15 +5,19 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+
+	"credo/pkg/requestcontext"
 )
 
 // MaxXFFHeaderLength is the maximum allowed length for X-Forwarded-For header
 // to prevent header injection attacks (PRD-017 TR-5).
 const MaxXFFHeaderLength = 500
 
-// Context keys for client metadata.
-type contextKeyClientIP struct{}
-type contextKeyUserAgent struct{}
+// Re-export context keys for backward compatibility.
+var (
+	ContextKeyClientIP  = requestcontext.ContextKeyClientIP
+	ContextKeyUserAgent = requestcontext.ContextKeyUserAgent
+)
 
 // Config holds configuration for the metadata middleware.
 type Config struct {
@@ -50,8 +54,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		userAgent := r.Header.Get("User-Agent")
 
 		ctx := r.Context()
-		ctx = context.WithValue(ctx, contextKeyClientIP{}, ip)
-		ctx = context.WithValue(ctx, contextKeyUserAgent{}, userAgent)
+		ctx = requestcontext.WithClientMetadata(ctx, ip, userAgent)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -147,25 +150,19 @@ func parseRemoteAddr(remoteAddr string) string {
 }
 
 // GetClientIP retrieves the client IP address from the context.
+// Deprecated: Use requestcontext.ClientIP(ctx) instead.
 func GetClientIP(ctx context.Context) string {
-	if ip, ok := ctx.Value(contextKeyClientIP{}).(string); ok {
-		return ip
-	}
-	return ""
+	return requestcontext.ClientIP(ctx)
 }
 
 // GetUserAgent retrieves the User-Agent from the context.
+// Deprecated: Use requestcontext.UserAgent(ctx) instead.
 func GetUserAgent(ctx context.Context) string {
-	if ua, ok := ctx.Value(contextKeyUserAgent{}).(string); ok {
-		return ua
-	}
-	return ""
+	return requestcontext.UserAgent(ctx)
 }
 
 // WithClientMetadata injects client IP and User-Agent into a context.
-// Useful for service unit tests that don't run the full HTTP middleware chain.
+// Deprecated: Use requestcontext.WithClientMetadata(ctx, clientIP, userAgent) instead.
 func WithClientMetadata(ctx context.Context, clientIP, userAgent string) context.Context {
-	ctx = context.WithValue(ctx, contextKeyClientIP{}, clientIP)
-	ctx = context.WithValue(ctx, contextKeyUserAgent{}, userAgent)
-	return ctx
+	return requestcontext.WithClientMetadata(ctx, clientIP, userAgent)
 }

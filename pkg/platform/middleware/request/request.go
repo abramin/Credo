@@ -9,8 +9,8 @@ import (
 	"runtime/debug"
 	"time"
 
-	metadata "credo/pkg/platform/middleware/metadata"
 	"credo/pkg/platform/privacy"
+	"credo/pkg/requestcontext"
 
 	"github.com/google/uuid"
 )
@@ -56,7 +56,7 @@ func RequestID(next http.Handler) http.Handler {
 			requestID = uuid.New().String()
 		}
 
-		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
+		ctx := requestcontext.WithRequestID(r.Context(), requestID)
 		w.Header().Set("X-Request-ID", requestID)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -72,14 +72,10 @@ func isValidRequestID(id string) bool {
 	return validRequestID.MatchString(id)
 }
 
-type requestIDKey struct{}
-
 // GetRequestID retrieves the request ID from the context.
+// Deprecated: Use requestcontext.RequestID(ctx) instead.
 func GetRequestID(ctx context.Context) string {
-	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
-		return id
-	}
-	return ""
+	return requestcontext.RequestID(ctx)
 }
 
 // Logger logs HTTP requests with method, path, status code, duration, and request ID.
@@ -106,7 +102,7 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 				"status", wrapped.statusCode,
 				"duration_ms", duration.Milliseconds(),
 				"request_id", requestID,
-				"remote_addr_prefix", privacy.AnonymizeIP(metadata.GetClientIP(ctx)),
+				"remote_addr_prefix", privacy.AnonymizeIP(requestcontext.ClientIP(ctx)),
 			)
 		})
 	}

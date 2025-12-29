@@ -7,34 +7,28 @@ import (
 	"context"
 	"net/http"
 	"time"
-)
 
-type contextKeyRequestTime struct{}
+	"credo/pkg/requestcontext"
+)
 
 // Middleware captures the current time at the start of the request
 // and stores it in the context for consistent time references throughout the request.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
-		ctx := context.WithValue(r.Context(), contextKeyRequestTime{}, now)
+		ctx := requestcontext.WithTime(r.Context(), now)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // Now retrieves the request-scoped time from context.
-// Falls back to time.Now() if not set (for non-HTTP contexts like workers, CLI, tests).
+// Deprecated: Use requestcontext.Now(ctx) instead.
 func Now(ctx context.Context) time.Time {
-	if t, ok := ctx.Value(contextKeyRequestTime{}).(time.Time); ok {
-		return t
-	}
-	return time.Now()
+	return requestcontext.Now(ctx)
 }
 
 // WithTime injects a specific time into a context.
-// Useful for:
-//   - Service unit tests that don't run the full HTTP middleware chain
-//   - Workers that need consistent time within a batch operation
-//   - CLI commands
+// Deprecated: Use requestcontext.WithTime(ctx, t) instead.
 func WithTime(ctx context.Context, t time.Time) context.Context {
-	return context.WithValue(ctx, contextKeyRequestTime{}, t)
+	return requestcontext.WithTime(ctx, t)
 }

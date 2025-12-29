@@ -27,8 +27,8 @@ import (
 	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/observability"
 	dErrors "credo/pkg/domain-errors"
-	requesttime "credo/pkg/platform/middleware/requesttime"
 	"credo/pkg/platform/privacy"
+	"credo/pkg/requestcontext"
 )
 
 // BucketStore checks rate limits using sliding window counters.
@@ -126,7 +126,7 @@ func (s *Service) CheckIP(ctx context.Context, ip string, class models.EndpointC
 			Allowed:    false,
 			Limit:      0,
 			Remaining:  0,
-			ResetAt:    requesttime.Now(ctx),
+			ResetAt:    requestcontext.Now(ctx),
 			RetryAfter: 60, // Retry in 60 seconds
 		}, nil
 	}
@@ -149,7 +149,7 @@ func (s *Service) CheckUser(ctx context.Context, userID string, class models.End
 			Allowed:    false,
 			Limit:      0,
 			Remaining:  0,
-			ResetAt:    requesttime.Now(ctx),
+			ResetAt:    requestcontext.Now(ctx),
 			RetryAfter: 60, // Retry in 60 seconds
 		}, nil
 	}
@@ -174,7 +174,7 @@ func (s *Service) checkRateLimit(
 	window time.Duration,
 	logIdentifier string,
 ) (*models.RateLimitResult, error) {
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 
 	// Check allowlist (result used later, not for early return)
 	allowlisted, allowlistErr := s.allowlist.IsAllowlisted(ctx, identifier)
@@ -255,7 +255,7 @@ func (s *Service) checkSingleLimit(ctx context.Context, p limitParams, class mod
 //
 // This is the primary entry point for authenticated request rate limiting.
 func (s *Service) CheckBoth(ctx context.Context, ip, userID string, class models.EndpointClass) (*models.RateLimitResult, error) {
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 
 	// Get limits upfront to fail fast if config is missing
 	ipLimit, userLimit, denial := s.getBothLimits(ctx, ip, userID, class, now)

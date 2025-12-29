@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"credo/internal/auth/models"
-	device "credo/pkg/platform/middleware/device"
+	"credo/pkg/requestcontext"
 )
 
 type deviceBindingState int
@@ -45,7 +45,7 @@ func (s *Service) applyDeviceBinding(ctx context.Context, session *models.Sessio
 
 // applyDeviceID handles device ID binding between session and cookie.
 func (s *Service) applyDeviceID(ctx context.Context, session *models.Session) {
-	cookieDeviceID := device.GetDeviceID(ctx)
+	cookieDeviceID := requestcontext.DeviceID(ctx)
 	state := classifyDeviceState(session.DeviceID, cookieDeviceID)
 
 	switch state {
@@ -62,7 +62,7 @@ func (s *Service) applyDeviceID(ctx context.Context, session *models.Session) {
 }
 
 func (s *Service) applyFingerprint(ctx context.Context, session *models.Session) {
-	currentFingerprint := device.GetDeviceFingerprint(ctx)
+	currentFingerprint := requestcontext.DeviceFingerprint(ctx)
 	if currentFingerprint == "" {
 		return
 	}

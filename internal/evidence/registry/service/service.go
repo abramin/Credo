@@ -20,7 +20,7 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
-	"credo/pkg/platform/middleware/request"
+	"credo/pkg/requestcontext"
 )
 
 // Tracer for distributed tracing of registry operations.
@@ -487,7 +487,7 @@ func (s *Service) auditSanctionsCheck(ctx context.Context, userID id.UserID, lis
 		UserID:    userID,
 		Decision:  decision,
 		Reason:    "user_initiated",
-		RequestID: request.GetRequestID(ctx),
+		RequestID: requestcontext.RequestID(ctx),
 	}
 
 	// Fail-closed: audit MUST succeed for all sanctions checks

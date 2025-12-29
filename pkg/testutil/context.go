@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	id "credo/pkg/domain"
-	authmw "credo/pkg/platform/middleware/auth"
+	"credo/pkg/requestcontext"
 )
 
 // WithUserID adds a user ID to the request context.
@@ -13,7 +13,7 @@ import (
 // If the userID is not a valid UUID, it will not be added to the context.
 func WithUserID(req *http.Request, userID string) *http.Request {
 	if parsedUserID, err := id.ParseUserID(userID); err == nil {
-		ctx := context.WithValue(req.Context(), authmw.ContextKeyUserID, parsedUserID)
+		ctx := requestcontext.WithUserID(req.Context(), parsedUserID)
 		return req.WithContext(ctx)
 	}
 	return req
@@ -23,7 +23,7 @@ func WithUserID(req *http.Request, userID string) *http.Request {
 // If the sessionID is not a valid UUID, it will not be added to the context.
 func WithSessionID(req *http.Request, sessionID string) *http.Request {
 	if parsedSessionID, err := id.ParseSessionID(sessionID); err == nil {
-		ctx := context.WithValue(req.Context(), authmw.ContextKeySessionID, parsedSessionID)
+		ctx := requestcontext.WithSessionID(req.Context(), parsedSessionID)
 		return req.WithContext(ctx)
 	}
 	return req
@@ -36,12 +36,12 @@ func WithAuth(req *http.Request, userID, sessionID string) *http.Request {
 	ctx := req.Context()
 	if userID != "" {
 		if parsedUserID, err := id.ParseUserID(userID); err == nil {
-			ctx = context.WithValue(ctx, authmw.ContextKeyUserID, parsedUserID)
+			ctx = requestcontext.WithUserID(ctx, parsedUserID)
 		}
 	}
 	if sessionID != "" {
 		if parsedSessionID, err := id.ParseSessionID(sessionID); err == nil {
-			ctx = context.WithValue(ctx, authmw.ContextKeySessionID, parsedSessionID)
+			ctx = requestcontext.WithSessionID(ctx, parsedSessionID)
 		}
 	}
 	return req.WithContext(ctx)
