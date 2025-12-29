@@ -18,32 +18,30 @@ func TestValueObjectsSuite(t *testing.T) {
 }
 
 func (s *ValueObjectsSuite) TestIssuedAtConstruction() {
-	s.Run("rejects zero time", func() {
-		_, err := shared.NewIssuedAt(time.Time{})
-		s.Require().Error(err)
-		s.ErrorIs(err, shared.ErrInvalidIssuedAt)
-	})
+	now := time.Now()
+	cases := []struct {
+		name    string
+		t       time.Time
+		wantErr bool
+	}{
+		{"rejects zero time", time.Time{}, true},
+		{"accepts valid time", now, false},
+		{"accepts past time", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), false},
+		{"accepts future time", now.Add(24 * time.Hour), false},
+	}
 
-	s.Run("accepts valid time", func() {
-		now := time.Now()
-		issuedAt, err := shared.NewIssuedAt(now)
-		s.Require().NoError(err)
-		s.Equal(now, issuedAt.Time())
-	})
-
-	s.Run("accepts past time", func() {
-		past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-		issuedAt, err := shared.NewIssuedAt(past)
-		s.Require().NoError(err)
-		s.Equal(past, issuedAt.Time())
-	})
-
-	s.Run("accepts future time", func() {
-		future := time.Now().Add(24 * time.Hour)
-		issuedAt, err := shared.NewIssuedAt(future)
-		s.Require().NoError(err)
-		s.Equal(future, issuedAt.Time())
-	})
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			issuedAt, err := shared.NewIssuedAt(tc.t)
+			if tc.wantErr {
+				s.Require().Error(err)
+				s.ErrorIs(err, shared.ErrInvalidIssuedAt)
+			} else {
+				s.Require().NoError(err)
+				s.Equal(tc.t, issuedAt.Time())
+			}
+		})
+	}
 }
 
 func (s *ValueObjectsSuite) TestIssuedAtMust() {
@@ -90,41 +88,33 @@ func (s *ValueObjectsSuite) TestExpiresAtConstruction() {
 }
 
 func (s *ValueObjectsSuite) TestExpiresAtAfterConstruction() {
-	s.Run("rejects zero time", func() {
-		issuedAt := shared.MustIssuedAt(time.Now())
-		_, err := shared.NewExpiresAtAfter(time.Time{}, issuedAt)
-		s.Require().Error(err)
-		s.ErrorIs(err, shared.ErrInvalidExpiresAt)
-	})
+	now := time.Now()
+	issuedAt := shared.MustIssuedAt(now)
 
-	s.Run("rejects expiration before issuance", func() {
-		now := time.Now()
-		issuedAt := shared.MustIssuedAt(now)
-		beforeIssuance := now.Add(-1 * time.Hour)
+	cases := []struct {
+		name         string
+		expiresAt    time.Time
+		wantErr      bool
+		wantSentinel error
+	}{
+		{"rejects zero time", time.Time{}, true, shared.ErrInvalidExpiresAt},
+		{"rejects expiration before issuance", now.Add(-1 * time.Hour), true, shared.ErrExpiresBeforeIssued},
+		{"rejects expiration equal to issuance", now, true, shared.ErrExpiresBeforeIssued},
+		{"accepts expiration after issuance", now.Add(24 * time.Hour), false, nil},
+	}
 
-		_, err := shared.NewExpiresAtAfter(beforeIssuance, issuedAt)
-		s.Require().Error(err)
-		s.ErrorIs(err, shared.ErrExpiresBeforeIssued)
-	})
-
-	s.Run("rejects expiration equal to issuance", func() {
-		now := time.Now()
-		issuedAt := shared.MustIssuedAt(now)
-
-		_, err := shared.NewExpiresAtAfter(now, issuedAt)
-		s.Require().Error(err)
-		s.ErrorIs(err, shared.ErrExpiresBeforeIssued)
-	})
-
-	s.Run("accepts expiration after issuance", func() {
-		now := time.Now()
-		issuedAt := shared.MustIssuedAt(now)
-		afterIssuance := now.Add(24 * time.Hour)
-
-		expiresAt, err := shared.NewExpiresAtAfter(afterIssuance, issuedAt)
-		s.Require().NoError(err)
-		s.Equal(afterIssuance, expiresAt.Time())
-	})
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			expiresAt, err := shared.NewExpiresAtAfter(tc.expiresAt, issuedAt)
+			if tc.wantErr {
+				s.Require().Error(err)
+				s.ErrorIs(err, tc.wantSentinel)
+			} else {
+				s.Require().NoError(err)
+				s.Equal(tc.expiresAt, expiresAt.Time())
+			}
+		})
+	}
 }
 
 func (s *ValueObjectsSuite) TestNoExpiration() {
@@ -152,44 +142,31 @@ func (s *ValueObjectsSuite) TestExpiresAtIsZero() {
 }
 
 func (s *ValueObjectsSuite) TestExpiresAtIsExpiredAt() {
-	s.Run("permanent credential never expires", func() {
-		exp := shared.NoExpiration()
-		now := time.Now()
-		farFuture := now.Add(100 * 365 * 24 * time.Hour)
+	now := time.Now()
+	expirationTime := now.Add(time.Hour)
 
-		s.False(exp.IsExpiredAt(now))
-		s.False(exp.IsExpiredAt(farFuture))
-	})
+	cases := []struct {
+		name      string
+		expiresAt shared.ExpiresAt
+		checkAt   time.Time
+		expired   bool
+	}{
+		{"permanent credential never expires (now)", shared.NoExpiration(), now, false},
+		{"permanent credential never expires (far future)", shared.NoExpiration(), now.Add(100 * 365 * 24 * time.Hour), false},
+		{"not expired before expiration time", mustExpiresAt(expirationTime), now, false},
+		{"expired after expiration time", mustExpiresAt(now.Add(-1 * time.Hour)), now, true},
+		{"not expired at exact expiration time", mustExpiresAt(expirationTime), expirationTime, false},
+		{"expired one nanosecond after expiration time", mustExpiresAt(expirationTime), expirationTime.Add(time.Nanosecond), true},
+	}
 
-	s.Run("not expired before expiration time", func() {
-		expirationTime := time.Now().Add(24 * time.Hour)
-		exp, _ := shared.NewExpiresAt(expirationTime)
-		now := time.Now()
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			s.Equal(tc.expired, tc.expiresAt.IsExpiredAt(tc.checkAt))
+		})
+	}
+}
 
-		s.False(exp.IsExpiredAt(now))
-	})
-
-	s.Run("expired after expiration time", func() {
-		expirationTime := time.Now().Add(-1 * time.Hour) // already passed
-		exp, _ := shared.NewExpiresAt(expirationTime)
-		now := time.Now()
-
-		s.True(exp.IsExpiredAt(now))
-	})
-
-	s.Run("not expired at exact expiration time", func() {
-		expirationTime := time.Now().Add(time.Hour)
-		exp, _ := shared.NewExpiresAt(expirationTime)
-
-		// At the exact expiration time, it's not yet expired (uses After, not Before)
-		s.False(exp.IsExpiredAt(expirationTime))
-	})
-
-	s.Run("expired one nanosecond after expiration time", func() {
-		expirationTime := time.Now().Add(time.Hour)
-		exp, _ := shared.NewExpiresAt(expirationTime)
-
-		afterExpiration := expirationTime.Add(time.Nanosecond)
-		s.True(exp.IsExpiredAt(afterExpiration))
-	})
+func mustExpiresAt(t time.Time) shared.ExpiresAt {
+	exp, _ := shared.NewExpiresAt(t)
+	return exp
 }

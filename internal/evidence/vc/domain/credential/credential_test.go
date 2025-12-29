@@ -37,88 +37,66 @@ func (s *CredentialSuite) SetupTest() {
 }
 
 func (s *CredentialSuite) TestConstructionInvariants() {
-	s.Run("rejects empty credential ID", func() {
-		_, err := credential.New(
-			"",
-			s.validType,
-			s.validSubject,
-			s.validIssuer,
-			s.validIssuedAt,
-			s.validClaims,
-		)
-		s.Require().Error(err)
-		s.Contains(err.Error(), "credential_id")
-	})
+	cases := []struct {
+		name     string
+		id       models.CredentialID
+		credType models.CredentialType
+		subject  id.UserID
+		issuer   string
+		issuedAt shared.IssuedAt
+		claims   credential.ClaimSet
+		wantErr  bool
+		errField string
+	}{
+		{
+			name: "rejects empty credential ID", id: "", credType: s.validType,
+			subject: s.validSubject, issuer: s.validIssuer, issuedAt: s.validIssuedAt, claims: s.validClaims,
+			wantErr: true, errField: "credential_id",
+		},
+		{
+			name: "rejects nil subject", id: s.validID, credType: s.validType,
+			subject: id.UserID{}, issuer: s.validIssuer, issuedAt: s.validIssuedAt, claims: s.validClaims,
+			wantErr: true, errField: "subject",
+		},
+		{
+			name: "rejects empty issuer", id: s.validID, credType: s.validType,
+			subject: s.validSubject, issuer: "", issuedAt: s.validIssuedAt, claims: s.validClaims,
+			wantErr: true, errField: "issuer",
+		},
+		{
+			name: "rejects zero issued_at", id: s.validID, credType: s.validType,
+			subject: s.validSubject, issuer: s.validIssuer, issuedAt: shared.IssuedAt{}, claims: s.validClaims,
+			wantErr: true, errField: "issued_at",
+		},
+		{
+			name: "rejects nil claims", id: s.validID, credType: s.validType,
+			subject: s.validSubject, issuer: s.validIssuer, issuedAt: s.validIssuedAt, claims: nil,
+			wantErr: true, errField: "claims",
+		},
+		{
+			name: "accepts valid inputs", id: s.validID, credType: s.validType,
+			subject: s.validSubject, issuer: s.validIssuer, issuedAt: s.validIssuedAt, claims: s.validClaims,
+			wantErr: false,
+		},
+	}
 
-	s.Run("rejects nil subject", func() {
-		_, err := credential.New(
-			s.validID,
-			s.validType,
-			id.UserID{}, // nil user ID
-			s.validIssuer,
-			s.validIssuedAt,
-			s.validClaims,
-		)
-		s.Require().Error(err)
-		s.Contains(err.Error(), "subject")
-	})
-
-	s.Run("rejects empty issuer", func() {
-		_, err := credential.New(
-			s.validID,
-			s.validType,
-			s.validSubject,
-			"",
-			s.validIssuedAt,
-			s.validClaims,
-		)
-		s.Require().Error(err)
-		s.Contains(err.Error(), "issuer")
-	})
-
-	s.Run("rejects zero issued_at", func() {
-		_, err := credential.New(
-			s.validID,
-			s.validType,
-			s.validSubject,
-			s.validIssuer,
-			shared.IssuedAt{}, // zero value
-			s.validClaims,
-		)
-		s.Require().Error(err)
-		s.Contains(err.Error(), "issued_at")
-	})
-
-	s.Run("rejects nil claims", func() {
-		_, err := credential.New(
-			s.validID,
-			s.validType,
-			s.validSubject,
-			s.validIssuer,
-			s.validIssuedAt,
-			nil,
-		)
-		s.Require().Error(err)
-		s.Contains(err.Error(), "claims")
-	})
-
-	s.Run("accepts valid inputs", func() {
-		cred, err := credential.New(
-			s.validID,
-			s.validType,
-			s.validSubject,
-			s.validIssuer,
-			s.validIssuedAt,
-			s.validClaims,
-		)
-		s.Require().NoError(err)
-		s.NotNil(cred)
-		s.Equal(s.validID, cred.ID())
-		s.Equal(s.validType, cred.Type())
-		s.Equal(s.validSubject, cred.Subject())
-		s.Equal(s.validIssuer, cred.Issuer())
-		s.False(cred.IsMinimized())
-	})
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			cred, err := credential.New(tc.id, tc.credType, tc.subject, tc.issuer, tc.issuedAt, tc.claims)
+			if tc.wantErr {
+				s.Require().Error(err)
+				s.Contains(err.Error(), tc.errField)
+			} else {
+				s.Require().NoError(err)
+				s.NotNil(cred)
+				s.Equal(tc.id, cred.ID())
+				s.Equal(tc.credType, cred.Type())
+				s.Equal(tc.subject, cred.Subject())
+				s.Equal(tc.issuer, cred.Issuer())
+				s.False(cred.IsMinimized())
+			}
+		})
+	}
 }
 
 func (s *CredentialSuite) TestMinimization() {
@@ -173,26 +151,5 @@ func (s *CredentialSuite) TestMinimization() {
 		// But should still have is_over_18
 		s.Contains(minimizedMap, "is_over_18")
 		s.Equal(true, minimizedMap["is_over_18"])
-	})
-}
-
-func (s *CredentialSuite) TestAccessors() {
-	s.Run("all accessors return correct values", func() {
-		cred, err := credential.New(
-			s.validID,
-			s.validType,
-			s.validSubject,
-			s.validIssuer,
-			s.validIssuedAt,
-			s.validClaims,
-		)
-		s.Require().NoError(err)
-
-		s.Equal(s.validID, cred.ID())
-		s.Equal(s.validType, cred.Type())
-		s.Equal(s.validSubject, cred.Subject())
-		s.Equal(s.validIssuer, cred.Issuer())
-		s.Equal(s.validIssuedAt, cred.IssuedAt())
-		s.NotNil(cred.Claims())
 	})
 }
