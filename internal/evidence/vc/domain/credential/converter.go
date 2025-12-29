@@ -14,7 +14,7 @@ func ToModel(c *Credential) models.VerifiableCredential {
 		Subject:  c.subject,
 		Issuer:   c.issuer,
 		IssuedAt: c.issuedAt.Time(),
-		Claims:   models.Claims(c.claims),
+		Claims:   models.Claims(c.claims.ToMap()),
 	}
 }
 
@@ -27,12 +27,26 @@ func FromModel(m models.VerifiableCredential) (*Credential, error) {
 		return nil, err
 	}
 
+	// Reconstruct typed claims based on credential type
+	claims := claimsFromMap(m.Type, m.Claims)
+
 	return New(
 		m.ID,
 		m.Type,
 		m.Subject,
 		m.Issuer,
 		issuedAt,
-		Claims(m.Claims),
+		claims,
 	)
+}
+
+// claimsFromMap reconstructs typed ClaimSet from untyped map based on credential type.
+func claimsFromMap(credType models.CredentialType, m models.Claims) ClaimSet {
+	switch credType {
+	case models.CredentialTypeAgeOver18:
+		return AgeOver18ClaimsFromMap(m)
+	default:
+		// Fallback for unknown types - return AgeOver18 as default
+		return AgeOver18ClaimsFromMap(m)
+	}
 }

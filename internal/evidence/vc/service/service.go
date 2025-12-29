@@ -106,11 +106,8 @@ func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.V
 		return nil, dErrors.New(dErrors.CodeBadRequest, "User does not meet age requirement")
 	}
 
-	// Build claims via domain aggregate
-	claims := credential.Claims{
-		"is_over_18":   true,
-		"verified_via": models.VerifiedViaNationalRegistry,
-	}
+	// Build typed claims via domain value object
+	claims := credential.NewAgeOver18Claims(true, models.VerifiedViaNationalRegistry)
 
 	issuedAt, err := shared.NewIssuedAt(now)
 	if err != nil {

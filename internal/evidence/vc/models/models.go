@@ -90,19 +90,3 @@ type VerifyResult struct {
 	Credential *VerifiableCredential
 	Reason     string
 }
-
-// MinimizeClaims removes regulated or sensitive keys when regulated mode is enabled.
-func MinimizeClaims(claims Claims, regulated bool) Claims {
-	if !regulated {
-		return claims
-	}
-	out := Claims{}
-	for k, v := range claims {
-		// Drop known PII or regulated keys.
-		if k == "full_name" || k == "national_id" || k == "date_of_birth" || k == "verified_via" {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}

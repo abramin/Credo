@@ -21,23 +21,6 @@ import (
 	id "credo/pkg/domain"
 )
 
-// Claims represents a set of verifiable credential claims.
-// Claims are key-value pairs that contain the assertions made by the credential.
-type Claims map[string]interface{}
-
-// Minimized returns a copy of claims with PII stripped for regulated mode.
-// Stripped keys: full_name, national_id, date_of_birth, verified_via
-func (c Claims) Minimized() Claims {
-	out := make(Claims)
-	for k, v := range c {
-		if k == "full_name" || k == "national_id" || k == "date_of_birth" || k == "verified_via" {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
 var (
 	errMissingCredentialID = errors.New("credential_id is required")
 	errMissingSubject      = errors.New("subject is required")
@@ -69,7 +52,7 @@ type Credential struct {
 	subject   id.UserID
 	issuer    string
 	issuedAt  shared.IssuedAt
-	claims    Claims
+	claims    ClaimSet
 	minimized bool
 }
 
@@ -81,7 +64,7 @@ func New(
 	subject id.UserID,
 	issuer string,
 	issuedAt shared.IssuedAt,
-	claims Claims,
+	claims ClaimSet,
 ) (*Credential, error) {
 	if credentialID == "" {
 		return nil, errMissingCredentialID
@@ -136,7 +119,7 @@ func (c *Credential) IssuedAt() shared.IssuedAt {
 }
 
 // Claims returns the credential claims.
-func (c *Credential) Claims() Claims {
+func (c *Credential) Claims() ClaimSet {
 	return c.claims
 }
 
@@ -150,7 +133,7 @@ func (c *Credential) IsMinimized() bool {
 //
 // The returned value:
 //   - Retains: ID, Type, Subject, Issuer, IssuedAt
-//   - Strips: PII keys from claims (full_name, national_id, date_of_birth, verified_via)
+//   - Strips: PII from claims (delegated to ClaimSet.Minimized)
 //   - Is marked as minimized (IsMinimized returns true)
 //
 // This method is pure - it returns a new value without modifying the original.
