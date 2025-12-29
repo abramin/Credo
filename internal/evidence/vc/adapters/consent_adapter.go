@@ -5,7 +5,7 @@ import (
 
 	"credo/internal/consent/models"
 	"credo/internal/consent/service"
-	vcservice "credo/internal/evidence/vc/service"
+	"credo/internal/evidence/vc/ports"
 	id "credo/pkg/domain"
 )
 
@@ -15,7 +15,7 @@ type ConsentAdapter struct {
 }
 
 // NewConsentAdapter creates a new in-process consent adapter.
-func NewConsentAdapter(consentService *service.Service) vcservice.ConsentPort {
+func NewConsentAdapter(consentService *service.Service) ports.ConsentPort {
 	return &ConsentAdapter{consentService: consentService}
 }
 

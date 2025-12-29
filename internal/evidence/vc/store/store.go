@@ -4,14 +4,16 @@ import (
 	"context"
 
 	"credo/internal/evidence/vc/models"
-	pkgerrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/sentinel"
 )
 
-var (
-	// ErrNotFound keeps storage-specific 404s consistent across implementations.
-	ErrNotFound = pkgerrors.New(pkgerrors.CodeNotFound, "record not found")
-)
+// ErrNotFound is returned when a credential is not found in the store.
+// Services should translate this to a domain error at their boundary.
+var ErrNotFound = sentinel.ErrNotFound
 
+// Store defines the credential persistence interface.
+// Implementations return sentinel errors (ErrNotFound) for infrastructure facts.
+// Services are responsible for translating these to domain errors.
 type Store interface {
 	Save(ctx context.Context, credential models.VerifiableCredential) error
 	FindByID(ctx context.Context, id models.CredentialID) (models.VerifiableCredential, error)

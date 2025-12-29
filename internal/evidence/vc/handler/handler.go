@@ -13,8 +13,7 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/httputil"
-	auth "credo/pkg/platform/middleware/auth"
-	request "credo/pkg/platform/middleware/request"
+	"credo/pkg/requestcontext"
 )
 
 // Service defines the VC issuance operations used by the handler.
@@ -104,9 +103,9 @@ type IssueResponse struct {
 // HandleIssue handles POST /vc/issue requests.
 func (h *Handler) HandleIssue(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	requestID := request.GetRequestID(ctx)
+	requestID := requestcontext.RequestID(ctx)
 
-	userID := auth.GetUserID(ctx)
+	userID := requestcontext.UserID(ctx)
 	if userID.IsNil() {
 		httputil.WriteError(w, dErrors.New(dErrors.CodeUnauthorized, "authentication required"))
 		return

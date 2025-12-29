@@ -510,6 +510,7 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 func buildVCModule(infra *infraBundle, consentSvc *consentService.Service, registrySvc *registryService.Service) *vcModule {
 	store := vcStore.NewInMemoryStore()
 	consentAdapter := vcAdapters.NewConsentAdapter(consentSvc)
+	registryAdapter := vcAdapters.NewRegistryAdapter(registrySvc)
 
 	auditPort := auditpublisher.NewPublisher(
 		auditstore.NewInMemoryStore(),
@@ -520,7 +521,7 @@ func buildVCModule(infra *infraBundle, consentSvc *consentService.Service, regis
 
 	svc := vcService.NewService(
 		store,
-		registrySvc,
+		registryAdapter,
 		consentAdapter,
 		infra.Cfg.Security.RegulatedMode,
 		vcService.WithAuditor(auditPort),

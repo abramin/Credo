@@ -2,28 +2,21 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
-	registrymodels "credo/internal/evidence/registry/models"
+	"credo/internal/evidence/vc/domain/credential"
+	"credo/internal/evidence/vc/domain/shared"
 	"credo/internal/evidence/vc/models"
+	"credo/internal/evidence/vc/ports"
 	"credo/internal/evidence/vc/store"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
-	"credo/pkg/platform/middleware/request"
-	requesttime "credo/pkg/platform/middleware/requesttime"
+	"credo/pkg/platform/sentinel"
+	"credo/pkg/requestcontext"
 )
-
-// RegistryService defines the registry lookup dependency for VC issuance.
-type RegistryService interface {
-	Citizen(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrymodels.CitizenRecord, error)
-}
-
-// ConsentPort enforces consent requirements for VC issuance.
-type ConsentPort interface {
-	RequireVCIssuance(ctx context.Context, userID id.UserID) error
-}
 
 // AuditPublisher emits audit events for credential lifecycle actions.
 type AuditPublisher interface {
@@ -36,15 +29,23 @@ type Option func(*Service)
 // Service issues and verifies verifiable credentials using registry evidence.
 type Service struct {
 	store       store.Store
-	registry    RegistryService
-	consentPort ConsentPort
+	registry    ports.RegistryPort
+	consentPort ports.ConsentPort
 	auditor     AuditPublisher
 	regulated   bool
 	logger      *slog.Logger
 }
 
 // NewService creates a VC service with the required dependencies.
-func NewService(store store.Store, registry RegistryService, consentPort ConsentPort, regulated bool, opts ...Option) *Service {
+// Panics if required dependencies (store, registry) are nil - fail fast at startup.
+func NewService(store store.Store, registry ports.RegistryPort, consentPort ports.ConsentPort, regulated bool, opts ...Option) *Service {
+	if store == nil {
+		panic("vc.NewService: store is required")
+	}
+	if registry == nil {
+		panic("vc.NewService: registry is required")
+	}
+
 	svc := &Service{
 		store:       store,
 		registry:    registry,
@@ -82,12 +83,6 @@ func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.V
 	if req.NationalID.IsNil() {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "national_id is required")
 	}
-	if s.registry == nil {
-		return nil, dErrors.New(dErrors.CodeInternal, "registry service unavailable")
-	}
-	if s.store == nil {
-		return nil, dErrors.New(dErrors.CodeInternal, "credential store unavailable")
-	}
 
 	if err := s.requireVCIssuanceConsent(ctx, req.UserID); err != nil {
 		return nil, err
@@ -106,33 +101,50 @@ func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.V
 		return nil, dErrors.New(dErrors.CodeBadRequest, "invalid citizen record")
 	}
 
-	now := requesttime.Now(ctx)
+	now := requestcontext.Now(ctx)
 	if !isOver18(birthDate, now) {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "User does not meet age requirement")
 	}
 
-	claims := models.Claims{
+	// Build claims via domain aggregate
+	claims := credential.Claims{
 		"is_over_18":   true,
 		"verified_via": models.VerifiedViaNationalRegistry,
 	}
-	claims = models.MinimizeClaims(claims, s.regulated)
 
-	credential := models.VerifiableCredential{
-		ID:       models.NewCredentialID(),
-		Type:     req.Type,
-		Subject:  req.UserID,
-		Issuer:   models.IssuerCredo,
-		IssuedAt: now,
-		Claims:   claims,
+	issuedAt, err := shared.NewIssuedAt(now)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create issuance timestamp")
 	}
 
-	if err := s.store.Save(ctx, credential); err != nil {
+	// Create domain aggregate
+	cred, err := credential.New(
+		models.NewCredentialID(),
+		req.Type,
+		req.UserID,
+		models.IssuerCredo,
+		issuedAt,
+		claims,
+	)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create credential")
+	}
+
+	// Apply minimization in regulated mode
+	if s.regulated {
+		cred = cred.Minimized()
+	}
+
+	// Convert to infrastructure model for storage
+	vcModel := credential.ToModel(cred)
+
+	if err := s.store.Save(ctx, vcModel); err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to store credential")
 	}
 
-	s.emitAudit(ctx, credential)
+	s.emitAudit(ctx, vcModel)
 
-	return &credential, nil
+	return &vcModel, nil
 }
 
 // Verify validates an issued credential by ID and returns its stored content.
@@ -140,18 +152,19 @@ func (s *Service) Verify(ctx context.Context, credentialID models.CredentialID) 
 	if credentialID == "" {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "credential_id is required")
 	}
-	if s.store == nil {
-		return nil, dErrors.New(dErrors.CodeInternal, "credential store unavailable")
-	}
 
-	credential, err := s.store.FindByID(ctx, credentialID)
+	cred, err := s.store.FindByID(ctx, credentialID)
 	if err != nil {
-		return nil, err
+		// Translate sentinel errors to domain errors at service boundary
+		if errors.Is(err, sentinel.ErrNotFound) {
+			return nil, dErrors.New(dErrors.CodeNotFound, "credential not found")
+		}
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to retrieve credential")
 	}
 
 	return &models.VerifyResult{
 		Valid:      true,
-		Credential: &credential,
+		Credential: &cred,
 	}, nil
 }
 
@@ -174,7 +187,7 @@ func (s *Service) emitAudit(ctx context.Context, credential models.VerifiableCre
 		Subject:   credential.ID.String(),
 		Decision:  "issued",
 		Reason:    "user_initiated",
-		RequestID: request.GetRequestID(ctx),
+		RequestID: requestcontext.RequestID(ctx),
 	}
 
 	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
