@@ -20,6 +20,8 @@ func NewRegistryAdapter(registryService *registryservice.Service) ports.Registry
 }
 
 // Citizen fetches a citizen record for the given user and national ID.
+// Uses CitizenWithDetails to get full PII for age computation - the VC service
+// applies its own minimization to the credential claims before output.
 func (a *RegistryAdapter) Citizen(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrymodels.CitizenRecord, error) {
-	return a.registryService.Citizen(ctx, userID, nationalID)
+	return a.registryService.CitizenWithDetails(ctx, userID, nationalID)
 }
