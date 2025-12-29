@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	id "credo/pkg/domain"
-	request "credo/pkg/platform/middleware/request"
+	"credo/pkg/requestcontext"
 )
 
 // JWTValidator defines the interface for validating JWT tokens
@@ -29,45 +29,6 @@ type JWTClaims struct {
 	JTI       string // JWT ID for revocation tracking
 }
 
-// Context keys for storing authenticated user information (typed IDs).
-type contextKeyUserID struct{}
-type contextKeySessionID struct{}
-type contextKeyClientID struct{}
-
-// ContextKeyUserID is exported for use in handlers and tests.
-var (
-	ContextKeyUserID    = contextKeyUserID{}
-	ContextKeySessionID = contextKeySessionID{}
-	ContextKeyClientID  = contextKeyClientID{}
-)
-
-// GetUserID retrieves the authenticated user ID from the context as a typed ID.
-// Returns the zero value (nil UUID) if not set.
-func GetUserID(ctx context.Context) id.UserID {
-	if userID, ok := ctx.Value(ContextKeyUserID).(id.UserID); ok {
-		return userID
-	}
-	return id.UserID{}
-}
-
-// GetSessionID retrieves the session ID from the context as a typed ID.
-// Returns the zero value (nil UUID) if not set.
-func GetSessionID(ctx context.Context) id.SessionID {
-	if sessionID, ok := ctx.Value(ContextKeySessionID).(id.SessionID); ok {
-		return sessionID
-	}
-	return id.SessionID{}
-}
-
-// GetClientID retrieves the client ID from the context as a typed ID.
-// Returns the zero value (nil UUID) if not set.
-func GetClientID(ctx context.Context) id.ClientID {
-	if clientID, ok := ctx.Value(ContextKeyClientID).(id.ClientID); ok {
-		return clientID
-	}
-	return id.ClientID{}
-}
-
 // writeJSONError writes a JSON error response with the given status code and error details.
 func writeJSONError(w http.ResponseWriter, status int, errCode, errDesc string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -79,10 +40,10 @@ func writeJSONError(w http.ResponseWriter, status int, errCode, errDesc string) 
 type revocationResult int
 
 const (
-	revocationOK       revocationResult = iota // Token is valid, not revoked
-	revocationMissingJTI                       // Token missing required JTI claim
-	revocationRevoked                          // Token has been revoked
-	revocationError                            // Error checking revocation status
+	revocationOK         revocationResult = iota // Token is valid, not revoked
+	revocationMissingJTI                         // Token missing required JTI claim
+	revocationRevoked                            // Token has been revoked
+	revocationError                              // Error checking revocation status
 )
 
 // checkRevocation verifies that a token has not been revoked.
@@ -93,7 +54,7 @@ func checkRevocation(ctx context.Context, checker TokenRevocationChecker, jti st
 	}
 
 	if jti == "" {
-		requestID := request.GetRequestID(ctx)
+		requestID := requestcontext.RequestID(ctx)
 		logger.WarnContext(ctx, "unauthorized access - missing token jti",
 			"request_id", requestID,
 		)
@@ -102,7 +63,7 @@ func checkRevocation(ctx context.Context, checker TokenRevocationChecker, jti st
 
 	revoked, err := checker.IsTokenRevoked(ctx, jti)
 	if err != nil {
-		requestID := request.GetRequestID(ctx)
+		requestID := requestcontext.RequestID(ctx)
 		logger.ErrorContext(ctx, "failed to check token revocation",
 			"error", err,
 			"request_id", requestID,
@@ -111,7 +72,7 @@ func checkRevocation(ctx context.Context, checker TokenRevocationChecker, jti st
 	}
 
 	if revoked {
-		requestID := request.GetRequestID(ctx)
+		requestID := requestcontext.RequestID(ctx)
 		logger.WarnContext(ctx, "unauthorized access - token revoked",
 			"jti", jti,
 			"request_id", requestID,
@@ -168,7 +129,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 
 			token, ok := strings.CutPrefix(authHeader, "Bearer ")
 			if !ok {
-				requestID := request.GetRequestID(ctx)
+				requestID := requestcontext.RequestID(ctx)
 				logger.WarnContext(ctx, "unauthorized access - missing token",
 					"request_id", requestID,
 				)
@@ -178,7 +139,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 
 			claims, err := validator.ValidateToken(token)
 			if err != nil {
-				requestID := request.GetRequestID(ctx)
+				requestID := requestcontext.RequestID(ctx)
 				logger.WarnContext(ctx, "unauthorized access - invalid token",
 					"error", err,
 					"request_id", requestID,
@@ -200,7 +161,7 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 			// Parse string IDs to typed IDs
 			parsed, err := parseClaims(claims)
 			if err != nil {
-				requestID := request.GetRequestID(ctx)
+				requestID := requestcontext.RequestID(ctx)
 				logger.WarnContext(ctx, "unauthorized access - malformed token claims",
 					"error", err,
 					"request_id", requestID,
@@ -210,9 +171,9 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 			}
 
 			// Store typed IDs in context
-			ctx = context.WithValue(ctx, ContextKeyUserID, parsed.UserID)
-			ctx = context.WithValue(ctx, ContextKeySessionID, parsed.SessionID)
-			ctx = context.WithValue(ctx, ContextKeyClientID, parsed.ClientID)
+			ctx = requestcontext.WithUserID(ctx, parsed.UserID)
+			ctx = requestcontext.WithSessionID(ctx, parsed.SessionID)
+			ctx = requestcontext.WithClientID(ctx, parsed.ClientID)
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

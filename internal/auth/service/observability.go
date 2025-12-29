@@ -6,7 +6,7 @@ import (
 	id "credo/pkg/domain"
 	"credo/pkg/platform/attrs"
 	"credo/pkg/platform/audit"
-	request "credo/pkg/platform/middleware/request"
+	"credo/pkg/requestcontext"
 )
 
 // Observability helpers for logging, auditing, and metrics.
@@ -14,7 +14,7 @@ import (
 
 func (s *Service) logAudit(ctx context.Context, event string, attributes ...any) {
 	// Add request_id from context if available
-	requestID := request.GetRequestID(ctx)
+	requestID := requestcontext.RequestID(ctx)
 	if requestID != "" {
 		attributes = append(attributes, "request_id", requestID)
 	}
@@ -58,7 +58,7 @@ func parseAuthFailureAttrs(ctx context.Context, attributes []any) authFailureAtt
 	userIDStr := attrs.ExtractString(attributes, "user_id")
 	userID, _ := id.ParseUserID(userIDStr)
 	return authFailureAttrs{
-		requestID: request.GetRequestID(ctx),
+		requestID: requestcontext.RequestID(ctx),
 		userIDStr: userIDStr,
 		userID:    userID,
 		email:     attrs.ExtractString(attributes, "email"),
@@ -79,7 +79,7 @@ func (s *Service) logAuthFailure(ctx context.Context, reason string, isError boo
 	if s.logger == nil {
 		return
 	}
-	// Add request_id from context if available
+	// Add request_id from parsed attrs if available
 	if parsed.requestID != "" {
 		attributes = append(attributes, "request_id", parsed.requestID)
 	}

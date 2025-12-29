@@ -8,8 +8,7 @@ import (
 	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	devicemw "credo/pkg/platform/middleware/device"
-	metadata "credo/pkg/platform/middleware/metadata"
+	"credo/pkg/requestcontext"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -72,9 +71,9 @@ func (s *ServiceSuite) TestAuthorizationCodeFlow() {
 		req := baseReq
 		req.State = "xyz"
 		userAgent := "Mozilla/5.0"
-		ctx := metadata.WithClientMetadata(context.Background(), "192.168.1.1", userAgent)
+		ctx := requestcontext.WithClientMetadata(context.Background(), "192.168.1.1", userAgent)
 		// Inject pre-computed fingerprint (as Device middleware would)
-		ctx = devicemw.WithDeviceFingerprint(ctx, deviceSvc.ComputeFingerprint(userAgent))
+		ctx = requestcontext.WithDeviceFingerprint(ctx, deviceSvc.ComputeFingerprint(userAgent))
 
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
 

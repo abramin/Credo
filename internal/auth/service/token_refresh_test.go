@@ -9,7 +9,7 @@ import (
 	tenantModels "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	devicectx "credo/pkg/platform/middleware/device"
+	"credo/pkg/requestcontext"
 
 	"github.com/google/uuid"
 	"go.uber.org/mock/gomock"
@@ -198,7 +198,7 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		refreshRec := *validRefreshToken
 		sess := *validSession
 		sess.DeviceID = "session-device"
-		ctx := devicectx.WithDeviceID(context.Background(), "cookie-device-1")
+		ctx := requestcontext.WithDeviceID(context.Background(), "cookie-device-1")
 
 		// Enable device binding for this specific scenario
 		prevBinding := s.service.DeviceBindingEnabled

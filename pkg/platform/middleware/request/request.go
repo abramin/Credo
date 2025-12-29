@@ -1,7 +1,6 @@
 package request
 
 import (
-	"context"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -9,8 +8,8 @@ import (
 	"runtime/debug"
 	"time"
 
-	metadata "credo/pkg/platform/middleware/metadata"
 	"credo/pkg/platform/privacy"
+	"credo/pkg/requestcontext"
 
 	"github.com/google/uuid"
 )
@@ -35,7 +34,7 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 						"stack", string(debug.Stack()),
 						"path", r.URL.Path,
 						"method", r.Method,
-						"request_id", GetRequestID(ctx),
+						"request_id", requestcontext.RequestID(ctx),
 					)
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				}
@@ -56,7 +55,7 @@ func RequestID(next http.Handler) http.Handler {
 			requestID = uuid.New().String()
 		}
 
-		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
+		ctx := requestcontext.WithRequestID(r.Context(), requestID)
 		w.Header().Set("X-Request-ID", requestID)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -72,16 +71,6 @@ func isValidRequestID(id string) bool {
 	return validRequestID.MatchString(id)
 }
 
-type requestIDKey struct{}
-
-// GetRequestID retrieves the request ID from the context.
-func GetRequestID(ctx context.Context) string {
-	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
-		return id
-	}
-	return ""
-}
-
 // Logger logs HTTP requests with method, path, status code, duration, and request ID.
 func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -93,7 +82,7 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 
 			duration := time.Since(start)
 			ctx := r.Context()
-			requestID := GetRequestID(ctx)
+			requestID := requestcontext.RequestID(ctx)
 
 			// Skip noisy health checks unless they fail.
 			if r.URL.Path == "/health" && wrapped.statusCode < http.StatusInternalServerError {
@@ -106,7 +95,7 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 				"status", wrapped.statusCode,
 				"duration_ms", duration.Milliseconds(),
 				"request_id", requestID,
-				"remote_addr_prefix", privacy.AnonymizeIP(metadata.GetClientIP(ctx)),
+				"remote_addr_prefix", privacy.AnonymizeIP(requestcontext.ClientIP(ctx)),
 			)
 		})
 	}
