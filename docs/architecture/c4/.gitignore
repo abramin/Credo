@@ -1,0 +1,7 @@
+# Structurizr Lite local cache
+.structurizr/
+usr/
+
+# Exported images (regenerate with CLI)
+images/*.png
+images/*.svg
