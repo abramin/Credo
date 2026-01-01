@@ -8,6 +8,7 @@ import (
 	registrycontracts "credo/contracts/registry"
 	"credo/internal/decision/metrics"
 	"credo/internal/decision/ports"
+	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	"credo/pkg/requestcontext"
 )
@@ -54,6 +55,8 @@ func WithLogger(l *slog.Logger) Option {
 
 // New creates a new decision service with required dependencies.
 // Panics if required dependencies are nil - fail fast at startup.
+// All ports are required for compliance: consent gates data access,
+// auditor ensures regulatory audit trail.
 func New(
 	registry ports.RegistryPort,
 	vc ports.VCPort,
@@ -67,7 +70,12 @@ func New(
 	if vc == nil {
 		panic("decision.New: vc port is required")
 	}
-	// consent and auditor can be nil (optional)
+	if consent == nil {
+		panic("decision.New: consent port is required for compliance")
+	}
+	if auditor == nil {
+		panic("decision.New: auditor is required for compliance audit trail")
+	}
 
 	s := &Service{
 		registry: registry,
@@ -114,8 +122,10 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateR
 	// Build result
 	result := s.buildResult(req.Purpose, outcome, evidence, derived)
 
-	// Emit audit event (fail-open for non-sanctions, fail-closed for sanctions fail)
-	s.emitAudit(ctx, req, result)
+	// Emit audit event (fail-open for non-sanctions, fail-closed for sanctions)
+	if err := s.emitAudit(ctx, req, result); err != nil {
+		return nil, err
+	}
 
 	// Record metrics
 	if s.metrics != nil {
@@ -126,9 +136,6 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateR
 }
 
 func (s *Service) requireConsent(ctx context.Context, userID interface{ String() string }) error {
-	if s.consent == nil {
-		return nil
-	}
 	return s.consent.RequireConsent(ctx, userID.String(), consentPurpose)
 }
 
@@ -267,41 +274,44 @@ func (s *Service) buildInput(evidence *GatheredEvidence, derived DerivedIdentity
 	return input
 }
 
-func (s *Service) emitAudit(ctx context.Context, req EvaluateRequest, result *EvaluateResult) {
-	if s.auditor == nil {
-		return
-	}
-
+// emitAudit publishes a decision audit event.
+// Returns an error only for sanctions-related decisions (fail-closed semantics).
+// Non-sanctions decisions use best-effort logging.
+func (s *Service) emitAudit(ctx context.Context, req EvaluateRequest, result *EvaluateResult) error {
 	event := audit.Event{
-		Category:  audit.CategoryCompliance,
+		Category:  audit.EventDecisionMade.Category(),
 		Timestamp: time.Now(),
 		UserID:    req.UserID,
-		Action:    "decision_made",
+		Action:    string(audit.EventDecisionMade),
 		Purpose:   string(req.Purpose),
 		Decision:  string(result.Status),
 		Reason:    string(result.Reason),
 		RequestID: requestcontext.RequestID(ctx),
 	}
 
-	// For sanctions failures, use fail-closed semantics
-	if result.Status == DecisionFail && result.Reason == ReasonSanctioned {
+	// For sanctions-related decisions, use fail-closed semantics.
+	// The audit trail MUST be recorded before returning the decision.
+	isSanctionsRelated := result.Reason == ReasonSanctioned || req.Purpose == PurposeSanctionsScreening
+	if isSanctionsRelated {
 		if err := s.auditor.Emit(ctx, event); err != nil {
 			if s.logger != nil {
 				s.logger.ErrorContext(ctx, "CRITICAL: audit failed for sanctions decision - blocking response",
 					"user_id", req.UserID,
+					"purpose", req.Purpose,
 					"error", err,
 				)
 			}
-			// Note: In production, this should block the response.
-			// For now, we log but allow the decision to proceed.
+			return dErrors.New(dErrors.CodeInternal, "decision audit unavailable")
 		}
-	} else {
-		// Best-effort for non-sanctions decisions
-		if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
-			s.logger.WarnContext(ctx, "failed to emit decision audit event",
-				"error", err,
-				"user_id", req.UserID,
-			)
-		}
+		return nil
 	}
+
+	// Best-effort for non-sanctions decisions
+	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
+		s.logger.WarnContext(ctx, "failed to emit decision audit event",
+			"error", err,
+			"user_id", req.UserID,
+		)
+	}
+	return nil
 }
