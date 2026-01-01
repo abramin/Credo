@@ -90,7 +90,7 @@ func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.C
 
 	record, err := s.registry.Citizen(ctx, req.UserID, req.NationalID)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeExternalError(err, "registry lookup failed")
 	}
 	if record == nil || !record.Valid {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "invalid citizen record")
@@ -171,9 +171,12 @@ func (s *Service) Verify(ctx context.Context, credentialID models.CredentialID) 
 
 func (s *Service) requireVCIssuanceConsent(ctx context.Context, userID id.UserID) error {
 	if s.consentPort == nil {
-		return nil
+		return dErrors.New(dErrors.CodeInternal, "consent service unavailable")
 	}
-	return s.consentPort.RequireVCIssuance(ctx, userID)
+	if err := s.consentPort.RequireVCIssuance(ctx, userID); err != nil {
+		return sanitizeExternalError(err, "consent check failed")
+	}
+	return nil
 }
 
 func (s *Service) emitAudit(ctx context.Context, credential models.CredentialRecord) {
@@ -226,4 +229,20 @@ func (s *Service) emitVerifyAudit(ctx context.Context, credential models.Credent
 func isOver18(birthDate, now time.Time) bool {
 	adultAt := birthDate.UTC().AddDate(18, 0, 0)
 	return !now.UTC().Before(adultAt)
+}
+
+func sanitizeExternalError(err error, msg string) error {
+	if err == nil {
+		return nil
+	}
+
+	var domainErr *dErrors.Error
+	if errors.As(err, &domainErr) {
+		if domainErr.Code == dErrors.CodeInternal {
+			return dErrors.New(dErrors.CodeInternal, msg)
+		}
+		return err
+	}
+
+	return dErrors.Wrap(err, dErrors.CodeInternal, msg)
 }
