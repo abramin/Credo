@@ -2,14 +2,28 @@
 // Implements the consent management UI for PRD-002
 // Assumes backend is always available
 
+const CONSENT_API_BASE_URL = (() => {
+    if (window.location.port === '3000') {
+        return '/api';
+    }
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://localhost:8080';
+    }
+    return '';
+})();
+
+const consentApiUrl = (endpoint) => `${CONSENT_API_BASE_URL}${endpoint}`;
+
 document.addEventListener('alpine:init', () => {
     Alpine.data('consentDemo', () => ({
         // State
         loading: false,
         purposesLoading: false,
         consentsLoading: false,
+        runnerLoading: false,
         error: null,
         success: null,
+        activeTab: 'consents',
 
         // Authentication
         isAuthenticated: false,
@@ -59,6 +73,77 @@ document.addEventListener('alpine:init', () => {
             }
         ],
         consents: [],
+        selectedScenario: 'valid',
+        runnerNationalId: 'CITIZEN123456',
+        runnerPurpose: 'age_verification',
+        lastCredentialId: '',
+        runnerSteps: [
+            {
+                id: 'citizen',
+                name: 'Citizen Registry',
+                description: 'POST /registry/citizen'
+            },
+            {
+                id: 'sanctions',
+                name: 'Sanctions Check',
+                description: 'POST /registry/sanctions'
+            },
+            {
+                id: 'vc_issue',
+                name: 'Issue Credential',
+                description: 'POST /vc/issue'
+            },
+            {
+                id: 'vc_verify',
+                name: 'Verify Credential',
+                description: 'POST /vc/verify'
+            },
+            {
+                id: 'decision',
+                name: 'Evaluate Decision',
+                description: 'POST /decision/evaluate'
+            }
+        ],
+        runnerScenarios: [
+            {
+                id: 'valid',
+                label: 'Valid',
+                nationalId: 'CITIZEN123456',
+                hint: 'Expected: valid citizen'
+            },
+            {
+                id: 'sanctioned',
+                label: 'Sanctioned',
+                nationalId: 'SANCTIONED999',
+                hint: 'Expected: sanctions listed'
+            },
+            {
+                id: 'invalid',
+                label: 'Invalid',
+                nationalId: 'INVALID999',
+                hint: 'Expected: invalid citizen'
+            },
+            {
+                id: 'underage',
+                label: 'Underage',
+                nationalId: 'UNDERAGE01',
+                hint: 'Depends on registry data'
+            }
+        ],
+        runnerResults: {
+            citizen: null,
+            sanctions: null,
+            vc_issue: null,
+            vc_verify: null,
+            decision: null
+        },
+        runnerExpanded: {
+            citizen: false,
+            sanctions: false,
+            vc_issue: false,
+            vc_verify: false,
+            decision: false
+        },
 
         // Initialization
         init() {
@@ -77,6 +162,233 @@ document.addEventListener('alpine:init', () => {
             });
         },
 
+        applyScenario(scenario) {
+            this.selectedScenario = scenario.id;
+            this.runnerNationalId = scenario.nationalId;
+        },
+
+        resetRunner() {
+            this.runnerResults = {
+                citizen: null,
+                sanctions: null,
+                vc_issue: null,
+                vc_verify: null,
+                decision: null
+            };
+            this.runnerExpanded = {
+                citizen: false,
+                sanctions: false,
+                vc_issue: false,
+                vc_verify: false,
+                decision: false
+            };
+            this.lastCredentialId = '';
+        },
+
+        async runAll() {
+            if (!this.runnerNationalId) {
+                this.error = 'Please enter a National ID before running the pipeline.';
+                return;
+            }
+
+            if (!this.isAuthenticated || !this.accessToken) {
+                this.error = 'Not authenticated. Please get an access token first.';
+                return;
+            }
+
+            this.runnerLoading = true;
+            this.error = null;
+            this.success = null;
+            this.resetRunner();
+
+            await this.runCitizen();
+            await this.runSanctions();
+            await this.runIssueVC();
+            await this.runVerifyVC();
+            await this.runDecision();
+
+            this.runnerLoading = false;
+        },
+
+        async runStep(stepId) {
+            if (!this.runnerNationalId) {
+                this.error = 'Please enter a National ID before running a step.';
+                return;
+            }
+
+            if (!this.isAuthenticated || !this.accessToken) {
+                this.error = 'Not authenticated. Please get an access token first.';
+                return;
+            }
+
+            this.runnerLoading = true;
+            try {
+                switch (stepId) {
+                    case 'citizen':
+                        await this.runCitizen();
+                        break;
+                    case 'sanctions':
+                        await this.runSanctions();
+                        break;
+                    case 'vc_issue':
+                        await this.runIssueVC();
+                        break;
+                    case 'vc_verify':
+                        await this.runVerifyVC();
+                        break;
+                    case 'decision':
+                        await this.runDecision();
+                        break;
+                    default:
+                        break;
+                }
+            } finally {
+                this.runnerLoading = false;
+            }
+        },
+
+        async runCitizen() {
+            await this.runnerRequest('citizen', '/registry/citizen', {
+                national_id: this.runnerNationalId
+            });
+        },
+
+        async runSanctions() {
+            await this.runnerRequest('sanctions', '/registry/sanctions', {
+                national_id: this.runnerNationalId
+            });
+        },
+
+        async runIssueVC() {
+            const result = await this.runnerRequest('vc_issue', '/vc/issue', {
+                type: 'AgeOver18',
+                national_id: this.runnerNationalId
+            });
+
+            if (result && result.state === 'success') {
+                const body = result.body || {};
+                this.lastCredentialId = body.credential_id || body.credentialId || body.ID || '';
+            }
+        },
+
+        async runVerifyVC() {
+            if (!this.lastCredentialId) {
+                this.runnerResults.vc_verify = {
+                    state: 'skipped',
+                    status: null,
+                    durationMs: 0,
+                    body: null,
+                    error: 'No credential_id available. Issue a credential first.'
+                };
+                return;
+            }
+
+            await this.runnerRequest('vc_verify', '/vc/verify', {
+                credential_id: this.lastCredentialId
+            });
+        },
+
+        async runDecision() {
+            await this.runnerRequest('decision', '/decision/evaluate', {
+                purpose: this.runnerPurpose,
+                context: {
+                    national_id: this.runnerNationalId
+                }
+            });
+        },
+
+        async runnerRequest(stepId, endpoint, payload) {
+            const start = performance.now();
+            try {
+                const response = await fetch(consentApiUrl(endpoint), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + this.accessToken
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const durationMs = Math.round(performance.now() - start);
+                const contentType = response.headers.get('content-type') || '';
+                let body = null;
+
+                if (response.status !== 204) {
+                    if (contentType.includes('application/json')) {
+                        body = await response.json();
+                    } else {
+                        body = await response.text();
+                    }
+                }
+
+                const result = {
+                    state: response.ok ? 'success' : 'error',
+                    status: response.status,
+                    durationMs,
+                    body,
+                    error: response.ok ? null : (body && (body.error_description || body.error || body.message)) || response.statusText
+                };
+
+                this.runnerResults[stepId] = result;
+                return result;
+            } catch (err) {
+                const durationMs = Math.round(performance.now() - start);
+                const result = {
+                    state: 'error',
+                    status: 0,
+                    durationMs,
+                    body: null,
+                    error: err.message || 'Network error'
+                };
+                this.runnerResults[stepId] = result;
+                return result;
+            }
+        },
+
+        toggleRunnerDetails(stepId) {
+            this.runnerExpanded[stepId] = !this.runnerExpanded[stepId];
+        },
+
+        runnerCardClass(stepId) {
+            const result = this.runnerResults[stepId];
+            if (!result) return 'border-gray-200 bg-white';
+            if (result.state === 'success') return 'border-green-200 bg-green-50';
+            if (result.state === 'error') return 'border-red-200 bg-red-50';
+            if (result.state === 'skipped') return 'border-yellow-200 bg-yellow-50';
+            return 'border-gray-200 bg-white';
+        },
+
+        runnerStatusClass(stepId) {
+            const result = this.runnerResults[stepId];
+            if (!result) return '';
+            if (result.state === 'success') return 'pass';
+            if (result.state === 'error') return 'fail';
+            if (result.state === 'skipped') return 'pending';
+            return '';
+        },
+
+        runnerStatusText(stepId) {
+            const result = this.runnerResults[stepId];
+            if (!result) return 'Not Run';
+            if (result.state === 'success') return 'OK';
+            if (result.state === 'error') return 'Error';
+            if (result.state === 'skipped') return 'Skipped';
+            return 'Unknown';
+        },
+
+        formatRunnerBody(stepId) {
+            const result = this.runnerResults[stepId];
+            if (!result) return '';
+            const payload = result.body || { error: result.error || 'No response body' };
+            if (typeof payload === 'string') {
+                return payload;
+            }
+            try {
+                return JSON.stringify(payload, null, 2);
+            } catch (err) {
+                return String(payload);
+            }
+        },
         // Check if OAuth token is available in URL or sessionStorage
         checkForToken() {
             // Look for token in URL query parameter (e.g., ?token=xxx)
@@ -161,7 +473,7 @@ document.addEventListener('alpine:init', () => {
 
             try {
                 // Fetch from backend: GET /auth/consent
-                const response = await fetch('/auth/consent', {
+                const response = await fetch(consentApiUrl('/auth/consent'), {
                     method: 'GET',
                     headers: {
                         'Content-Type': 'application/json',
@@ -239,7 +551,7 @@ document.addEventListener('alpine:init', () => {
                 };
 
                 // Call backend: POST /auth/consent
-                const response = await fetch('/auth/consent', {
+                const response = await fetch(consentApiUrl('/auth/consent'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -298,7 +610,7 @@ document.addEventListener('alpine:init', () => {
                 };
 
                 // Call backend: POST /auth/consent/revoke
-                const response = await fetch('/auth/consent/revoke', {
+                const response = await fetch(consentApiUrl('/auth/consent/revoke'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
