@@ -25,8 +25,9 @@ func NewRegistryAdapter(registryService *registryService.Service) ports.Registry
 }
 
 // CheckCitizen retrieves citizen record by national ID
+// Uses CitizenWithDetails to get DOB for age derivation (decision service will minimize its own output)
 func (a *RegistryAdapter) CheckCitizen(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*ports.CitizenRecord, error) {
-	record, err := a.registryService.Citizen(ctx, userID, nationalID)
+	record, err := a.registryService.CitizenWithDetails(ctx, userID, nationalID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,25 +57,33 @@ func (a *RegistryAdapter) CheckSanctions(ctx context.Context, userID id.UserID, 
 }
 
 // Check performs combined citizen + sanctions lookup
+// Uses CitizenWithDetails for citizen to get DOB for age derivation
 func (a *RegistryAdapter) Check(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*ports.CitizenRecord, *ports.SanctionsRecord, error) {
-	result, err := a.registryService.Check(ctx, userID, nationalID)
+	// Use CitizenWithDetails to bypass regulated mode minimization
+	// The decision service needs DOB to compute is_over_18 and will minimize its own output
+	citizenRecord, err := a.registryService.CitizenWithDetails(ctx, userID, nationalID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sanctionsRecord, err := a.registryService.Sanctions(ctx, userID, nationalID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	citizen := &ports.CitizenRecord{
-		NationalID:  result.Citizen.NationalID,
-		FullName:    result.Citizen.FullName,
-		DateOfBirth: result.Citizen.DateOfBirth,
-		Valid:       result.Citizen.Valid,
-		CheckedAt:   result.Citizen.CheckedAt,
+		NationalID:  citizenRecord.NationalID,
+		FullName:    citizenRecord.FullName,
+		DateOfBirth: citizenRecord.DateOfBirth,
+		Valid:       citizenRecord.Valid,
+		CheckedAt:   citizenRecord.CheckedAt,
 	}
 
 	sanctions := &ports.SanctionsRecord{
-		NationalID: result.Sanction.NationalID,
-		Listed:     result.Sanction.Listed,
-		Source:     result.Sanction.Source,
-		CheckedAt:  result.Sanction.CheckedAt,
+		NationalID: sanctionsRecord.NationalID,
+		Listed:     sanctionsRecord.Listed,
+		Source:     sanctionsRecord.Source,
+		CheckedAt:  sanctionsRecord.CheckedAt,
 	}
 
 	return citizen, sanctions, nil

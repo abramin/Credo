@@ -13,19 +13,6 @@ Feature: Decision Engine Evaluation
   # =============================================
 
   @decision @age-verification @normal
-  Scenario: Age verification passes with existing credential
-    Given the citizen registry contains a record for "ADULT123456" with birth date "1990-01-15"
-    And I request an AgeOver18 credential with national_id "ADULT123456"
-    When I evaluate "age_verification" for national_id "ADULT123456"
-    Then the response status should be 200
-    And the decision status should be "pass"
-    And the decision reason should be "all_checks_passed"
-    And the evidence field "is_over_18" should be true
-    And the evidence field "citizen_valid" should be true
-    And the evidence field "has_credential" should be true
-    And the evidence field "sanctions_listed" should be false
-
-  @decision @age-verification @normal
   Scenario: Age verification passes with conditions when no credential
     Given the citizen registry contains a record for "NOCRED123456" with birth date "1990-01-15"
     When I evaluate "age_verification" for national_id "NOCRED123456"
@@ -36,6 +23,22 @@ Feature: Decision Engine Evaluation
     And the evidence field "is_over_18" should be true
     And the evidence field "citizen_valid" should be true
     And the evidence field "has_credential" should be false
+
+  @decision @age-verification @normal
+  Scenario: Age verification passes with existing credential
+    # Use a separate user to avoid credential state pollution from other scenarios
+    Given I am authenticated as "decision-with-vc@example.com"
+    And I grant consent for purposes "decision_evaluation,registry_check,vc_issuance"
+    And the citizen registry contains a record for "ADULT123456" with birth date "1990-01-15"
+    And I request an AgeOver18 credential with national_id "ADULT123456"
+    When I evaluate "age_verification" for national_id "ADULT123456"
+    Then the response status should be 200
+    And the decision status should be "pass"
+    And the decision reason should be "all_checks_passed"
+    And the evidence field "is_over_18" should be true
+    And the evidence field "citizen_valid" should be true
+    And the evidence field "has_credential" should be true
+    And the evidence field "sanctions_listed" should be false
 
   # =============================================
   # Age Verification - Failure Cases (Rule Chain)
