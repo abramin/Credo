@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"credo/internal/evidence/vc/models"
+	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
 )
 
@@ -17,4 +18,7 @@ var ErrNotFound = sentinel.ErrNotFound
 type Store interface {
 	Save(ctx context.Context, credential models.CredentialRecord) error
 	FindByID(ctx context.Context, id models.CredentialID) (models.CredentialRecord, error)
+	// FindBySubjectAndType retrieves the most recent credential by subject and type.
+	// Returns ErrNotFound if no matching credential exists.
+	FindBySubjectAndType(ctx context.Context, subject id.UserID, credType models.CredentialType) (models.CredentialRecord, error)
 }
