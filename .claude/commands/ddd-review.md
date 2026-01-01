@@ -198,6 +198,53 @@ if token.IsExpiredAt(s.clock.Now()) { ... }
 
 - What is the aggregate root here, and what invariant does it protect?
 - Are state transitions explicit and enforced (methods, closed sets)?
+
+## Doc comment rules (when asked to add GoDoc comments)
+
+You are a Go engineer working in a DDD-style codebase. Your task is to add or improve Go doc comments for functions and methods in the selected file(s).
+
+### Goal
+
+- Add thorough doc comments ONLY where they add value:
+  - Exported types/functions/methods
+  - Any method/function with side effects (storage writes, external calls, logging, metrics, randomness, time, goroutines)
+  - Any method with non-obvious domain rules, invariants, state transitions, security implications, or tricky concurrency
+- Do NOT add verbose comments for trivial helpers that simply do what the name says.
+
+### Style rules (GoDoc)
+
+- Use line comments `//` (not block comments).
+- First line must start with the identifier name and be a complete sentence.
+- Keep the first 1–2 lines as a short summary. Then add sections only if relevant.
+- Be specific about DDD intent: aggregate, invariant, state transition, business rule.
+- If something is unknown from local context, state assumptions explicitly instead of inventing facts.
+
+### Doc comment sections (include only when relevant)
+
+- Domain intent: aggregate/entity/value object, purpose, invariants enforced, state transitions.
+- Usage: where it should be called from (handler/service/domain), required preconditions.
+- Inputs/Outputs: only if not obvious.
+- Side effects: storage writes, external calls, emitted events, audit logs, metrics, time, randomness, goroutines.
+- Errors: list expected domain errors vs unexpected system errors; mention conflict semantics.
+- Concurrency: thread-safety, idempotency, optimistic locking, tx boundaries.
+- Security: trust boundaries, authz assumptions, tenant isolation, sensitive data handling.
+- Observability: what caller should measure/log (don’t add logging unless asked).
+- Example: only for complex public APIs.
+
+### Mechanical constraints
+
+- Do not change behavior.
+- Do not rename identifiers.
+- Do not reformat unrelated code.
+- If you need to add small helper error comments (e.g., sentinel errors), do so sparingly.
+
+### Output
+
+- Edit code in place by adding/updating doc comments directly above the identifier.
+- After edits, provide a short bullet list summarizing:
+  - Which identifiers were documented
+  - Any assumptions you made
+  - Any spots you skipped as “too trivial” (with 1-line rationale)
 - Are domain checks expressed as methods (`IsPending`, `CanRotate`)?
 - Are request validation rules mistakenly treated as domain invariants?
 

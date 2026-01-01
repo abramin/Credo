@@ -27,6 +27,10 @@ import (
 	consentmetrics "credo/internal/consent/metrics"
 	consentService "credo/internal/consent/service"
 	consentStore "credo/internal/consent/store"
+	"credo/internal/decision"
+	decisionAdapters "credo/internal/decision/adapters"
+	decisionHandler "credo/internal/decision/handler"
+	decisionmetrics "credo/internal/decision/metrics"
 	registryAdapters "credo/internal/evidence/registry/adapters"
 	registryHandler "credo/internal/evidence/registry/handler"
 	registrymetrics "credo/internal/evidence/registry/metrics"
@@ -122,6 +126,12 @@ type registryModule struct {
 type vcModule struct {
 	Service *vcService.Service
 	Handler *vcHandler.Handler
+	Store   vcStore.Store
+}
+
+type decisionModule struct {
+	Service *decision.Service
+	Handler *decisionHandler.Handler
 }
 
 type tenantClientLookup struct {
@@ -171,6 +181,7 @@ func main() {
 	consentMod := buildConsentModule(infra)
 	registryMod := buildRegistryModule(infra, consentMod.Service)
 	vcMod := buildVCModule(infra, consentMod.Service, registryMod.Service)
+	decisionMod := buildDecisionModule(infra, registryMod.Service, vcMod.Store, consentMod.Service)
 
 	startCleanupWorker(appCtx, infra.Log, authMod.Cleanup)
 	go func() {
@@ -180,7 +191,7 @@ func main() {
 	}()
 
 	r := setupRouter(infra)
-	registerRoutes(r, infra, authMod, consentMod, tenantMod, registryMod, vcMod, rateLimitMiddleware, clientRateLimitMiddleware)
+	registerRoutes(r, infra, authMod, consentMod, tenantMod, registryMod, vcMod, decisionMod, rateLimitMiddleware, clientRateLimitMiddleware)
 
 	mainSrv := httpserver.New(infra.Cfg.Addr, r)
 	startServer(mainSrv, infra.Log, "main API")
@@ -531,6 +542,40 @@ func buildVCModule(infra *infraBundle, consentSvc *consentService.Service, regis
 	return &vcModule{
 		Service: svc,
 		Handler: vcHandler.New(svc, infra.Log),
+		Store:   store,
+	}
+}
+
+func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Service, vcSt vcStore.Store, consentSvc *consentService.Service) *decisionModule {
+	// Create adapters
+	registryAdapter := decisionAdapters.NewRegistryAdapter(registrySvc)
+	vcAdapter := decisionAdapters.NewVCAdapter(vcSt)
+	consentAdapter := decisionAdapters.NewConsentAdapter(consentSvc)
+
+	// Create audit publisher
+	auditPort := auditpublisher.NewPublisher(
+		auditstore.NewInMemoryStore(),
+		auditpublisher.WithAsyncBuffer(1000),
+		auditpublisher.WithMetrics(infra.AuditMetrics),
+		auditpublisher.WithPublisherLogger(infra.Log),
+	)
+
+	// Create metrics
+	metrics := decisionmetrics.New()
+
+	// Create service
+	svc := decision.New(
+		registryAdapter,
+		vcAdapter,
+		consentAdapter,
+		auditPort,
+		decision.WithMetrics(metrics),
+		decision.WithLogger(infra.Log),
+	)
+
+	return &decisionModule{
+		Service: svc,
+		Handler: decisionHandler.New(svc, infra.Log, metrics),
 	}
 }
 
@@ -587,7 +632,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 }
 
 // registerRoutes wires HTTP handlers to the shared router
-func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, registryMod *registryModule, vcMod *vcModule, rateLimitMiddleware *rateLimitMW.Middleware, clientRateLimitMiddleware *rateLimitMW.ClientMiddleware) {
+func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, registryMod *registryModule, vcMod *vcModule, decisionMod *decisionModule, rateLimitMiddleware *rateLimitMW.Middleware, clientRateLimitMiddleware *rateLimitMW.ClientMiddleware) {
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
@@ -635,6 +680,8 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 		registryMod.Handler.Register(r)
 		// Verifiable credential endpoints
 		vcMod.Handler.Register(r)
+		// Decision endpoints
+		decisionMod.Handler.Register(r)
 	})
 
 	// Admin endpoints - ClassWrite (50 req/min)

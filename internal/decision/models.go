@@ -5,8 +5,10 @@ import (
 
 	registrycontracts "credo/contracts/registry"
 	authModel "credo/internal/auth/models"
+	"credo/internal/decision/ports"
 	vcmodels "credo/internal/evidence/vc/models"
 	id "credo/pkg/domain"
+	dErrors "credo/pkg/domain-errors"
 )
 
 // DecisionOutcome enumerates the possible gateway decisions.
@@ -55,4 +57,75 @@ func deriveIsOver18(dob string) bool {
 	}
 	years := time.Since(t).Hours() / 24 / 365.25
 	return years >= 18
+}
+
+// Purpose defines supported decision purposes.
+type Purpose string
+
+const (
+	PurposeAgeVerification    Purpose = "age_verification"
+	PurposeSanctionsScreening Purpose = "sanctions_screening"
+)
+
+// ParsePurpose validates and parses a purpose string.
+func ParsePurpose(s string) (Purpose, error) {
+	switch Purpose(s) {
+	case PurposeAgeVerification, PurposeSanctionsScreening:
+		return Purpose(s), nil
+	default:
+		return "", dErrors.New(dErrors.CodeBadRequest, "unsupported purpose: must be age_verification or sanctions_screening")
+	}
+}
+
+// DecisionReason encodes the reason for a decision.
+type DecisionReason string
+
+const (
+	ReasonAllChecksPassed   DecisionReason = "all_checks_passed"
+	ReasonSanctioned        DecisionReason = "sanctioned"
+	ReasonInvalidCitizen    DecisionReason = "invalid_citizen"
+	ReasonUnderage          DecisionReason = "underage"
+	ReasonMissingCredential DecisionReason = "missing_credential"
+	ReasonNotSanctioned     DecisionReason = "not_sanctioned"
+)
+
+// EvaluateRequest is the domain-level input for decision evaluation.
+type EvaluateRequest struct {
+	UserID     id.UserID
+	Purpose    Purpose
+	NationalID id.NationalID
+}
+
+// EvaluateResult is the structured outcome of a decision evaluation.
+type EvaluateResult struct {
+	Status      DecisionOutcome
+	Reason      DecisionReason
+	Conditions  []string
+	Evidence    EvidenceSummary
+	EvaluatedAt time.Time
+}
+
+// EvidenceSummary captures the non-PII evidence used in the decision.
+type EvidenceSummary struct {
+	CitizenValid    *bool
+	SanctionsListed bool
+	HasCredential   *bool
+	IsOver18        *bool
+}
+
+// GatheredEvidence holds raw evidence before rule evaluation.
+// Internal use only - not exposed in API responses.
+type GatheredEvidence struct {
+	Citizen    *ports.CitizenRecord
+	Sanctions  *ports.SanctionsRecord
+	Credential *vcmodels.CredentialRecord
+	FetchedAt  time.Time
+	Latencies  EvidenceLatencies
+}
+
+// EvidenceLatencies tracks per-source fetch times for metrics.
+type EvidenceLatencies struct {
+	Citizen    time.Duration
+	Sanctions  time.Duration
+	Credential time.Duration
 }
