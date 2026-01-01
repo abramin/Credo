@@ -73,7 +73,8 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// Issue issues a new AgeOver18 credential after registry verification.
+// Issue issues a new AgeOver18 credential after consent and registry verification.
+// Side effects: registry lookup, store write, audit emission, and time retrieval.
 func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.CredentialRecord, error) {
 	if err := s.validateIssueRequest(req); err != nil {
 		return nil, err
@@ -163,6 +164,7 @@ func (s *Service) buildCredentialModel(req models.IssueRequest, record *registry
 }
 
 // Verify validates an issued credential by ID and returns its stored content.
+// Side effects: store read, audit emission, and domain error translation.
 func (s *Service) Verify(ctx context.Context, credentialID models.CredentialID) (*models.VerifyResult, error) {
 	if credentialID == "" {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "credential_id is required")

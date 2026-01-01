@@ -90,7 +90,8 @@ func New(
 }
 
 // Evaluate performs a complete decision evaluation for the given request.
-// This is the main entry point that orchestrates evidence gathering and rule evaluation.
+// It checks consent, gathers registry/VC evidence, evaluates rules, emits an audit event,
+// and records metrics using a single evaluation timestamp.
 func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateResult, error) {
 	// Single authoritative timestamp for the entire evaluation.
 	// Injected into all functions for deterministic testing and consistent audit trails.
