@@ -37,11 +37,53 @@ func (s *Service) gatherEvidence(ctx context.Context, req EvaluateRequest, evalT
 	// Launch evidence fetches based on purpose
 	switch req.Purpose {
 	case PurposeAgeVerification:
-		s.launchCitizenFetch(ctx, g, &result, req)
-		s.launchSanctionsFetch(ctx, g, &result, req)
-		s.launchCredentialFetch(ctx, g, &result, req)
+		s.launchEvidenceFetch(ctx, g, "citizen", func(latency time.Duration) {
+			result.citizenLatency = latency
+		}, func(ctx context.Context) error {
+			citizen, err := s.registry.CheckCitizen(ctx, req.UserID, req.NationalID)
+			if err != nil {
+				return err
+			}
+			result.citizen = citizen
+			return nil
+		})
+		s.launchEvidenceFetch(ctx, g, "sanctions", func(latency time.Duration) {
+			result.sanctionsLatency = latency
+		}, func(ctx context.Context) error {
+			sanctions, err := s.registry.CheckSanctions(ctx, req.UserID, req.NationalID)
+			if err != nil {
+				return err
+			}
+			result.sanctions = sanctions
+			return nil
+		})
+		s.launchEvidenceFetch(ctx, g, "credential", func(latency time.Duration) {
+			result.credentialLatency = latency
+		}, func(ctx context.Context) error {
+			cred, err := s.vc.FindBySubjectAndType(ctx, req.UserID, vcmodels.CredentialTypeAgeOver18)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.DebugContext(ctx, "credential lookup failed",
+						"user_id", req.UserID,
+						"error", err,
+					)
+				}
+				return nil
+			}
+			result.credential = cred
+			return nil
+		})
 	case PurposeSanctionsScreening:
-		s.launchSanctionsFetch(ctx, g, &result, req)
+		s.launchEvidenceFetch(ctx, g, "sanctions", func(latency time.Duration) {
+			result.sanctionsLatency = latency
+		}, func(ctx context.Context) error {
+			sanctions, err := s.registry.CheckSanctions(ctx, req.UserID, req.NationalID)
+			if err != nil {
+				return err
+			}
+			result.sanctions = sanctions
+			return nil
+		})
 	}
 
 	// Wait for all goroutines with early cancellation on first failure
@@ -63,83 +105,21 @@ func (s *Service) gatherEvidence(ctx context.Context, req EvaluateRequest, evalT
 	}, nil
 }
 
-func (s *Service) launchCitizenFetch(
+func (s *Service) launchEvidenceFetch(
 	ctx context.Context,
 	g *errgroup.Group,
-	result *evidenceFetchResult,
-	req EvaluateRequest,
+	kind string,
+	setLatency func(time.Duration),
+	fetch func(context.Context) error,
 ) {
 	g.Go(func() error {
 		start := time.Now()
-		citizen, err := s.registry.CheckCitizen(ctx, req.UserID, req.NationalID)
+		err := fetch(ctx)
 		latency := time.Since(start)
-
-		// Store latency immediately for metrics (written to isolated field)
-		result.citizenLatency = latency
+		setLatency(latency)
 		if s.metrics != nil {
-			s.metrics.ObserveEvidenceLatency("citizen", latency)
+			s.metrics.ObserveEvidenceLatency(kind, latency)
 		}
-
-		if err != nil {
-			return err
-		}
-		result.citizen = citizen
-		return nil
-	})
-}
-
-func (s *Service) launchSanctionsFetch(
-	ctx context.Context,
-	g *errgroup.Group,
-	result *evidenceFetchResult,
-	req EvaluateRequest,
-) {
-	g.Go(func() error {
-		start := time.Now()
-		sanctions, err := s.registry.CheckSanctions(ctx, req.UserID, req.NationalID)
-		latency := time.Since(start)
-
-		result.sanctionsLatency = latency
-		if s.metrics != nil {
-			s.metrics.ObserveEvidenceLatency("sanctions", latency)
-		}
-
-		if err != nil {
-			return err
-		}
-		result.sanctions = sanctions
-		return nil
-	})
-}
-
-func (s *Service) launchCredentialFetch(
-	ctx context.Context,
-	g *errgroup.Group,
-	result *evidenceFetchResult,
-	req EvaluateRequest,
-) {
-	g.Go(func() error {
-		start := time.Now()
-		cred, err := s.vc.FindBySubjectAndType(ctx, req.UserID, vcmodels.CredentialTypeAgeOver18)
-		latency := time.Since(start)
-
-		result.credentialLatency = latency
-		if s.metrics != nil {
-			s.metrics.ObserveEvidenceLatency("credential", latency)
-		}
-
-		// Not finding a credential is not an error - it's just missing evidence
-		if err != nil {
-			if s.logger != nil {
-				s.logger.DebugContext(ctx, "credential lookup failed",
-					"user_id", req.UserID,
-					"error", err,
-				)
-			}
-			// Don't return error - credential is optional
-			return nil
-		}
-		result.credential = cred
-		return nil
+		return err
 	})
 }

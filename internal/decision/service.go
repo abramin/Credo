@@ -295,29 +295,37 @@ func (s *Service) emitAudit(ctx context.Context, req EvaluateRequest, result *Ev
 		RequestID: requestcontext.RequestID(ctx),
 	}
 
-	// For sanctions-related decisions, use fail-closed semantics.
-	// The audit trail MUST be recorded before returning the decision.
-	isSanctionsRelated := result.Reason == ReasonSanctioned || req.Purpose == PurposeSanctionsScreening
-	if isSanctionsRelated {
-		if err := s.auditor.Emit(ctx, event); err != nil {
-			if s.logger != nil {
-				s.logger.ErrorContext(ctx, "CRITICAL: audit failed for sanctions decision - blocking response",
-					"user_id", req.UserID,
-					"purpose", req.Purpose,
-					"error", err,
-				)
-			}
-			return dErrors.New(dErrors.CodeInternal, "decision audit unavailable")
-		}
-		return nil
+	if isSanctionsDecision(req, result) {
+		return s.emitAuditFailClosed(ctx, event, req)
 	}
 
-	// Best-effort for non-sanctions decisions
+	s.emitAuditBestEffort(ctx, event, req)
+	return nil
+}
+
+func isSanctionsDecision(req EvaluateRequest, result *EvaluateResult) bool {
+	return result.Reason == ReasonSanctioned || req.Purpose == PurposeSanctionsScreening
+}
+
+func (s *Service) emitAuditFailClosed(ctx context.Context, event audit.Event, req EvaluateRequest) error {
+	if err := s.auditor.Emit(ctx, event); err != nil {
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "CRITICAL: audit failed for sanctions decision - blocking response",
+				"user_id", req.UserID,
+				"purpose", req.Purpose,
+				"error", err,
+			)
+		}
+		return dErrors.New(dErrors.CodeInternal, "decision audit unavailable")
+	}
+	return nil
+}
+
+func (s *Service) emitAuditBestEffort(ctx context.Context, event audit.Event, req EvaluateRequest) {
 	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
 		s.logger.WarnContext(ctx, "failed to emit decision audit event",
 			"error", err,
 			"user_id", req.UserID,
 		)
 	}
-	return nil
 }

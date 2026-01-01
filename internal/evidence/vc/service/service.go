@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	registrymodels "credo/internal/evidence/registry/models"
 	"credo/internal/evidence/vc/domain/credential"
 	"credo/internal/evidence/vc/domain/shared"
 	"credo/internal/evidence/vc/models"
@@ -74,20 +75,48 @@ func WithLogger(logger *slog.Logger) Option {
 
 // Issue issues a new AgeOver18 credential after registry verification.
 func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.CredentialRecord, error) {
-	if req.UserID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeUnauthorized, "user ID required")
-	}
-	if req.Type != models.CredentialTypeAgeOver18 {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "invalid credential type")
-	}
-	if req.NationalID.IsNil() {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "national_id is required")
+	if err := s.validateIssueRequest(req); err != nil {
+		return nil, err
 	}
 
 	if err := s.requireVCIssuanceConsent(ctx, req.UserID); err != nil {
 		return nil, err
 	}
 
+	now := requestcontext.Now(ctx)
+	record, err := s.fetchCitizenRecord(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	vcModel, err := s.buildCredentialModel(req, record, now)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.store.Save(ctx, vcModel); err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to store credential")
+	}
+
+	s.emitAudit(ctx, vcModel)
+
+	return &vcModel, nil
+}
+
+func (s *Service) validateIssueRequest(req models.IssueRequest) error {
+	if req.UserID.IsNil() {
+		return dErrors.New(dErrors.CodeUnauthorized, "user ID required")
+	}
+	if req.Type != models.CredentialTypeAgeOver18 {
+		return dErrors.New(dErrors.CodeBadRequest, "invalid credential type")
+	}
+	if req.NationalID.IsNil() {
+		return dErrors.New(dErrors.CodeBadRequest, "national_id is required")
+	}
+	return nil
+}
+
+func (s *Service) fetchCitizenRecord(ctx context.Context, req models.IssueRequest) (*registrymodels.CitizenRecord, error) {
 	record, err := s.registry.Citizen(ctx, req.UserID, req.NationalID)
 	if err != nil {
 		return nil, sanitizeExternalError(err, "registry lookup failed")
@@ -95,26 +124,25 @@ func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.C
 	if record == nil || !record.Valid {
 		return nil, dErrors.New(dErrors.CodeBadRequest, "invalid citizen record")
 	}
+	return record, nil
+}
 
+func (s *Service) buildCredentialModel(req models.IssueRequest, record *registrymodels.CitizenRecord, now time.Time) (models.CredentialRecord, error) {
 	birthDate, err := time.Parse("2006-01-02", record.DateOfBirth)
 	if err != nil {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "invalid citizen record")
+		return models.CredentialRecord{}, dErrors.New(dErrors.CodeBadRequest, "invalid citizen record")
 	}
-
-	now := requestcontext.Now(ctx)
 	if !isOver18(birthDate, now) {
-		return nil, dErrors.New(dErrors.CodeBadRequest, "User does not meet age requirement")
+		return models.CredentialRecord{}, dErrors.New(dErrors.CodeBadRequest, "User does not meet age requirement")
 	}
 
-	// Build typed claims via domain value object
 	claims := credential.NewAgeOver18Claims(true, models.VerifiedViaNationalRegistry)
 
 	issuedAt, err := shared.NewIssuedAt(now)
 	if err != nil {
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create issuance timestamp")
+		return models.CredentialRecord{}, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create issuance timestamp")
 	}
 
-	// Create domain aggregate
 	cred, err := credential.New(
 		models.NewCredentialID(),
 		req.Type,
@@ -124,24 +152,14 @@ func (s *Service) Issue(ctx context.Context, req models.IssueRequest) (*models.C
 		claims,
 	)
 	if err != nil {
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create credential")
+		return models.CredentialRecord{}, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create credential")
 	}
 
-	// Apply minimization in regulated mode
 	if s.regulated {
 		cred = cred.Minimized()
 	}
 
-	// Convert to infrastructure model for storage
-	vcModel := credential.ToModel(cred)
-
-	if err := s.store.Save(ctx, vcModel); err != nil {
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to store credential")
-	}
-
-	s.emitAudit(ctx, vcModel)
-
-	return &vcModel, nil
+	return credential.ToModel(cred), nil
 }
 
 // Verify validates an issued credential by ID and returns its stored content.
