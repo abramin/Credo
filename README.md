@@ -28,15 +28,19 @@ _Modular identity and evidence platform covering auth, consent, registry evidenc
 
 ## Status (PRDs)
 
-Progress: `7/53` complete (Phase 0 done).
+Progress: `11/53` complete (Phases 0-1 done).
 
 - ✅ PRD-001 Auth & Session Management
 - ✅ PRD-001B Admin User Deletion
 - ✅ PRD-002 Consent Management (TR-6 projections deferred post-Postgres)
+- ✅ PRD-003 Registry Integration
+- ✅ PRD-004 Verifiable Credentials
+- ✅ PRD-005 Decision Engine
+- ✅ PRD-006 Audit & Compliance Baseline
 - ✅ PRD-016 Token Lifecycle & Revocation
+- ✅ PRD-017 Rate Limiting & Abuse Prevention (MVP)
 - ✅ PRD-026A Tenant & Client Management
 - ✅ PRD-026B Tenant & Client Lifecycle
-- ✅ PRD-017 Rate Limiting & Abuse Prevention (MVP)
 - ➡️ Full index: see [PRD index](docs/prd/README.md)
 
 ## Project plan
@@ -95,9 +99,41 @@ python3 -m http.server 8000  # http://localhost:8000
 
 ## API quick reference
 
+Auth:
 - `POST /auth/authorize` – issue authorization code
 - `POST /auth/token` – exchange code/refresh token
+- `POST /auth/revoke` – revoke access/refresh token
 - `GET /auth/userinfo` – current user profile
+- `GET /auth/sessions` – list active sessions
+- `DELETE /auth/sessions/{session_id}` – revoke session
+- `POST /auth/logout-all` – revoke all sessions
+
+Consent:
 - `POST /auth/consent` – grant consent (login, registry_check, vc_issuance, decision_evaluation)
 - `POST /auth/consent/revoke` – revoke consent
+- `POST /auth/consent/revoke-all` – revoke all consents
 - `GET /auth/consent` – list consents (`status`, `purpose` filters)
+- `DELETE /auth/consent` – delete all consents (GDPR)
+
+Registry:
+- `POST /registry/citizen` – citizen lookup
+- `POST /registry/sanctions` – sanctions screening
+
+VC:
+- `POST /vc/issue` – issue AgeOver18 credential
+- `POST /vc/verify` – verify credential
+
+Decision:
+- `POST /decision/evaluate` – evaluate decision
+
+Tenant/Admin (requires `X-Admin-Token`):
+- `POST /admin/tenants` – create tenant
+- `GET /admin/tenants/{id}` – tenant details
+- `POST /admin/tenants/{id}/deactivate` – deactivate tenant
+- `POST /admin/tenants/{id}/reactivate` – reactivate tenant
+- `POST /admin/clients` – register client
+- `GET /admin/clients/{id}` – client details
+- `PUT /admin/clients/{id}` – update client
+- `POST /admin/clients/{id}/deactivate` – deactivate client
+- `POST /admin/clients/{id}/reactivate` – reactivate client
+- `POST /admin/clients/{id}/rotate-secret` – rotate client secret
