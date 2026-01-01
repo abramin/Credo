@@ -159,10 +159,14 @@ func (s *Service) Verify(ctx context.Context, credentialID models.CredentialID) 
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to retrieve credential")
 	}
 
-	return &models.VerifyResult{
+	result := &models.VerifyResult{
 		Valid:      true,
 		Credential: &cred,
-	}, nil
+	}
+
+	s.emitVerifyAudit(ctx, cred)
+
+	return result, nil
 }
 
 func (s *Service) requireVCIssuanceConsent(ctx context.Context, userID id.UserID) error {
@@ -189,6 +193,30 @@ func (s *Service) emitAudit(ctx context.Context, credential models.CredentialRec
 
 	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
 		s.logger.ErrorContext(ctx, "failed to emit vc_issued audit event",
+			"error", err,
+			"user_id", credential.Subject,
+		)
+	}
+}
+
+func (s *Service) emitVerifyAudit(ctx context.Context, credential models.CredentialRecord) {
+	// TODO: this should probably error if auditor is nil?
+	if s.auditor == nil {
+		return
+	}
+
+	event := audit.Event{
+		Action:    "vc_verified",
+		Purpose:   "vc_verification",
+		UserID:    credential.Subject,
+		Subject:   credential.ID.String(),
+		Decision:  "verified",
+		Reason:    "user_initiated",
+		RequestID: requestcontext.RequestID(ctx),
+	}
+
+	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
+		s.logger.ErrorContext(ctx, "failed to emit vc_verified audit event",
 			"error", err,
 			"user_id", credential.Subject,
 		)
