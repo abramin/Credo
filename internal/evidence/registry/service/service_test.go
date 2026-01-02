@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -527,6 +528,135 @@ func (s *ServiceSuite) TestCitizenMinimization() {
 		s.Equal("1990-01-01", result.DateOfBirth)
 		s.Equal("123 Test St", result.Address)
 		s.True(result.Valid)
+	})
+}
+
+func (s *ServiceSuite) TestCitizenWithDetailsNoMinimizationNoCache() {
+	ctx := context.Background()
+	nationalIDStr := "ABC123456"
+	nationalID := testNationalID(nationalIDStr)
+	userID := testUserID()
+	now := time.Now()
+
+	citizenRecord := &models.CitizenRecord{
+		NationalID:  nationalIDStr,
+		FullName:    "Test User",
+		DateOfBirth: "1990-01-01",
+		Address:     "123 Test St",
+		Valid:       true,
+		CheckedAt:   now,
+	}
+
+	cache := newStubCache()
+	citizenProv := &stubProvider{
+		id:       "test-citizen",
+		provType: providers.ProviderTypeCitizen,
+		lookupFn: func(_ context.Context, _ map[string]string) (*providers.Evidence, error) {
+			return citizenEvidence(citizenRecord), nil
+		},
+	}
+
+	orch := newTestOrchestrator(citizenProv, nil)
+	svc := New(orch, cache, nil, true) // regulated = true but should not minimize
+
+	result, err := svc.CitizenWithDetails(ctx, userID, nationalID)
+	s.Require().NoError(err)
+	s.Equal(nationalIDStr, result.NationalID)
+	s.Equal("Test User", result.FullName)
+	s.Equal("1990-01-01", result.DateOfBirth)
+	s.Equal("123 Test St", result.Address)
+	s.True(result.Valid)
+	s.Equal(now, result.CheckedAt)
+
+	// Internal lookups should not write to cache.
+	s.Len(cache.saveCitizenCalls, 0)
+}
+
+func (s *ServiceSuite) TestCacheSaveErrorsDoNotFail() {
+	ctx := context.Background()
+	nationalIDStr := "ABC123456"
+	nationalID := testNationalID(nationalIDStr)
+	userID := testUserID()
+	now := time.Now()
+
+	citizenRecord := &models.CitizenRecord{
+		NationalID:  nationalIDStr,
+		FullName:    "Test User",
+		DateOfBirth: "1990-01-01",
+		Address:     "123 Test St",
+		Valid:       true,
+		CheckedAt:   now,
+	}
+	sanctionsRecord := &models.SanctionsRecord{
+		NationalID: nationalIDStr,
+		Listed:     false,
+		Source:     "test-source",
+		CheckedAt:  now,
+	}
+
+	s.Run("check ignores cache save errors", func() {
+		cache := newStubCache()
+		cache.saveCitizenErr = errors.New("cache write failed")
+		cache.saveSanctionErr = errors.New("cache write failed")
+		citizenProv := &stubProvider{
+			id:       "test-citizen",
+			provType: providers.ProviderTypeCitizen,
+			lookupFn: func(_ context.Context, _ map[string]string) (*providers.Evidence, error) {
+				return citizenEvidence(citizenRecord), nil
+			},
+		}
+		sanctionsProv := &stubProvider{
+			id:       "test-sanctions",
+			provType: providers.ProviderTypeSanctions,
+			lookupFn: func(_ context.Context, _ map[string]string) (*providers.Evidence, error) {
+				return sanctionsEvidence(sanctionsRecord), nil
+			},
+		}
+
+		orch := newTestOrchestrator(citizenProv, sanctionsProv)
+		svc := New(orch, cache, nil, false)
+
+		result, err := svc.Check(ctx, userID, nationalID)
+		s.Require().NoError(err)
+		s.NotNil(result)
+	})
+
+	s.Run("citizen ignores cache save errors", func() {
+		cache := newStubCache()
+		cache.saveCitizenErr = errors.New("cache write failed")
+		citizenProv := &stubProvider{
+			id:       "test-citizen",
+			provType: providers.ProviderTypeCitizen,
+			lookupFn: func(_ context.Context, _ map[string]string) (*providers.Evidence, error) {
+				return citizenEvidence(citizenRecord), nil
+			},
+		}
+
+		orch := newTestOrchestrator(citizenProv, nil)
+		svc := New(orch, cache, nil, false)
+
+		result, err := svc.Citizen(ctx, userID, nationalID)
+		s.Require().NoError(err)
+		s.NotNil(result)
+	})
+
+	s.Run("sanctions ignores cache save errors", func() {
+		cache := newStubCache()
+		cache.saveSanctionErr = errors.New("cache write failed")
+		sanctionsProv := &stubProvider{
+			id:       "test-sanctions",
+			provType: providers.ProviderTypeSanctions,
+			lookupFn: func(_ context.Context, _ map[string]string) (*providers.Evidence, error) {
+				return sanctionsEvidence(sanctionsRecord), nil
+			},
+		}
+
+		orch := newTestOrchestrator(nil, sanctionsProv)
+		svc := New(orch, cache, nil, false)
+
+		result, err := svc.Sanctions(ctx, userID, nationalID)
+		s.Require().NoError(err)
+		s.NotNil(result)
 	})
 }
 

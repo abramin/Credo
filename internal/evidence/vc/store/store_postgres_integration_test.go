@@ -149,6 +149,39 @@ func (s *PostgresStoreSuite) TestSubjectTypeQueryOrdering() {
 	s.Equal(4, int(found.Claims["iteration"].(float64)))
 }
 
+// TestAgeOver18ClaimsRoundTrip verifies AgeOver18 claims are stored in columns and restored on read.
+func (s *PostgresStoreSuite) TestAgeOver18ClaimsRoundTrip() {
+	ctx := context.Background()
+
+	credID := models.NewCredentialID()
+	issuedAt := time.Now()
+	credential := models.CredentialRecord{
+		ID:       credID,
+		Type:     models.CredentialTypeAgeOver18,
+		Subject:  s.userID,
+		Issuer:   models.IssuerCredo,
+		IssuedAt: issuedAt,
+		Claims: models.Claims{
+			"is_over_18":   true,
+			"verified_via": "registry",
+		},
+	}
+
+	err := s.store.Save(ctx, credential)
+	s.Require().NoError(err)
+
+	found, err := s.store.FindByID(ctx, credID)
+	s.Require().NoError(err)
+
+	isOver18, ok := found.Claims["is_over_18"].(bool)
+	s.True(ok)
+	s.True(isOver18)
+
+	verifiedVia, ok := found.Claims["verified_via"].(string)
+	s.True(ok)
+	s.Equal("registry", verifiedVia)
+}
+
 // TestConcurrentDifferentCredentials verifies concurrent saves of different credentials.
 func (s *PostgresStoreSuite) TestConcurrentDifferentCredentials() {
 	ctx := context.Background()
