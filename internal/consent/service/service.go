@@ -137,6 +137,48 @@ func WithReGrantCooldown(cooldown time.Duration) Option {
 	}
 }
 
+func validatePurposes(purposes []models.Purpose) error {
+	for _, purpose := range purposes {
+		if !purpose.IsValid() {
+			return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
+		}
+	}
+	return nil
+}
+
+func scopeForPurpose(userID id.UserID, purpose models.Purpose) (models.ConsentScope, error) {
+	scope, err := models.NewConsentScope(userID, purpose)
+	if err != nil {
+		return models.ConsentScope{}, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid consent scope")
+	}
+	return scope, nil
+}
+
+func (s *Service) withUserTx(ctx context.Context, userID id.UserID, fn func(ctx context.Context, store Store) error) error {
+	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
+	return s.tx.RunInTx(txCtx, fn)
+}
+
+func (s *Service) forEachScope(
+	ctx context.Context,
+	userID id.UserID,
+	purposes []models.Purpose,
+	fn func(ctx context.Context, store Store, scope models.ConsentScope) error,
+) error {
+	return s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
+		for _, purpose := range purposes {
+			scope, err := scopeForPurpose(userID, purpose)
+			if err != nil {
+				return err
+			}
+			if err := fn(txCtx, txStore, scope); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // Grant grants consent for the specified purposes.
 // It performs transactional upserts, applies idempotency rules,
 // and emits audit/metrics for any changes.
@@ -157,20 +199,14 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 		effects []*grantEffect
 	)
 	// Wrap multi-purpose grant in transaction to ensure atomicity per AGENTS.md
-	txErr := s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
-		for _, purpose := range purposes {
-			scope, err := scopeForPurpose(userID, purpose)
-			if err != nil {
-				return err
-			}
-			record, effect, err := s.upsertGrantTx(txCtx, txStore, scope)
-			if err != nil {
-				return err
-			}
-			granted = append(granted, record)
-			if effect != nil {
-				effects = append(effects, effect)
-			}
+	txErr := s.forEachScope(ctx, userID, purposes, func(txCtx context.Context, txStore Store, scope models.ConsentScope) error {
+		record, effect, err := s.upsertGrantTx(txCtx, txStore, scope)
+		if err != nil {
+			return err
+		}
+		granted = append(granted, record)
+		if effect != nil {
+			effects = append(effects, effect)
 		}
 		return nil
 	})
@@ -221,7 +257,7 @@ func (s *Service) evaluateGrant(existing *models.Record, now time.Time) (grantUp
 	return update, nil
 }
 
-func (s *Service) revokeScopeTx(ctx context.Context, txStore Store, scope models.ConsentScope, now time.Time) (*models.Record, bool, error) {
+func (s *Service) tryRevokeScopeTx(ctx context.Context, txStore Store, scope models.ConsentScope, now time.Time) (*models.Record, bool, error) {
 	var (
 		changed bool
 		updated models.Record
@@ -360,21 +396,15 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	now := requestcontext.Now(ctx)
 
 	// Wrap multi-purpose revoke in transaction to ensure atomicity
-	txErr := s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
-		for _, purpose := range purposes {
-			scope, err := scopeForPurpose(userID, purpose)
-			if err != nil {
-				return err
-			}
-			record, changed, err := s.revokeScopeTx(txCtx, txStore, scope, now)
-			if err != nil {
-				return err
-			}
-			if !changed {
-				continue
-			}
-			revoked = append(revoked, record)
+	txErr := s.forEachScope(ctx, userID, purposes, func(txCtx context.Context, txStore Store, scope models.ConsentScope) error {
+		record, changed, err := s.tryRevokeScopeTx(txCtx, txStore, scope, now)
+		if err != nil {
+			return err
 		}
+		if !changed {
+			return nil
+		}
+		revoked = append(revoked, record)
 		return nil
 	})
 	if txErr != nil {
@@ -486,28 +516,6 @@ func (s *Service) List(ctx context.Context, userID id.UserID, filter *models.Rec
 	s.observeRecordsPerUser(float64(len(records)))
 
 	return records, nil
-}
-
-func validatePurposes(purposes []models.Purpose) error {
-	for _, purpose := range purposes {
-		if !purpose.IsValid() {
-			return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
-		}
-	}
-	return nil
-}
-
-func scopeForPurpose(userID id.UserID, purpose models.Purpose) (models.ConsentScope, error) {
-	scope, err := models.NewConsentScope(userID, purpose)
-	if err != nil {
-		return models.ConsentScope{}, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid consent scope")
-	}
-	return scope, nil
-}
-
-func (s *Service) withUserTx(ctx context.Context, userID id.UserID, fn func(ctx context.Context, store Store) error) error {
-	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
-	return s.tx.RunInTx(txCtx, fn)
 }
 
 func filterRecords(records []*models.Record, filter *models.RecordFilter, now time.Time) []*models.Record {
