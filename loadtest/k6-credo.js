@@ -109,21 +109,25 @@ const CONSENT_PURPOSES = ['login', 'registry_check', 'vc_issuance', 'decision_ev
 // Scenario configurations
 export const options = {
   scenarios: {
-    // Scenario 1: Token Refresh Storm
+    // ========== AUTH MODULE SCENARIOS ==========
+    // Scenarios run SEQUENTIALLY when SCENARIO=all (staggered startTime)
+    // Total estimated runtime: ~75 minutes
+
+    // Scenario 1: Token Refresh Storm (5m)
     // Tests mutex contention under concurrent token refresh load
     token_refresh_storm: {
       executor: 'constant-arrival-rate',
-      rate: 100,                    // 100 requests per second
+      rate: 100,
       timeUnit: '1s',
       duration: '5m',
       preAllocatedVUs: 50,
       maxVUs: 200,
       exec: 'tokenRefreshScenario',
-      startTime: '0s',
+      startTime: '0s',              // 0:00 - 5:00
       tags: { scenario: 'token_refresh' },
     },
 
-    // Scenario 2: Consent Grant Burst
+    // Scenario 2: Consent Grant Burst (5m)
     // Tests consent service throughput with multi-purpose grants
     consent_burst: {
       executor: 'ramping-arrival-rate',
@@ -132,138 +136,130 @@ export const options = {
       preAllocatedVUs: 20,
       maxVUs: 100,
       stages: [
-        { duration: '1m', target: 50 },   // Ramp up
-        { duration: '3m', target: 50 },   // Sustained load
-        { duration: '1m', target: 0 },    // Ramp down
+        { duration: '1m', target: 50 },
+        { duration: '3m', target: 50 },
+        { duration: '1m', target: 0 },
       ],
       exec: 'consentBurstScenario',
-      startTime: '0s',
+      startTime: '5m10s',           // 5:10 - 10:10
       tags: { scenario: 'consent_burst' },
     },
 
-    // Scenario 3: Mixed Load (Read + Write contention)
+    // Scenario 3: Mixed Load (5m)
     // Tests read performance during write contention
     mixed_load: {
       executor: 'constant-vus',
       vus: 50,
       duration: '5m',
       exec: 'mixedLoadScenario',
-      startTime: '0s',
+      startTime: '10m20s',          // 10:20 - 15:20
       tags: { scenario: 'mixed_load' },
     },
 
-    // Scenario 4: OAuth Flow Storm
-    // Tests the full authorize → token exchange path under concurrent load.
-    // This exercises sharded transactions in both authorize.go and token_exchange.go,
-    // plus JWT generation outside transaction boundaries.
+    // Scenario 4: OAuth Flow Storm (5m)
+    // Full authorize → token exchange path
     oauth_flow_storm: {
       executor: 'constant-arrival-rate',
-      rate: 50,                     // 50 full OAuth flows per second
+      rate: 50,
       timeUnit: '1s',
       duration: '5m',
       preAllocatedVUs: 50,
       maxVUs: 150,
       exec: 'oauthFlowScenario',
-      startTime: '0s',
+      startTime: '15m30s',          // 15:30 - 20:30
       tags: { scenario: 'oauth_flow' },
     },
 
-    // Scenario 5: OAuth Burst (ResolveClient)
-    // Tests 1000 concurrent ResolveClient calls against 100 clients.
-    // Measures p95 latency and validates client resolution cache effectiveness.
+    // Scenario 5: ResolveClient Burst (1m)
+    // 1000 concurrent ResolveClient calls against 100 clients
     resolve_client_burst: {
       executor: 'constant-arrival-rate',
-      rate: 200,                    // 200 req/sec targeting 1000 concurrent
+      rate: 200,
       timeUnit: '1s',
       duration: '1m',
       preAllocatedVUs: 100,
       maxVUs: 1000,
       exec: 'resolveClientBurstScenario',
-      startTime: '0s',
+      startTime: '20m40s',          // 20:40 - 21:40
       tags: { scenario: 'resolve_client_burst' },
     },
 
-    // Scenario 6: Client Onboarding Spike
-    // Tests 50 concurrent CreateClient requests to measure bcrypt contention.
+    // Scenario 6: Client Onboarding Spike (2m)
+    // 50 concurrent CreateClient (bcrypt contention)
     client_onboarding_spike: {
       executor: 'constant-vus',
       vus: 50,
       duration: '2m',
       exec: 'clientOnboardingScenario',
-      startTime: '0s',
+      startTime: '21m50s',          // 21:50 - 23:50
       tags: { scenario: 'client_onboarding' },
     },
 
-    // Scenario 7: Tenant Dashboard Under Load
-    // Tests 100 concurrent GetTenant calls for tenants with 500+ clients.
-    // Measures N+1 query impact on p95 latency.
+    // Scenario 7: Tenant Dashboard Load (2m)
+    // 100 concurrent GetTenant for tenants with 500+ clients
     tenant_dashboard_load: {
       executor: 'constant-vus',
       vus: 100,
       duration: '2m',
       exec: 'tenantDashboardScenario',
-      startTime: '0s',
+      startTime: '24m',             // 24:00 - 26:00
       tags: { scenario: 'tenant_dashboard' },
     },
 
-    // Scenario 8: Rate Limit Sustained
-    // Tests rate limiting behavior under sustained high request rate from single IP.
+    // Scenario 8: Rate Limit Sustained (1m)
+    // Rate limiting under sustained high request rate
     rate_limit_sustained: {
       executor: 'constant-arrival-rate',
-      rate: 500,                    // 500 req/sec to trigger rate limits
+      rate: 500,
       timeUnit: '1s',
       duration: '1m',
       preAllocatedVUs: 50,
       maxVUs: 200,
       exec: 'rateLimitSustainedScenario',
-      startTime: '0s',
+      startTime: '26m10s',          // 26:10 - 27:10
       tags: { scenario: 'rate_limit_sustained' },
     },
 
-    // Scenario 9: Rate Limit High Cardinality
-    // Tests memory behavior under many unique IPs via X-Forwarded-For.
+    // Scenario 9: Rate Limit Cardinality (~2m)
+    // Memory behavior under many unique IPs
     rate_limit_cardinality: {
       executor: 'per-vu-iterations',
       vus: 50,
-      iterations: 100,              // Each VU simulates 100 unique IPs
+      iterations: 100,
       exec: 'rateLimitCardinalityScenario',
-      startTime: '0s',
+      startTime: '27m20s',          // 27:20 - ~29:20
       tags: { scenario: 'rate_limit_cardinality' },
     },
 
-    // Scenario 10: Consent Shard Contention
-    // Tests 1000 concurrent grants for same user to stress sharded lock contention.
-    // Validates 128-shard distribution under single-user hot path.
+    // Scenario 10: Consent Shard Contention (1m)
+    // Single-user hot path stress test
     consent_shard_contention: {
       executor: 'constant-arrival-rate',
-      rate: 200,                    // 200 req/sec targeting single user
+      rate: 200,
       timeUnit: '1s',
       duration: '1m',
       preAllocatedVUs: 50,
       maxVUs: 200,
       exec: 'consentShardContentionScenario',
-      startTime: '0s',
+      startTime: '29m30s',          // 29:30 - 30:30
       tags: { scenario: 'consent_shard_contention' },
     },
 
-    // Scenario 11: Consent List Performance
-    // Tests listing consents for users with many purposes (O(n) concern).
+    // Scenario 11: Consent List Load (2m)
+    // Listing consents for users with many purposes
     consent_list_load: {
       executor: 'constant-vus',
       vus: 50,
       duration: '2m',
       exec: 'consentListScenario',
-      startTime: '0s',
+      startTime: '30m40s',          // 30:40 - 32:40
       tags: { scenario: 'consent_list_load' },
     },
 
     // ========== PERFORMANCE BOTTLENECK TESTS ==========
-    // These scenarios target specific performance bottlenecks identified in review.
 
-    // Scenario 12: Global Throttle Spike Test
-    // Purpose: Stress the global throttle PostgreSQL row locks with rapid RPS increase.
-    // Expected: p99 latency degradation as lock queue grows; validates FOR UPDATE contention.
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=global_throttle_spike
+    // Scenario 12: Global Throttle Spike (1m)
+    // Stress global throttle PostgreSQL row locks
     global_throttle_spike: {
       executor: 'ramping-arrival-rate',
       startRate: 1000,
@@ -271,19 +267,17 @@ export const options = {
       preAllocatedVUs: 200,
       maxVUs: 2000,
       stages: [
-        { duration: '10s', target: 10000 },  // Spike: 1000 → 10000 RPS
-        { duration: '30s', target: 10000 },  // Sustain peak
-        { duration: '10s', target: 1000 },   // Ramp down
+        { duration: '10s', target: 10000 },
+        { duration: '30s', target: 10000 },
+        { duration: '10s', target: 1000 },
       ],
       exec: 'globalThrottleSpikeScenario',
-      startTime: '0s',
+      startTime: '32m50s',          // 32:50 - 33:40
       tags: { scenario: 'global_throttle_spike' },
     },
 
-    // Scenario 13: Hot Key Advisory Lock Contention
-    // Purpose: 80% traffic to 10 hot IPs to stress advisory lock wait times.
-    // Expected: Lock wait times increase; validates sharded lock distribution.
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=hot_key_contention
+    // Scenario 13: Hot Key Contention (2m)
+    // 80% traffic to 10 hot IPs
     hot_key_contention: {
       executor: 'constant-arrival-rate',
       rate: 500,
@@ -292,28 +286,24 @@ export const options = {
       preAllocatedVUs: 100,
       maxVUs: 500,
       exec: 'hotKeyContentionScenario',
-      startTime: '0s',
+      startTime: '33m50s',          // 33:50 - 35:50
       tags: { scenario: 'hot_key_contention' },
     },
 
-    // Scenario 14: Auth Lockout TOCTOU Race Detection
-    // Purpose: 100 concurrent login failures for same user to expose TOCTOU races.
-    // Expected: All failures should increment correctly; hard lock triggers at threshold.
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=auth_lockout_race
+    // Scenario 14: Auth Lockout Race (~1m)
+    // Concurrent login failures for TOCTOU detection
     auth_lockout_race: {
       executor: 'per-vu-iterations',
       vus: 100,
-      iterations: 15,  // Each VU does 15 failures (100 * 15 = 1500 total for one user)
+      iterations: 15,
       exec: 'authLockoutRaceScenario',
-      startTime: '0s',
+      startTime: '36m',             // 36:00 - ~37:00
       tags: { scenario: 'auth_lockout_race' },
     },
 
     // ========== DECISION MODULE SCENARIOS ==========
 
-    // Scenario 15: Decision Age Verification Throughput
-    // Purpose: Baseline throughput for age verification decisions
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_age_verify
+    // Scenario 15: Decision Age Verification (5m)
     decision_age_verify: {
       executor: 'ramping-arrival-rate',
       startRate: 100,
@@ -321,18 +311,16 @@ export const options = {
       preAllocatedVUs: 50,
       maxVUs: 500,
       stages: [
-        { duration: '1m', target: 500 },   // Ramp to 500 req/s
-        { duration: '3m', target: 500 },   // Sustain
-        { duration: '1m', target: 100 },   // Ramp down
+        { duration: '1m', target: 500 },
+        { duration: '3m', target: 500 },
+        { duration: '1m', target: 100 },
       ],
       exec: 'decisionAgeVerifyScenario',
-      startTime: '0s',
+      startTime: '37m10s',          // 37:10 - 42:10
       tags: { scenario: 'decision_age_verify' },
     },
 
-    // Scenario 16: Decision Sanctions Screening Throughput
-    // Purpose: Baseline throughput for sanctions screening (fail-closed audit)
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_sanctions
+    // Scenario 16: Decision Sanctions Screening (5m)
     decision_sanctions: {
       executor: 'ramping-arrival-rate',
       startRate: 100,
@@ -340,30 +328,26 @@ export const options = {
       preAllocatedVUs: 50,
       maxVUs: 500,
       stages: [
-        { duration: '1m', target: 800 },   // Ramp to 800 req/s
-        { duration: '3m', target: 800 },   // Sustain
-        { duration: '1m', target: 100 },   // Ramp down
+        { duration: '1m', target: 800 },
+        { duration: '3m', target: 800 },
+        { duration: '1m', target: 100 },
       ],
       exec: 'decisionSanctionsScenario',
-      startTime: '0s',
+      startTime: '42m20s',          // 42:20 - 47:20
       tags: { scenario: 'decision_sanctions' },
     },
 
-    // Scenario 17: Decision Concurrent Same User
-    // Purpose: Test audit contention with many decisions for same user
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_same_user
+    // Scenario 17: Decision Same User (2m)
     decision_same_user: {
       executor: 'constant-vus',
       vus: 50,
       duration: '2m',
       exec: 'decisionSameUserScenario',
-      startTime: '0s',
+      startTime: '47m30s',          // 47:30 - 49:30
       tags: { scenario: 'decision_same_user' },
     },
 
-    // Scenario 18: Decision Cache Hit Test
-    // Purpose: Measure cache effectiveness with repeated national IDs
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_cache_hit
+    // Scenario 18: Decision Cache Hit (2m)
     decision_cache_hit: {
       executor: 'constant-arrival-rate',
       rate: 200,
@@ -372,25 +356,21 @@ export const options = {
       preAllocatedVUs: 50,
       maxVUs: 200,
       exec: 'decisionCacheHitScenario',
-      startTime: '0s',
+      startTime: '49m40s',          // 49:40 - 51:40
       tags: { scenario: 'decision_cache_hit' },
     },
 
-    // Scenario 19: Decision All Rule Paths
-    // Purpose: Coverage of all decision outcomes (pass, fail, pass_with_conditions)
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_rule_paths
+    // Scenario 19: Decision Rule Paths (3m)
     decision_rule_paths: {
       executor: 'constant-vus',
       vus: 100,
       duration: '3m',
       exec: 'decisionRulePathsScenario',
-      startTime: '0s',
+      startTime: '51m50s',          // 51:50 - 54:50
       tags: { scenario: 'decision_rule_paths' },
     },
 
-    // Scenario 20: Decision Consent Denial Fast-Fail
-    // Purpose: Verify denied consent fails fast without evidence fetch
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_consent_denial
+    // Scenario 20: Decision Consent Denial (2m)
     decision_consent_denial: {
       executor: 'constant-arrival-rate',
       rate: 200,
@@ -399,15 +379,13 @@ export const options = {
       preAllocatedVUs: 50,
       maxVUs: 200,
       exec: 'decisionConsentDenialScenario',
-      startTime: '0s',
+      startTime: '55m',             // 55:00 - 57:00
       tags: { scenario: 'decision_consent_denial' },
     },
 
     // ========== EVIDENCE MODULE SCENARIOS ==========
 
-    // Scenario 21: Evidence Citizen Lookup Throughput
-    // Purpose: Baseline throughput for citizen registry lookups
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_citizen
+    // Scenario 21: Evidence Citizen (4m)
     evidence_citizen: {
       executor: 'ramping-arrival-rate',
       startRate: 100,
@@ -420,13 +398,11 @@ export const options = {
         { duration: '1m', target: 100 },
       ],
       exec: 'evidenceCitizenScenario',
-      startTime: '0s',
+      startTime: '57m10s',          // 57:10 - 61:10
       tags: { scenario: 'evidence_citizen' },
     },
 
-    // Scenario 22: Evidence Sanctions Lookup Throughput
-    // Purpose: Baseline throughput for sanctions registry lookups
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_sanctions
+    // Scenario 22: Evidence Sanctions (4m)
     evidence_sanctions: {
       executor: 'ramping-arrival-rate',
       startRate: 100,
@@ -439,13 +415,11 @@ export const options = {
         { duration: '1m', target: 100 },
       ],
       exec: 'evidenceSanctionsScenario',
-      startTime: '0s',
+      startTime: '61m20s',          // 61:20 - 65:20
       tags: { scenario: 'evidence_sanctions' },
     },
 
-    // Scenario 23: Evidence VC Issuance Pipeline
-    // Purpose: Full VC issuance flow under load
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_vc_issue
+    // Scenario 23: Evidence VC Issuance (2m)
     evidence_vc_issue: {
       executor: 'constant-arrival-rate',
       rate: 100,
@@ -454,26 +428,22 @@ export const options = {
       preAllocatedVUs: 50,
       maxVUs: 200,
       exec: 'evidenceVCIssueScenario',
-      startTime: '0s',
+      startTime: '65m30s',          // 65:30 - 67:30
       tags: { scenario: 'evidence_vc_issue' },
     },
 
-    // Scenario 24: Evidence Cache Stampede
-    // Purpose: 1000 concurrent requests on expiring cache entry
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_cache_stampede
+    // Scenario 24: Evidence Cache Stampede (30s)
     evidence_cache_stampede: {
       executor: 'shared-iterations',
       vus: 100,
       iterations: 1000,
       maxDuration: '30s',
       exec: 'evidenceCacheStampedeScenario',
-      startTime: '0s',
+      startTime: '67m40s',          // 67:40 - 68:10
       tags: { scenario: 'evidence_cache_stampede' },
     },
 
-    // Scenario 25: Evidence Check (Combined) Throughput
-    // Purpose: Combined citizen + sanctions check throughput
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_check
+    // Scenario 25: Evidence Check (3m)
     evidence_check: {
       executor: 'constant-arrival-rate',
       rate: 200,
@@ -482,27 +452,23 @@ export const options = {
       preAllocatedVUs: 50,
       maxVUs: 300,
       exec: 'evidenceCheckScenario',
-      startTime: '0s',
+      startTime: '68m20s',          // 68:20 - 71:20
       tags: { scenario: 'evidence_check' },
     },
 
     // ========== ADDITIONAL AUTH SCENARIOS ==========
 
-    // Scenario 26: Auth Code Replay Attack
-    // Purpose: Verify replay protection under concurrent reuse attempts
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=auth_code_replay
+    // Scenario 26: Auth Code Replay (~30s)
     auth_code_replay: {
       executor: 'per-vu-iterations',
       vus: 50,
-      iterations: 3,  // Each VU tries to reuse same code 3 times
+      iterations: 3,
       exec: 'authCodeReplayScenario',
-      startTime: '0s',
+      startTime: '71m30s',          // 71:30 - ~72:00
       tags: { scenario: 'auth_code_replay' },
     },
 
-    // Scenario 27: Token Revocation List (TRL) Write Saturation
-    // Purpose: Measure TRL write throughput ceiling
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=trl_write_saturation
+    // Scenario 27: TRL Write Saturation (1m)
     trl_write_saturation: {
       executor: 'constant-arrival-rate',
       rate: 500,
@@ -511,13 +477,11 @@ export const options = {
       preAllocatedVUs: 100,
       maxVUs: 500,
       exec: 'trlWriteSaturationScenario',
-      startTime: '0s',
+      startTime: '72m10s',          // 72:10 - 73:10
       tags: { scenario: 'trl_write_saturation' },
     },
 
-    // Scenario 28: Userinfo Endpoint Throughput
-    // Purpose: Baseline for read-only userinfo endpoint
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=userinfo_throughput
+    // Scenario 28: Userinfo Throughput (30s)
     userinfo_throughput: {
       executor: 'constant-arrival-rate',
       rate: 2000,
@@ -526,33 +490,29 @@ export const options = {
       preAllocatedVUs: 100,
       maxVUs: 500,
       exec: 'userinfoThroughputScenario',
-      startTime: '0s',
+      startTime: '73m20s',          // 73:20 - 73:50
       tags: { scenario: 'userinfo_throughput' },
     },
 
     // ========== ADDITIONAL CONSENT SCENARIOS ==========
 
-    // Scenario 29: Consent Revoke/Grant Race
-    // Purpose: Test re-grant cooldown under rapid cycling
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=consent_revoke_grant_race
+    // Scenario 29: Consent Revoke/Grant Race (1m)
     consent_revoke_grant_race: {
       executor: 'constant-vus',
       vus: 50,
       duration: '1m',
       exec: 'consentRevokeGrantRaceScenario',
-      startTime: '0s',
+      startTime: '74m',             // 74:00 - 75:00
       tags: { scenario: 'consent_revoke_grant_race' },
     },
 
-    // Scenario 30: Consent GDPR Delete
-    // Purpose: Verify DeleteAll consistency
-    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=consent_gdpr_delete
+    // Scenario 30: Consent GDPR Delete (~1m)
     consent_gdpr_delete: {
       executor: 'per-vu-iterations',
       vus: 50,
       iterations: 5,
       exec: 'consentGDPRDeleteScenario',
-      startTime: '0s',
+      startTime: '75m10s',          // 75:10 - ~76:10
       tags: { scenario: 'consent_gdpr_delete' },
     },
   },
