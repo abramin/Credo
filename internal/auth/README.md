@@ -34,7 +34,10 @@ This is a distinct bounded context because its language and invariants are speci
 | **Revocation**         | `service/token_revocation.go`, `service/session_revoke.go` |
 | **UserInfo**           | `service/userinfo.go`                          |
 | **Device Binding**     | `device/device.go`, `service/device_binding.go` |
+| **Revocation Reason**  | `models.RevocationReason`                       |
 | **Audit events**       | emitted via `service/observability.go#logAudit` |
+
+> **Architecture Note:** Device ID cookie extraction happens in middleware (cross-cutting), while cookie setting happens in the auth handler (business logic). See `docs/engineering/architecture.md` for rationale.
 
 ---
 
@@ -42,7 +45,7 @@ This is a distinct bounded context because its language and invariants are speci
 
 ```
 internal/auth/
-├── adapters/           # External service adapters (e.g., ratelimit)
+├── adapters/           # External service adapters (ratelimit, resilient client resolver)
 ├── device/             # Device binding logic
 ├── email/              # Email validation utilities
 ├── handler/            # HTTP handlers (decode, validate, respond)
@@ -145,7 +148,7 @@ The **Session** is the primary aggregate root, owning:
 - **Device Binding Policy** via `device/device.go` and `service/device_binding.go`
   - Device binding is logging-only unless `DeviceBindingEnabled` is true.
   - Fingerprints are hashed; no IP is stored.
-- **Revocation List** via `store/revocation/revocation.go` (in-memory by default)
+- **Revocation List** via `store/revocation` (PostgreSQL-backed in production)
   - `TRLFailureMode` controls whether TRL write failures warn or fail.
   - Clock injection via `WithClock(func() time.Time)` option for testability
 - **Replay Protection** via `service/token_flow.go#revokeSessionOnReplay`
@@ -292,7 +295,7 @@ Services translate these to domain errors at their boundary.
 - Multi-factor authentication deferred.
 - Self-service account deletion deferred.
 - Device binding is logging-only unless `DeviceBindingEnabled` is true.
-- Admin deletion is not transactional in the in-memory stores.
+- Admin deletion is not transactional across stores.
 
 ---
 

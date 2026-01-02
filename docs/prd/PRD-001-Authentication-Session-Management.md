@@ -859,7 +859,7 @@ Until then, auth behavior remains unchanged to avoid cross-PRD coupling during M
 
 The following features were implemented to support production readiness beyond original PRD scope:
 
-1. **Sharded Transactional Locking**: 32-shard mutex pool to reduce lock contention during concurrent authorization flows (`internal/auth/service/service.go`)
+1. **Transactional Locking**: Mutex-based transaction support for in-memory stores; PostgreSQL transactions for production (`internal/auth/service/service.go`)
 2. **Device ID Cookie Management**: httpOnly, Secure, SameSite=Strict cookie for stable device binding across sessions
 3. **Rate Limiting Integration**: Authorization endpoint integrates with PRD-017 rate limiting
 4. **Token Pre-generation**: JWT tokens generated before acquiring transaction locks to minimize lock hold time

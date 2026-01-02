@@ -59,18 +59,7 @@ func (s *Service) handleTokenError(ctx context.Context, err error, clientID stri
 		return err
 	}
 
-	// Handle sentinel.ErrNotFound for session/code lookup failures
-	if errors.Is(err, sentinel.ErrNotFound) {
-		msg := "invalid authorization code"
-		logReason := "not_found"
-		if flow == TokenFlowRefresh {
-			msg = "invalid refresh token"
-		}
-		s.authFailure(ctx, logReason, false, attrs...)
-		return dErrors.New(dErrors.CodeInvalidGrant, msg)
-	}
-
-	// Check remaining mappings in order
+	// Check sentinel error mappings in priority order
 	for _, m := range tokenErrorMappings {
 		if errors.Is(err, m.sentinel) {
 			msg := m.codeMsg

@@ -476,12 +476,17 @@ const (
 )
 
 type ConsentRecord struct {
-    ID        string     // Format: "consent_<uuid>" - Always reused per user+purpose
+    ID        string     // UUID reused per user+purpose
     UserID    string
     Purpose   Purpose
     GrantedAt time.Time
     ExpiresAt *time.Time
     RevokedAt *time.Time
+}
+
+type ConsentScope struct {
+    UserID  string
+    Purpose Purpose
 }
 ```
 
@@ -494,7 +499,7 @@ type ConsentRecord struct {
 
 **Production Evolution (PRD-002 TR-6):**
 
-- **Write model:** Consent service writes canonical records to `ConsentStore` (SQL/in-memory) and emits `consent_granted`/`consent_revoked` events to Kafka/NATS.
+- **Write model:** Consent service writes canonical records to `ConsentStore` (PostgreSQL) and emits `consent_granted`/`consent_revoked` events to Kafka/NATS after commit (or via outbox).
 - **Read model:** Projection workers consume events and maintain a Redis/DynamoDB read model keyed by `user_id:purpose` with `{status, expires_at, revoked_at, version}` for sub-5ms lookups.
 - **Consistency:** Projection lag budget ≤1s; `Require()` checks projection first, falls back to canonical store on cache miss.
 - **Resilience:** Replay tool rebuilds projections from audit log; outbox pattern guarantees event delivery; no-eviction Redis policy for consent projections.
@@ -813,7 +818,7 @@ type AllowlistEntry struct {
 
 - `service/` - Rate limiting logic and orchestration
 - `middleware/` - HTTP middleware for enforcement
-- `store/bucket/` - Sliding window counters (in-memory, Redis)
+- `store/bucket/` - Sliding window counters (PostgreSQL)
 - `store/allowlist/` - Allowlist entries
 - `handler/` - Admin endpoints for allowlist management
 
@@ -957,6 +962,19 @@ Key handlers grouped by file, for example:
 - `RateLimit(class)` - Enforces per-IP rate limits by endpoint class (auth, sensitive, read, write)
 - `RateLimitAuthenticated(class)` - Enforces per-user rate limits for authenticated endpoints
 
+**Device Binding Middleware** (PRD-001):
+
+The device binding system has an intentional architectural split:
+
+- **Extraction (Middleware):** `Device(config)` middleware extracts device ID from cookie and pre-computes fingerprint on every request. This is a cross-cutting concern needed by multiple endpoints.
+- **Setting (Handler):** Device ID cookie is set only by the auth handler on `/auth/authorize` response. This is business logic specific to the authorization flow.
+
+This asymmetry exists because:
+1. Extraction is infrastructure (runs on all requests, injects into context)
+2. Setting is business logic (only during authorization, part of auth service response)
+
+See `docs/security/DEVICE_BINDING.md` for the full security model.
+
 All middleware supports context propagation and includes request_id for distributed tracing.
 
 **JWT Authentication:**
@@ -994,7 +1012,8 @@ Credo follows a **progressive enhancement** approach to storage and caching:
 **Phase 2 - Production Baseline:**
 
 - Persistent stores (PostgreSQL for canonical data)
-- Redis for hot caches (sessions, consent projections, evidence lookups)
+- Redis for sessions and token revocation (implemented)
+- Redis for hot caches (consent projections, evidence lookups - planned)
 - Kafka/NATS event bus for audit, consent changes, decision outcomes
 
 **Phase 3 - Scale and Observability:**
@@ -1008,8 +1027,9 @@ Credo follows a **progressive enhancement** approach to storage and caching:
 
 | Tier      | Technology             | Use Cases                                                | TTL Strategy                                  |
 | --------- | ---------------------- | -------------------------------------------------------- | --------------------------------------------- |
-| **Write** | PostgreSQL / In-Memory | Canonical consent, sessions, user data (source of truth) | N/A (durable)                                 |
-| **Hot**   | Redis Cluster          | Consent projections, registry cache, session throttling  | Align with domain expiry (consent, sanctions) |
+| **Write** | PostgreSQL / In-Memory | Canonical consent, users, auth codes, refresh tokens     | N/A (durable)                                 |
+| **Hot**   | Redis (implemented)    | Sessions, token revocation list (TRL)                    | Session TTL, token expiry                     |
+| **Hot**   | Redis (planned)        | Consent projections, registry cache, rate limiting       | Align with domain expiry (consent, sanctions) |
 | **Warm**  | Elasticsearch          | Audit index, compliance queries, investigations          | Time-based indices (daily/weekly)             |
 | **Cold**  | S3 / Object Store      | Audit archive, GDPR exports, long-term compliance        | Lifecycle policies (90d+ retention)           |
 
@@ -1047,6 +1067,25 @@ registry_refresh → [cache_warmer, evidence_projector]
 - **Consent projections:** No random eviction (allkeys-lru disabled); only TTL-based expiry
 - **Evidence cache:** LRU with 30s-5m TTL aligned to upstream refresh rates
 - **Session throttle:** LRU acceptable; false negatives fail-open with logging
+
+### Circuit Breaker Pattern
+
+Cross-module dependencies use circuit breakers to prevent cascade failures:
+
+**ClientResolver (Auth → Tenant):**
+
+- Failure threshold: 5 consecutive failures opens circuit
+- Success threshold: 3 consecutive successes closes circuit
+- Fallback: Returns cached client data when circuit is open
+- Cache TTL: 5 minutes
+
+This pattern is applied to any synchronous cross-module call where:
+
+1. The dependency could experience transient failures
+2. Cached/stale data is acceptable as a fallback
+3. Fail-fast is preferable to blocking on a degraded service
+
+See `internal/ratelimit/middleware/circuitbreaker.go` for the reference implementation.
 
 ---
 
@@ -1349,8 +1388,8 @@ Having the code structured by services makes these toggles easier to reason abou
 **What's Implemented:**
 
 - ✅ Complete domain models and service layer logic
-- ✅ In-memory stores (UserStore, SessionStore, ConsentStore, VCStore, RegistryCacheStore, AuditStore)
-- ✅ Storage interfaces abstracted (ready for Postgres implementations)
+- ✅ PostgreSQL stores (UserStore, SessionStore, ConsentStore, VCStore, RegistryCacheStore, AuditStore)
+- ✅ Storage interfaces abstracted (production adapters implemented)
 - ✅ Data minimization functions (MinimizeCitizenRecord, MinimizeClaims)
 - ✅ Consent enforcement with typed errors
 - ✅ Registry caching with TTL
@@ -1372,15 +1411,23 @@ Having the code structured by services makes these toggles easier to reason abou
 - ✅ Device binding service for session security (PRD-001)
 - ✅ Tenant and client management (PRD-026A)
 - ✅ Tenant and client lifecycle management (PRD-026B)
-- ✅ Rate limiting with in-memory sliding window (PRD-017 MVP)
+- ✅ Rate limiting with PostgreSQL-backed sliding window (PRD-017)
 
 **What's Partially Implemented:**
 
-- ⚠️ Rate limiting Redis backend (PRD-017 - in-memory MVP complete, Redis backend deferred to PRD-017B)
+- ⚠️ Rate limiting Redis backend (PRD-017B - planned, infrastructure ready)
 - ⚠️ Evidence and Decision handlers (501 Not Implemented)
 - ⚠️ User Data Rights handlers (501 Not Implemented)
 - ⚠️ Real VC credential ID generation
 - ⚠️ Async audit worker (worker.go exists but not wired)
+
+**Redis Integration (Implemented):**
+
+- ✅ Redis client package with connection pooling and health checks
+- ✅ Redis session store with JSON serialization and TTL-based expiry
+- ✅ Redis token revocation list (TRL) with pipeline batch operations
+- ✅ Automatic fallback to PostgreSQL when Redis is not configured
+- ✅ Configuration via `REDIS_URL` environment variable
 
 ### Production Roadmap
 
@@ -1388,7 +1435,7 @@ Key improvements to harden this design:
 
 1. **Persistent Storage**
 
-   - Replace in-memory stores with Postgres repositories per service
+   - PostgreSQL stores implemented per service
    - Add connection pooling and retry logic
    - Implement proper transaction handling for multi-store operations
    - **CQRS read models:** Deploy Redis projections for consent/decision hot paths (see PRD-002 TR-6, PRD-005 TR-5)
@@ -1431,7 +1478,7 @@ Key improvements to harden this design:
 
 6. **Security Hardening**
 
-   - ✅ Rate limiting with in-memory sliding window (PRD-017 MVP complete)
+   - ✅ Rate limiting with PostgreSQL-backed sliding window (PRD-017)
    - ⚠️ Distributed rate limiting with Redis backend (PRD-017B)
    - ⚠️ Implement circuit breakers for registry calls (hystrix-go or similar)
    - ⚠️ Add request signing/verification for interservice calls
@@ -1483,7 +1530,7 @@ Key improvements to harden this design:
 ### Why Interface-Based Storage?
 
 - **Testability:** Service logic can be tested with mock stores without spinning up databases.
-- **Flexibility:** Easy to swap in-memory stores for Postgres, MongoDB, or cloud-native storage.
+- **Flexibility:** Adapters allow swapping storage backends (PostgreSQL, Redis, cloud-native).
 - **Clear contracts:** Store interfaces document exactly what persistence operations each service needs.
 
 ### Why Derived Identity Pattern?
@@ -1534,3 +1581,4 @@ The codebase currently has:
 | 2.4     | 2025-12-17 | Engineering Team | Align with implemented PRDs: add Rate Limiting (PRD-017), Tenant Management (PRD-026A), Admin (PRD-001B), Device Binding modules; update package layout; add API Routes section; update middleware and implementation status |
 | 2.5     | 2025-12-17 | Engineering Team | Added Phase 7 Differentiation Pack services and package layout: Trust Score, Compliance Templates, Privacy Analytics, Trust Network, Consent-as-a-Service |
 | 2.6     | 2025-12-24 | Engineering Team | Phase 0 completion update: add PRD-026B tenant/client lifecycle management, update rate limiting to MVP complete status, add lifecycle API routes, update implementation status summary |
+| 2.7     | 2026-01-02 | Engineering Team | Add Redis integration for sessions and token revocation (PRD-016, PRD-020): Redis session store, Redis TRL, client package with health checks; update storage tiers and implementation status |

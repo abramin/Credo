@@ -43,8 +43,7 @@ jobs:
             ./internal/auth/store/revocation \
             ./internal/consent/store \
             ./pkg/platform/audit/publisher \
-            ./pkg/platform/audit/store/memory \
-            ./pkg/platform/sync
+            ./pkg/platform/audit/store/memory
 
   integration:
     name: Integration Tests (Testcontainers)
@@ -70,7 +69,7 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
   e2e:
-    name: E2E Tests
+    name: E2E Tests (In-Memory)
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -85,7 +84,7 @@ jobs:
           cache: true
 
       - name: Build Go application
-        run: go build -o bin/credo ./cmd/server/main.go
+        run: go build -o bin/credo ./cmd/server
 
       - name: Build and start mock citizen-registry
         run: |
@@ -108,14 +107,14 @@ jobs:
           timeout 10 bash -c 'until curl -f http://localhost:8082/health 2>/dev/null; do sleep 1; done' || true
           timeout 10 bash -c 'until curl -f http://localhost:8083/health 2>/dev/null; do sleep 1; done' || true
 
-      - name: Start backend server
+      - name: Start backend server (in-memory stores)
         run: |
           ./bin/credo &
           echo $! > server.pid
         env:
-          CREDO_ENV: demo
           PORT: 8080
           REGULATED_MODE: "true"
+          DISABLE_RATE_LIMITING: "true"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns
           CITIZEN_REGISTRY_URL: http://localhost:8082
@@ -180,7 +179,7 @@ jobs:
           retention-days: 7
 
   e2e-unregulated:
-    name: E2E Tests (Unregulated Mode)
+    name: E2E Tests (Unregulated, In-Memory)
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -195,7 +194,7 @@ jobs:
           cache: true
 
       - name: Build Go application
-        run: go build -o bin/credo ./cmd/server/main.go
+        run: go build -o bin/credo ./cmd/server
 
       - name: Build and start mock citizen-registry
         run: |
@@ -218,14 +217,14 @@ jobs:
           timeout 10 bash -c 'until curl -f http://localhost:8082/health 2>/dev/null; do sleep 1; done' || true
           timeout 10 bash -c 'until curl -f http://localhost:8083/health 2>/dev/null; do sleep 1; done' || true
 
-      - name: Start backend server (unregulated mode)
+      - name: Start backend server (unregulated, in-memory)
         run: |
           ./bin/credo &
           echo $! > server.pid
         env:
-          CREDO_ENV: demo
           PORT: 8080
           REGULATED_MODE: "false"
+          DISABLE_RATE_LIMITING: "true"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns
           CITIZEN_REGISTRY_URL: http://localhost:8082

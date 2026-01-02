@@ -28,10 +28,6 @@ paths:
         are treated as idempotent: no timestamps are updated and the existing
         consent is returned.
 
-        **Session State Transition:** If the user's session is in `pending_consent`
-        status (see `GET /auth/sessions` in auth.yaml), granting consent will
-        automatically transition the session to `active` status, enabling token
-        operations.
       security:
         - bearerAuth: []
       requestBody:
@@ -216,9 +212,9 @@ paths:
       description: |
         Revoke all consents for the authenticated user that are not already
         revoked. This is a bulk operation intended for cleanup and
-        administrative purposes. Expired consents without a revoked_at
-        timestamp are marked revoked as well. Returns a message that includes
-        the count of consents revoked.
+        administrative purposes. Expired consents remain expired and are not
+        marked revoked. Returns a message that includes the count of consents
+        revoked.
       security:
         - bearerAuth: []
       responses:
@@ -242,6 +238,41 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
+  /admin/consent/users/{user_id}/revoke-all:
+    post:
+      summary: Revoke all consents for a user (admin)
+      security:
+        - adminToken: []
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema:
+            type: string
+          description: Target user identifier
+      responses:
+        "200":
+          description: Consents revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeConsentResponse"
+              examples:
+                success:
+                  value:
+                    revoked: null
+                    message: "Consent revoked for 3 purposes"
+                none_to_revoke:
+                  summary: No consents to revoke
+                  value:
+                    revoked: null
+                    message: "Consent revoked for 0 purposes"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
     bearerAuth:
@@ -249,6 +280,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: JWT access token obtained from /auth/token endpoint
+    adminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Admin API token required for admin operations
   schemas:
     ConsentPurpose:
       type: string

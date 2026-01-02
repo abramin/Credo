@@ -2,44 +2,38 @@ package service
 
 import (
 	"context"
+	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-
 	pkgerrors "credo/pkg/domain-errors"
-	platformsync "credo/pkg/platform/sync"
-)
-
-// Shard contention metrics for monitoring lock behavior
-var (
-	shardLockWaitDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "credo_consent_shard_lock_wait_seconds",
-		Help:    "Time spent waiting to acquire shard lock",
-		Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1},
-	})
-	shardLockAcquisitions = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "credo_consent_shard_lock_acquisitions_total",
-		Help: "Total number of shard lock acquisitions",
-	})
 )
 
 // ConsentStoreTx provides a transactional boundary for consent store mutations.
 // Implementations may wrap a database transaction or, in-memory, a coarse lock.
 type ConsentStoreTx interface {
-	RunInTx(ctx context.Context, fn func(store Store) error) error
+	RunInTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error
 }
 
 // defaultConsentTxTimeout is the maximum duration for a consent transaction.
 const defaultConsentTxTimeout = 5 * time.Second
 
-type shardedConsentTx struct {
-	mu      *platformsync.ShardedMutex
+// inMemoryConsentTx provides simple mutex-based transaction support for in-memory stores.
+// Used for tests and demo mode. Production uses PostgresTx with real database transactions.
+type inMemoryConsentTx struct {
+	mu      sync.Mutex
 	store   Store
 	timeout time.Duration
 }
 
-func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(store Store) error) error {
+// newInMemoryConsentTx constructs a mutex-backed transaction wrapper for in-memory stores.
+// It is intended for tests or demo mode and does not provide cross-process isolation.
+func newInMemoryConsentTx(store Store) *inMemoryConsentTx {
+	return &inMemoryConsentTx{store: store}
+}
+
+// RunInTx executes fn under a mutex and applies a timeout if none is set.
+// Side effects: blocks concurrent callers until fn completes.
+func (t *inMemoryConsentTx) RunInTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return pkgerrors.Wrap(err, pkgerrors.CodeTimeout, "transaction aborted: context cancelled")
@@ -56,29 +50,15 @@ func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(store Store) err
 		defer cancel()
 	}
 
-	key := t.shardKey(ctx)
-
-	// Record lock acquisition timing for contention monitoring
-	lockStart := time.Now()
-	t.mu.Lock(key)
-	shardLockWaitDuration.Observe(time.Since(lockStart).Seconds())
-	shardLockAcquisitions.Inc()
-	defer t.mu.Unlock(key)
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	// Check again after acquiring lock
 	if err := ctx.Err(); err != nil {
 		return pkgerrors.Wrap(err, pkgerrors.CodeTimeout, "transaction aborted: context cancelled")
 	}
 
-	return fn(t.store)
-}
-
-// shardKey picks a shard based on user ID from context, or defaults to shard 0.
-func (t *shardedConsentTx) shardKey(ctx context.Context) string {
-	if userID, ok := ctx.Value(txUserKeyCtx).(string); ok && userID != "" {
-		return userID
-	}
-	return ""
+	return fn(ctx, t.store)
 }
 
 type txUserKey struct{}

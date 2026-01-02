@@ -4,108 +4,118 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestParseUserAgent(t *testing.T) {
-	t.Run("empty user agent returns unknown device", func(t *testing.T) {
+// DeviceServiceSuite tests the device binding and user-agent parsing functionality.
+// AGENTS.MD JUSTIFICATION: Fingerprint stability and user-agent parsing are internal
+// invariants not exposed via E2E tests; deterministic hashing is a pure function contract.
+type DeviceServiceSuite struct {
+	suite.Suite
+	svc *Service
+}
+
+func (s *DeviceServiceSuite) SetupTest() {
+	s.svc = NewService(true)
+}
+
+func TestDeviceServiceSuite(t *testing.T) {
+	suite.Run(t, new(DeviceServiceSuite))
+}
+
+// TestUserAgentParsing tests the user-agent string parsing for device display names.
+func (s *DeviceServiceSuite) TestUserAgentParsing() {
+	s.Run("empty user agent returns unknown device", func() {
 		result := ParseUserAgent("")
-		assert.Equal(t, "Unknown Device", result)
+		s.Equal("Unknown Device", result)
 	})
 
-	t.Run("chrome on desktop", func(t *testing.T) {
+	s.Run("chrome on desktop includes browser and OS", func() {
 		userAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 		result := ParseUserAgent(userAgent)
-		// Then: result should contain browser, "on", and OS
-		assert.Contains(t, result, "Chrome")
-		assert.Contains(t, result, "on")
-		assert.NotContains(t, result, "  ")
+		s.Contains(result, "Chrome")
+		s.Contains(result, "on")
+		s.NotContains(result, "  ")
 	})
 
-	t.Run("safari on iphone", func(t *testing.T) {
+	s.Run("safari on iphone includes platform", func() {
 		userAgent := "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 		result := ParseUserAgent(userAgent)
-		// Then: mobile device should include platform
-		assert.Contains(t, result, "on")
-		assert.Contains(t, result, "iPhone")
+		s.Contains(result, "on")
+		s.Contains(result, "iPhone")
 	})
 
-	t.Run("firefox on linux", func(t *testing.T) {
+	s.Run("firefox on linux includes browser and OS", func() {
 		userAgent := "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0"
 		result := ParseUserAgent(userAgent)
-		// Then: desktop device with identifiable browser and OS
-		assert.Contains(t, result, "Firefox")
-		assert.Contains(t, result, "on")
+		s.Contains(result, "Firefox")
+		s.Contains(result, "on")
 	})
 
-	t.Run("unknown user agent returns formatted string", func(t *testing.T) {
+	s.Run("unknown user agent returns formatted string", func() {
 		result := ParseUserAgent("Unknown/1.0")
-		// Then: even unknown agents should be formatted with defaults
-		assert.Contains(t, result, "on")
-		assert.NotEmpty(t, result)
+		s.Contains(result, "on")
+		s.NotEmpty(result)
 	})
-}
 
-func TestParseUserAgentFormatting(t *testing.T) {
-	t.Run("result has no leading or trailing whitespace", func(t *testing.T) {
+	s.Run("result has no leading or trailing whitespace", func() {
 		userAgent := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 		result := ParseUserAgent(userAgent)
-		assert.Equal(t, result, strings.TrimSpace(result))
+		s.Equal(result, strings.TrimSpace(result))
 	})
 }
 
-func TestDeviceBindingFingerprint(t *testing.T) {
-	svc := NewService(true)
-
-	t.Run("disabled returns empty fingerprint", func(t *testing.T) {
+// TestFingerprintStability tests that fingerprints are deterministic and stable
+// across minor version changes but sensitive to major changes.
+func (s *DeviceServiceSuite) TestFingerprintStability() {
+	s.Run("disabled service returns empty fingerprint", func() {
 		disabled := NewService(false)
 		fp := disabled.ComputeFingerprint("Mozilla/5.0 (Windows NT 10.0) Chrome/120.0.0.0")
-		assert.Empty(t, fp)
+		s.Empty(fp)
 	})
 
-	t.Run("same user agent yields deterministic fingerprint", func(t *testing.T) {
+	s.Run("same user agent yields deterministic fingerprint", func() {
 		ua := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-		fp1 := svc.ComputeFingerprint(ua)
-		fp2 := svc.ComputeFingerprint(ua)
+		fp1 := s.svc.ComputeFingerprint(ua)
+		fp2 := s.svc.ComputeFingerprint(ua)
 
-		assert.Equal(t, fp1, fp2)
-		assert.Len(t, fp1, 64)
+		s.Equal(fp1, fp2)
+		s.Len(fp1, 64) // SHA-256 hex
 	})
 
-	t.Run("minor version changes do not affect fingerprint", func(t *testing.T) {
+	s.Run("minor version changes do not affect fingerprint", func() {
 		ua1 := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.109 Safari/537.36"
 		ua2 := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.224 Safari/537.36"
 
-		fp1 := svc.ComputeFingerprint(ua1)
-		fp2 := svc.ComputeFingerprint(ua2)
+		fp1 := s.svc.ComputeFingerprint(ua1)
+		fp2 := s.svc.ComputeFingerprint(ua2)
 
-		assert.Equal(t, fp1, fp2)
+		s.Equal(fp1, fp2)
 	})
 
-	t.Run("major version changes affect fingerprint", func(t *testing.T) {
+	s.Run("major version changes affect fingerprint", func() {
 		ua1 := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 		ua2 := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 
-		fp1 := svc.ComputeFingerprint(ua1)
-		fp2 := svc.ComputeFingerprint(ua2)
+		fp1 := s.svc.ComputeFingerprint(ua1)
+		fp2 := s.svc.ComputeFingerprint(ua2)
 
-		assert.NotEqual(t, fp1, fp2)
+		s.NotEqual(fp1, fp2)
 	})
 }
 
-func TestFingerprintComparison(t *testing.T) {
-	svc := NewService(true)
-
-	t.Run("mismatch reports drift", func(t *testing.T) {
-		matched, drift := svc.CompareFingerprints("a", "b")
-		assert.False(t, matched)
-		assert.True(t, drift)
+// TestFingerprintComparison tests the drift detection logic.
+func (s *DeviceServiceSuite) TestFingerprintComparison() {
+	s.Run("mismatch reports drift", func() {
+		matched, drift := s.svc.CompareFingerprints("a", "b")
+		s.False(matched)
+		s.True(drift)
 	})
 
-	t.Run("match reports no drift", func(t *testing.T) {
-		matched, drift := svc.CompareFingerprints("abc", "abc")
-		assert.True(t, matched)
-		assert.False(t, drift)
+	s.Run("match reports no drift", func() {
+		matched, drift := s.svc.CompareFingerprints("abc", "abc")
+		s.True(matched)
+		s.False(drift)
 	})
 }

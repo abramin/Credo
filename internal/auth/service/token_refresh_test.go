@@ -15,14 +15,13 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-// TestTokenRefreshFlow tests refresh token grant (PRD-016 FR-2)
+// TestTokenRefreshFlow tests refresh token grant edge cases (PRD-016 FR-2)
 //
 // AGENTS.MD JUSTIFICATION:
-// These unit tests verify:
-// - Refresh token consumption (single-use enforcement)
+// These unit tests verify behaviors NOT covered by Gherkin:
 // - Client/user status validation on refresh (PRD-026A FR-4.5.4)
-// - Token rotation behavior and session advancement
-// - Store error propagation to domain errors
+// - Client ID mismatch detection (RFC 6749 §5.2)
+// - Device binding behavior during refresh
 //
 // E2E coverage: e2e/features/auth_token_lifecycle.feature covers happy path
 // and reuse rejection. Unit tests add client/user inactive scenarios.
@@ -66,65 +65,11 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		ExpiresAt:      time.Now().Add(23 * time.Hour),
 	}
 
-	s.Run("happy path - successful token refresh", func() {
-		req := newReq()
-		refreshRec := *validRefreshToken
-		sess := *validSession
-		ctx := context.Background()
-
-		// Expected flow (updated for PRD-026A FR-4.5.4 validation before transaction):
-		// 1. Find refresh token (non-transactional, for validation)
-		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
-		// 2. Find session (non-transactional, for validation)
-		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		// 3. Validate client and user status (PRD-026A FR-4.5.4)
-		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientID).Return(mockClient, mockTenant, nil)
-		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
-		// 4. Inside transaction: consume refresh token, re-find session, generate tokens
-		s.mockRefreshStore.EXPECT().Execute(gomock.Any(), refreshTokenString, gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, token string, validate func(*models.RefreshTokenRecord) error, mutate func(*models.RefreshTokenRecord)) (*models.RefreshTokenRecord, error) {
-				if err := validate(&refreshRec); err != nil {
-					return &refreshRec, err
-				}
-				mutate(&refreshRec)
-				return &refreshRec, nil
-			})
-		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
-		accessToken, _, idToken, refreshToken := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
-		// Inside RunInTx: Execute session validation and mutation
-		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sess.ID, gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, sessionID id.SessionID, validate func(*models.Session) error, mutate func(*models.Session)) (*models.Session, error) {
-				s.Require().Equal(sess.ID, sessionID)
-				// Execute the callbacks to verify they work
-				if err := validate(&sess); err != nil {
-					return nil, err
-				}
-				mutate(&sess)
-				return &sess, nil
-			})
-		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(ctx context.Context, token *models.RefreshTokenRecord) error {
-				s.Require().Equal(refreshToken, token.Token)
-				s.Require().Equal(sessionID, token.SessionID)
-				s.Require().False(token.Used)
-				return nil
-			})
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-		result, err := s.service.Token(ctx, &req)
-		s.Require().NoError(err)
-		s.Equal(accessToken, result.AccessToken)
-		s.Equal(idToken, result.IDToken)
-		s.Equal(refreshToken, result.RefreshToken)
-		s.Equal("Bearer", result.TokenType)
-		s.Equal(int(s.service.TokenTTL.Seconds()), result.ExpiresIn)
-	})
-
-	// NOTE: RFC 6749 §5.2 invalid_grant scenarios (token used, not found, expired, session not found, session revoked)
-	// are covered by e2e/features/auth_token_lifecycle.feature - deleted per testing.md doctrine
+	// NOTE: Happy path and RFC 6749 §5.2 invalid_grant scenarios (token used, not found, expired,
+	// session not found, session revoked) are covered by e2e/features/auth_token_lifecycle.feature
 
 	// RFC 6749 §5.2: "The provided authorization grant ... was issued to another client."
-	s.Run("client_id mismatch - invalid_grant", func() {
+	s.Run("client_id mismatch returns invalid_grant", func() {
 		req := models.TokenRequest{
 			GrantType:    string(models.GrantRefreshToken),
 			RefreshToken: refreshTokenString,
@@ -149,7 +94,7 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 			"expected invalid_grant error code per RFC 6749 §5.2 - got %s", err.Error())
 	})
 
-	s.Run("client inactive - PRD-026A FR-4.5.4", func() {
+	s.Run("inactive client returns forbidden - PRD-026A FR-4.5.4", func() {
 		req := newReq()
 		refreshRec := *validRefreshToken
 		sess := *validSession
@@ -171,7 +116,7 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		s.Contains(err.Error(), "client is not active")
 	})
 
-	s.Run("user inactive - PRD-026A FR-4.5.4", func() {
+	s.Run("inactive user returns forbidden - PRD-026A FR-4.5.4", func() {
 		req := newReq()
 		refreshRec := *validRefreshToken
 		sess := *validSession
@@ -193,7 +138,7 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		s.Contains(err.Error(), "user inactive")
 	})
 
-	s.Run("device binding enabled ignores mismatched cookie device_id", func() {
+	s.Run("device binding ignores mismatched cookie device_id", func() {
 		req := newReq()
 		refreshRec := *validRefreshToken
 		sess := *validSession
@@ -216,6 +161,7 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientID).Return(mockClient, mockTenant, nil)
 		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
 		// Inside transaction
+		// Note: Session is NOT re-fetched here - executeTokenFlowTx uses the Execute pattern
 		s.mockRefreshStore.EXPECT().Execute(gomock.Any(), refreshTokenString, gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, token string, validate func(*models.RefreshTokenRecord) error, mutate func(*models.RefreshTokenRecord)) (*models.RefreshTokenRecord, error) {
 				if err := validate(&refreshRec); err != nil {
@@ -224,7 +170,6 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 				mutate(&refreshRec)
 				return &refreshRec, nil
 			})
-		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
 		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sess.ID, gomock.Any(), gomock.Any()).
 			DoAndReturn(func(ctx context.Context, sessionID id.SessionID, validate func(*models.Session) error, mutate func(*models.Session)) (*models.Session, error) {

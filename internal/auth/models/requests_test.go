@@ -10,6 +10,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// ============================================================================
+// FAST-FEEDBACK VALIDATION TESTS
+// ============================================================================
+//
+// These tests provide rapid feedback on request validation logic. While some
+// validation scenarios are also covered in E2E feature tests (e2e/features/auth_*.feature),
+// these unit tests serve a different purpose:
+//
+// 1. SPEED: Run in milliseconds vs seconds for E2E tests
+// 2. ISOLATION: Test validation logic without HTTP/network overhead
+// 3. COVERAGE: Exercise edge cases (size limits, syntax) not worth E2E round-trips
+// 4. REFACTORING: Enable safe refactoring of validation implementation
+//
+// The method IS the contract here - Validate() and Normalize() define the behavior.
+// ============================================================================
+
 func TestAuthorizationRequest_Validate_SizeLimits(t *testing.T) {
 	validRequest := func() *AuthorizationRequest {
 		return &AuthorizationRequest{

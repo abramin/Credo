@@ -46,9 +46,14 @@ import (
 	vcStore "credo/internal/evidence/vc/store"
 	jwttoken "credo/internal/jwt_token"
 	"credo/internal/platform/config"
+	"credo/internal/platform/database"
 	"credo/internal/platform/health"
 	"credo/internal/platform/httpserver"
+	"credo/internal/platform/kafka"
+	kafkaconsumer "credo/internal/platform/kafka/consumer"
+	kafkaproducer "credo/internal/platform/kafka/producer"
 	"credo/internal/platform/logger"
+	platformredis "credo/internal/platform/redis"
 	rateLimitConfig "credo/internal/ratelimit/config"
 	rateLimitMW "credo/internal/ratelimit/middleware"
 	rateLimitModels "credo/internal/ratelimit/models"
@@ -60,16 +65,12 @@ import (
 	authlockoutStore "credo/internal/ratelimit/store/authlockout"
 	rwbucketStore "credo/internal/ratelimit/store/bucket"
 	globalthrottleStore "credo/internal/ratelimit/store/globalthrottle"
-	audit "credo/pkg/platform/audit"
 	tenantHandler "credo/internal/tenant/handler"
 	tenantmetrics "credo/internal/tenant/metrics"
 	tenantService "credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
-	"credo/internal/platform/database"
-	"credo/internal/platform/kafka"
-	kafkaconsumer "credo/internal/platform/kafka/consumer"
-	kafkaproducer "credo/internal/platform/kafka/producer"
+	audit "credo/pkg/platform/audit"
 	auditconsumer "credo/pkg/platform/audit/consumer"
 	auditmetrics "credo/pkg/platform/audit/metrics"
 	outboxmetrics "credo/pkg/platform/audit/outbox/metrics"
@@ -104,24 +105,21 @@ type infraBundle struct {
 	DeviceService   *device.Service
 
 	// Phase 2: Infrastructure
-	DBPool         *database.Pool
-	KafkaProducer  *kafkaproducer.Producer
-	OutboxWorker   *outboxworker.Worker
-	OutboxMetrics  *outboxmetrics.Metrics
-	KafkaConsumer  *kafkaconsumer.Consumer
+	DBPool             *database.Pool
+	RedisClient        *platformredis.Client
+	KafkaProducer      *kafkaproducer.Producer
+	OutboxWorker       *outboxworker.Worker
+	OutboxMetrics      *outboxmetrics.Metrics
+	KafkaConsumer      *kafkaconsumer.Consumer
 	KafkaHealthChecker *kafka.HealthChecker
 }
 
 type authModule struct {
-	Service       *authService.Service
-	Handler       *authHandler.Handler
-	AdminSvc      *admin.Service
-	Cleanup       *cleanupWorker.CleanupService
-	Users         *userStore.InMemoryUserStore
-	Sessions      *sessionStore.InMemorySessionStore
-	Codes         *authCodeStore.InMemoryAuthorizationCodeStore
-	RefreshTokens *refreshTokenStore.InMemoryRefreshTokenStore
-	AuditStore    audit.Store
+	Service    *authService.Service
+	Handler    *authHandler.Handler
+	AdminSvc   *admin.Service
+	Cleanup    *cleanupWorker.CleanupService
+	AuditStore audit.Store
 }
 
 type consentModule struct {
@@ -132,8 +130,6 @@ type consentModule struct {
 type tenantModule struct {
 	Service *tenantService.Service
 	Handler *tenantHandler.Handler
-	Tenants *tenantstore.InMemory
-	Clients *clientstore.InMemory
 }
 
 type registryModule struct {
@@ -170,36 +166,54 @@ func main() {
 		panic(err)
 	}
 
-	rlBundle, err := buildRateLimitServices(infra.Log)
+	rlBundle, err := buildRateLimitServices(infra.Log, infra.DBPool)
 	if err != nil {
 		infra.Log.Error("failed to initialize rate limit services", "error", err)
 		os.Exit(1)
 	}
-	fallbackLimiter := rateLimitMW.NewFallbackLimiter(rlBundle.cfg, rlBundle.allowlistStore, infra.Log)
 	rateLimitMiddleware := rateLimitMW.New(
 		rlBundle.limiter,
 		infra.Log,
 		rateLimitMW.WithDisabled(infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting),
-		rateLimitMW.WithFallbackLimiter(fallbackLimiter),
 	)
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
-	tenantMod := buildTenantModule(infra)
+	tenantMod, err := buildTenantModule(infra)
+	if err != nil {
+		infra.Log.Error("failed to initialize tenant module", "error", err)
+		os.Exit(1)
+	}
 	authMod, err := buildAuthModule(appCtx, infra, tenantMod.Service, rlBundle.authLockoutSvc, rlBundle.requestSvc)
 	if err != nil {
 		infra.Log.Error("failed to initialize auth module", "error", err)
 		os.Exit(1)
 	}
-	clientRateLimitMiddleware, err := buildClientRateLimitMiddleware(infra.Log, tenantMod.Service, rlBundle.cfg, infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting)
+	clientRateLimitMiddleware, err := buildClientRateLimitMiddleware(infra.Log, tenantMod.Service, rlBundle.cfg, infra.DBPool, infra.Cfg.DemoMode || infra.Cfg.DisableRateLimiting)
 	if err != nil {
 		infra.Log.Error("failed to initialize client rate limit middleware", "error", err)
 		os.Exit(1)
 	}
-	consentMod := buildConsentModule(infra)
-	registryMod := buildRegistryModule(infra, consentMod.Service)
-	vcMod := buildVCModule(infra, consentMod.Service, registryMod.Service)
-	decisionMod := buildDecisionModule(infra, registryMod.Service, vcMod.Store, consentMod.Service)
+	consentMod, err := buildConsentModule(infra)
+	if err != nil {
+		infra.Log.Error("failed to initialize consent module", "error", err)
+		os.Exit(1)
+	}
+	registryMod, err := buildRegistryModule(infra, consentMod.Service)
+	if err != nil {
+		infra.Log.Error("failed to initialize registry module", "error", err)
+		os.Exit(1)
+	}
+	vcMod, err := buildVCModule(infra, consentMod.Service, registryMod.Service)
+	if err != nil {
+		infra.Log.Error("failed to initialize vc module", "error", err)
+		os.Exit(1)
+	}
+	decisionMod, err := buildDecisionModule(infra, registryMod.Service, vcMod.Store, consentMod.Service)
+	if err != nil {
+		infra.Log.Error("failed to initialize decision module", "error", err)
+		os.Exit(1)
+	}
 
 	startCleanupWorker(appCtx, infra.Log, authMod.Cleanup)
 	go func() {
@@ -232,18 +246,37 @@ type rateLimitBundle struct {
 	limiter        *rateLimitMW.Limiter
 	authLockoutSvc *authlockout.Service
 	requestSvc     *requestlimit.Service
-	allowlistStore *rwallowlistStore.InMemoryAllowlistStore
-	cfg            *rateLimitConfig.Config
+	allowlistStore interface {
+		requestlimit.AllowlistStore
+		StartCleanup(ctx context.Context, interval time.Duration) error
+	}
+	cfg *rateLimitConfig.Config
 }
 
-func buildRateLimitServices(logger *slog.Logger) (*rateLimitBundle, error) {
+func buildRateLimitServices(logger *slog.Logger, dbPool *database.Pool) (*rateLimitBundle, error) {
 	cfg := rateLimitConfig.DefaultConfig()
 
-	// Create stores
-	bucketStore := rwbucketStore.New()
-	allowlistStore := rwallowlistStore.New()
-	authLockoutSt := authlockoutStore.New()
-	globalThrottleSt := globalthrottleStore.New()
+	// Create stores - use Postgres if available, otherwise fall back to in-memory
+	var bucketStore requestlimit.BucketStore
+	var allowlistStore interface {
+		requestlimit.AllowlistStore
+		StartCleanup(ctx context.Context, interval time.Duration) error
+	}
+	var authLockoutSt authlockout.Store
+	var globalThrottleSt globalthrottle.Store
+
+	if dbPool != nil {
+		bucketStore = rwbucketStore.NewPostgres(dbPool.DB())
+		allowlistStore = rwallowlistStore.NewPostgres(dbPool.DB())
+		authLockoutSt = authlockoutStore.NewPostgres(dbPool.DB(), &cfg.AuthLockout)
+		globalThrottleSt = globalthrottleStore.NewPostgres(dbPool.DB(), &cfg.Global)
+	} else {
+		logger.Warn("no database connection, using in-memory rate limit stores")
+		bucketStore = rwbucketStore.New()
+		allowlistStore = rwallowlistStore.New()
+		authLockoutSt = authlockoutStore.New()
+		globalThrottleSt = globalthrottleStore.New()
+	}
 
 	// Create focused services
 	requestSvc, err := requestlimit.New(bucketStore, allowlistStore,
@@ -283,12 +316,20 @@ func buildRateLimitServices(logger *slog.Logger) (*rateLimitBundle, error) {
 	}, nil
 }
 
-func buildClientRateLimitMiddleware(logger *slog.Logger, tenantSvc *tenantService.Service, cfg *rateLimitConfig.Config, disabled bool) (*rateLimitMW.ClientMiddleware, error) {
+func buildClientRateLimitMiddleware(logger *slog.Logger, tenantSvc *tenantService.Service, cfg *rateLimitConfig.Config, dbPool *database.Pool, disabled bool) (*rateLimitMW.ClientMiddleware, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("rate limit config is required")
 	}
 	clientLookup := &tenantClientLookup{tenantSvc: tenantSvc}
-	clientBucketStore := rwbucketStore.New()
+
+	// Use Postgres if available, otherwise fall back to in-memory
+	var clientBucketStore rateLimitClientLimit.BucketStore
+	if dbPool != nil {
+		clientBucketStore = rwbucketStore.NewPostgres(dbPool.DB())
+	} else {
+		logger.Warn("no database connection, using in-memory client rate limit store")
+		clientBucketStore = rwbucketStore.New()
+	}
 	clientLimiter, err := rateLimitClientLimit.New(
 		clientBucketStore,
 		clientLookup,
@@ -298,12 +339,10 @@ func buildClientRateLimitMiddleware(logger *slog.Logger, tenantSvc *tenantServic
 	if err != nil {
 		return nil, err
 	}
-	fallback := rateLimitMW.NewFallbackClientLimiter(&cfg.ClientLimits)
 	return rateLimitMW.NewClientMiddleware(
 		clientLimiter,
 		logger,
 		disabled,
-		rateLimitMW.WithClientFallbackLimiter(fallback),
 	), nil
 }
 
@@ -322,7 +361,7 @@ func buildInfra() (*infraBundle, error) {
 	)
 	if cfg.DemoMode {
 		log.Info("CREDO_ENV=demo — starting isolated demo environment",
-			"stores", "in-memory",
+			"stores", "postgres",
 			"issuer_base_url", cfg.Auth.JWTIssuerBaseURL,
 		)
 	}
@@ -375,6 +414,16 @@ func initPhase2Infra(bundle *infraBundle, cfg *config.Server, log *slog.Logger) 
 		}
 		bundle.DBPool = dbPool
 		log.Info("database connected", "url", cfg.Database.URL[:min(len(cfg.Database.URL), 50)]+"...")
+	}
+
+	// Initialize Redis client if configured
+	if cfg.Redis.URL != "" {
+		redisClient, err := platformredis.New(cfg.Redis)
+		if err != nil {
+			return fmt.Errorf("initialize redis: %w", err)
+		}
+		bundle.RedisClient = redisClient
+		log.Info("redis connected", "url", cfg.Redis.URL)
 	}
 
 	// Initialize Kafka producer if configured
@@ -436,31 +485,48 @@ func initPhase2Infra(bundle *infraBundle, cfg *config.Server, log *slog.Logger) 
 }
 
 func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *tenantService.Service, authLockoutSvc *authlockout.Service, requestSvc *requestlimit.Service) (*authModule, error) {
-	users := userStore.New()
-	sessions := sessionStore.New()
-	codes := authCodeStore.New()
-	refreshTokens := refreshTokenStore.New()
-
-	// Use in-memory audit store for demo mode, postgres otherwise
-	var auditStore audit.Store
-	if infra.Cfg.DemoMode {
-		auditStore = auditmemory.NewInMemoryStore()
-	} else {
-		if infra.DBPool == nil {
-			return nil, fmt.Errorf("database connection required for audit events")
-		}
-		auditStore = auditpostgres.New(infra.DBPool.DB())
-	}
-
 	authCfg := &authService.Config{
 		SessionTTL:             infra.Cfg.Auth.SessionTTL,
 		TokenTTL:               infra.Cfg.Auth.TokenTTL,
 		AllowedRedirectSchemes: infra.Cfg.Auth.AllowedRedirectSchemes,
 		DeviceBindingEnabled:   infra.Cfg.Auth.DeviceBindingEnabled,
 	}
-	trl := revocationStore.NewInMemoryTRL(
-		revocationStore.WithCleanupInterval(infra.Cfg.Auth.TokenRevocationCleanupInterval),
+
+	// Wrap tenant service with circuit breaker for resilience
+	resilientClientResolver := authAdapters.NewResilientClientResolver(
+		tenantService,
+		infra.Log,
+		authAdapters.WithFailureThreshold(5),
+		authAdapters.WithCacheTTL(5*time.Minute),
 	)
+
+	// Create rate limit adapter for auth handler (nil if rate limiting is disabled)
+	var rateLimitAdapter authPorts.RateLimitPort
+	if !infra.Cfg.DemoMode && !infra.Cfg.DisableRateLimiting {
+		rateLimitAdapter = authAdapters.New(authLockoutSvc, requestSvc)
+	}
+
+	if infra.DBPool != nil {
+		return buildAuthModulePostgres(infra, resilientClientResolver, authCfg, rateLimitAdapter)
+	}
+	return buildAuthModuleInMemory(infra, resilientClientResolver, authCfg, rateLimitAdapter)
+}
+
+func buildAuthModulePostgres(infra *infraBundle, clientResolver authService.ClientResolver, authCfg *authService.Config, rateLimitAdapter authPorts.RateLimitPort) (*authModule, error) {
+	users := userStore.NewPostgres(infra.DBPool.DB())
+	codes := authCodeStore.NewPostgres(infra.DBPool.DB())
+	refreshTokens := refreshTokenStore.NewPostgres(infra.DBPool.DB())
+	sessions := sessionStore.NewPostgres(infra.DBPool.DB())
+	auditSt := auditpostgres.New(infra.DBPool.DB())
+
+	var trl authService.TokenRevocationList
+	if infra.RedisClient != nil {
+		trl = revocationStore.NewRedisTRL(infra.RedisClient.Client)
+		infra.Log.Info("using Postgres for sessions, Redis for token revocation")
+	} else {
+		trl = revocationStore.NewPostgresTRL(infra.DBPool.DB())
+		infra.Log.Info("using Postgres for sessions and token revocation")
+	}
 
 	authSvc, err := authService.New(
 		users,
@@ -468,13 +534,13 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		codes,
 		refreshTokens,
 		infra.JWTService,
-		tenantService,
+		clientResolver,
 		authCfg,
 		authService.WithMetrics(infra.AuthMetrics),
 		authService.WithLogger(infra.Log),
 		authService.WithTRL(trl),
 		authService.WithAuditPublisher(auditpublisher.NewPublisher(
-			auditStore,
+			auditSt,
 			auditpublisher.WithMetrics(infra.AuditMetrics),
 			auditpublisher.WithPublisherLogger(infra.Log),
 		)),
@@ -495,75 +561,129 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		return nil, err
 	}
 
-	// Create rate limit adapter for auth handler (nil if rate limiting is disabled)
-	var rateLimitAdapter authPorts.RateLimitPort
-	if !infra.Cfg.DemoMode && !infra.Cfg.DisableRateLimiting {
-		rateLimitAdapter = authAdapters.New(authLockoutSvc, requestSvc)
-	}
-
 	return &authModule{
-		Service:       authSvc,
-		Handler:       authHandler.New(authSvc, rateLimitAdapter, infra.AuthMetrics, infra.Log, infra.Cfg.Auth.DeviceCookieName, infra.Cfg.Auth.DeviceCookieMaxAge),
-		AdminSvc:      admin.NewService(users, sessions, auditStore),
-		Cleanup:       cleanupSvc,
-		Users:         users,
-		Sessions:      sessions,
-		Codes:         codes,
-		RefreshTokens: refreshTokens,
-		AuditStore:    auditStore,
+		Service:    authSvc,
+		Handler:    authHandler.New(authSvc, rateLimitAdapter, infra.AuthMetrics, infra.Log, infra.Cfg.Auth.DeviceCookieName, infra.Cfg.Auth.DeviceCookieMaxAge),
+		AdminSvc:   admin.NewService(users, sessions, auditSt),
+		Cleanup:    cleanupSvc,
+		AuditStore: auditSt,
 	}, nil
 }
 
-func buildConsentModule(infra *infraBundle) *consentModule {
-	var auditStore audit.Store
-	if infra.DBPool != nil {
-		auditStore = auditpostgres.New(infra.DBPool.DB())
-	} else {
-		auditStore = auditmemory.NewInMemoryStore()
-	}
+func buildAuthModuleInMemory(infra *infraBundle, clientResolver authService.ClientResolver, authCfg *authService.Config, rateLimitAdapter authPorts.RateLimitPort) (*authModule, error) {
+	infra.Log.Warn("no database connection, using in-memory auth stores")
 
-	consentSvc := consentService.New(
-		consentStore.New(),
-		auditpublisher.NewPublisher(
-			auditStore,
+	users := userStore.New()
+	codes := authCodeStore.New()
+	refreshTokens := refreshTokenStore.New()
+	sessions := sessionStore.New()
+	trl := revocationStore.NewInMemoryTRL()
+	auditSt := auditmemory.NewInMemoryStore()
+
+	authSvc, err := authService.New(
+		users,
+		sessions,
+		codes,
+		refreshTokens,
+		infra.JWTService,
+		clientResolver,
+		authCfg,
+		authService.WithMetrics(infra.AuthMetrics),
+		authService.WithLogger(infra.Log),
+		authService.WithTRL(trl),
+		authService.WithAuditPublisher(auditpublisher.NewPublisher(
+			auditSt,
 			auditpublisher.WithMetrics(infra.AuditMetrics),
 			auditpublisher.WithPublisherLogger(infra.Log),
-		),
-		infra.Log,
+		)),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// No cleanup worker for in-memory stores (not needed for tests)
+	return &authModule{
+		Service:    authSvc,
+		Handler:    authHandler.New(authSvc, rateLimitAdapter, infra.AuthMetrics, infra.Log, infra.Cfg.Auth.DeviceCookieName, infra.Cfg.Auth.DeviceCookieMaxAge),
+		AdminSvc:   admin.NewService(users, sessions, auditSt),
+		Cleanup:    nil,
+		AuditStore: auditSt,
+	}, nil
+}
+
+func buildConsentModule(infra *infraBundle) (*consentModule, error) {
+	var store consentService.Store
+	var auditSt audit.Store
+	var opts []consentService.Option
+
+	if infra.DBPool != nil {
+		store = consentStore.NewPostgres(infra.DBPool.DB())
+		auditSt = auditpostgres.New(infra.DBPool.DB())
+		opts = append(opts, consentService.WithTx(newConsentPostgresTx(infra.DBPool.DB())))
+	} else {
+		infra.Log.Warn("no database connection, using in-memory consent stores")
+		store = consentStore.New()
+		auditSt = auditmemory.NewInMemoryStore()
+		// In-memory uses default tx wrapper (created in service.New)
+	}
+
+	opts = append(opts,
 		consentService.WithConsentTTL(infra.Cfg.Consent.ConsentTTL),
 		consentService.WithGrantWindow(infra.Cfg.Consent.ConsentGrantWindow),
 		consentService.WithReGrantCooldown(infra.Cfg.Consent.ReGrantCooldown),
 		consentService.WithMetrics(infra.ConsentMetrics),
 	)
 
+	consentSvc := consentService.New(
+		store,
+		auditpublisher.NewPublisher(
+			auditSt,
+			auditpublisher.WithMetrics(infra.AuditMetrics),
+			auditpublisher.WithPublisherLogger(infra.Log),
+		),
+		infra.Log,
+		opts...,
+	)
+
 	return &consentModule{
 		Service: consentSvc,
 		Handler: consentHandler.New(consentSvc, infra.Log, infra.ConsentMetrics),
-	}
+	}, nil
 }
 
-func buildTenantModule(infra *infraBundle) *tenantModule {
-	tenants := tenantstore.NewInMemory()
-	clients := clientstore.NewInMemory()
+func buildTenantModule(infra *infraBundle) (*tenantModule, error) {
+	var tenants tenantService.TenantStore
+	var clients tenantService.ClientStore
+	var userCounter tenantService.UserCounter
+
+	if infra.DBPool != nil {
+		tenants = tenantstore.NewPostgres(infra.DBPool.DB())
+		clients = clientstore.NewPostgres(infra.DBPool.DB())
+		userCounter = userStore.NewPostgres(infra.DBPool.DB())
+	} else {
+		infra.Log.Warn("no database connection, using in-memory tenant stores")
+		tenants = tenantstore.NewInMemory()
+		clients = clientstore.NewInMemory()
+		userCounter = nil // user counting not available without database
+	}
+
 	service, err := tenantService.New(
 		tenants,
 		clients,
-		nil,
+		userCounter,
 		tenantService.WithMetrics(infra.TenantMetrics),
 	)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create tenant service: %v", err))
+		return nil, fmt.Errorf("failed to create tenant service: %w", err)
 	}
 
 	return &tenantModule{
 		Service: service,
 		Handler: tenantHandler.New(service, infra.Log),
-		Tenants: tenants,
-		Clients: clients,
-	}
+	}, nil
 }
 
-func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service) *registryModule {
+func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service) (*registryModule, error) {
 	// Create provider registry
 	registry := providers.NewProviderRegistry()
 
@@ -596,11 +716,21 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 		DefaultTimeout:  infra.Cfg.Registry.RegistryTimeout,
 	})
 
-	// Create cache store with metrics
-	cache := registryStore.NewInMemoryCache(
-		infra.Cfg.Registry.CacheTTL,
-		registryStore.WithMetrics(infra.RegistryMetrics),
-	)
+	// Create cache store
+	var cache registryService.CacheStore
+	var auditSt audit.Store
+	if infra.DBPool != nil {
+		cache = registryStore.NewPostgresCache(
+			infra.DBPool.DB(),
+			infra.Cfg.Registry.CacheTTL,
+			infra.RegistryMetrics,
+		)
+		auditSt = auditpostgres.New(infra.DBPool.DB())
+	} else {
+		infra.Log.Warn("no database connection, using in-memory registry cache")
+		cache = registryStore.NewInMemoryCache(infra.Cfg.Registry.CacheTTL)
+		auditSt = auditmemory.NewInMemoryStore()
+	}
 
 	// Create consent adapter (needed by both service and handler)
 	consentAdapter := registryAdapters.NewConsentAdapter(consentSvc)
@@ -615,15 +745,9 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 		registryService.WithLogger(infra.Log),
 	)
 
-	// Create audit publisher for handler (use in-memory store if no database)
-	var auditStore audit.Store
-	if infra.DBPool != nil {
-		auditStore = auditpostgres.New(infra.DBPool.DB())
-	} else {
-		auditStore = auditmemory.NewInMemoryStore()
-	}
+	// Create audit publisher for handler
 	auditPort := auditpublisher.NewPublisher(
-		auditStore,
+		auditSt,
 		auditpublisher.WithMetrics(infra.AuditMetrics),
 		auditpublisher.WithPublisherLogger(infra.Log),
 	)
@@ -633,22 +757,27 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 	return &registryModule{
 		Service: svc,
 		Handler: handler,
-	}
+	}, nil
 }
 
-func buildVCModule(infra *infraBundle, consentSvc *consentService.Service, registrySvc *registryService.Service) *vcModule {
-	store := vcStore.NewInMemoryStore()
+func buildVCModule(infra *infraBundle, consentSvc *consentService.Service, registrySvc *registryService.Service) (*vcModule, error) {
+	var store vcStore.Store
+	var auditSt audit.Store
+
+	if infra.DBPool != nil {
+		store = vcStore.NewPostgres(infra.DBPool.DB())
+		auditSt = auditpostgres.New(infra.DBPool.DB())
+	} else {
+		infra.Log.Warn("no database connection, using in-memory VC store")
+		store = vcStore.NewInMemoryStore()
+		auditSt = auditmemory.NewInMemoryStore()
+	}
+
 	consentAdapter := vcAdapters.NewConsentAdapter(consentSvc)
 	registryAdapter := vcAdapters.NewRegistryAdapter(registrySvc)
 
-	var auditStore audit.Store
-	if infra.DBPool != nil {
-		auditStore = auditpostgres.New(infra.DBPool.DB())
-	} else {
-		auditStore = auditmemory.NewInMemoryStore()
-	}
 	auditPort := auditpublisher.NewPublisher(
-		auditStore,
+		auditSt,
 		auditpublisher.WithMetrics(infra.AuditMetrics),
 		auditpublisher.WithPublisherLogger(infra.Log),
 	)
@@ -666,24 +795,25 @@ func buildVCModule(infra *infraBundle, consentSvc *consentService.Service, regis
 		Service: svc,
 		Handler: vcHandler.New(svc, infra.Log),
 		Store:   store,
-	}
+	}, nil
 }
 
-func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Service, vcSt vcStore.Store, consentSvc *consentService.Service) *decisionModule {
+func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Service, vcSt vcStore.Store, consentSvc *consentService.Service) (*decisionModule, error) {
 	// Create adapters
 	registryAdapter := decisionAdapters.NewRegistryAdapter(registrySvc)
 	vcAdapter := decisionAdapters.NewVCAdapter(vcSt)
 	consentAdapter := decisionAdapters.NewConsentAdapter(consentSvc)
 
-	// Create audit publisher (use in-memory store if no database)
-	var auditStore audit.Store
+	// Create audit publisher
+	var auditSt audit.Store
 	if infra.DBPool != nil {
-		auditStore = auditpostgres.New(infra.DBPool.DB())
+		auditSt = auditpostgres.New(infra.DBPool.DB())
 	} else {
-		auditStore = auditmemory.NewInMemoryStore()
+		infra.Log.Warn("no database connection, using in-memory decision audit store")
+		auditSt = auditmemory.NewInMemoryStore()
 	}
 	auditPort := auditpublisher.NewPublisher(
-		auditStore,
+		auditSt,
 		auditpublisher.WithMetrics(infra.AuditMetrics),
 		auditpublisher.WithPublisherLogger(infra.Log),
 	)
@@ -704,10 +834,14 @@ func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Servic
 	return &decisionModule{
 		Service: svc,
 		Handler: decisionHandler.New(svc, infra.Log, metrics),
-	}
+	}, nil
 }
 
 func startCleanupWorker(ctx context.Context, log *slog.Logger, cleanupSvc *cleanupWorker.CleanupService) {
+	if cleanupSvc == nil {
+		log.Info("cleanup worker disabled (in-memory mode)")
+		return
+	}
 	go func() {
 		if err := cleanupSvc.Start(ctx); err != nil && err != context.Canceled {
 			log.Error("auth cleanup service stopped", "error", err)
@@ -774,6 +908,11 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 			return infra.DBPool.Health(context.Background())
 		})
 	}
+	if infra.RedisClient != nil {
+		healthHandler.RegisterCheck("redis", func() error {
+			return infra.RedisClient.Health(context.Background())
+		})
+	}
 	if infra.KafkaHealthChecker != nil {
 		healthHandler.RegisterCheck("kafka", func() error {
 			return infra.KafkaHealthChecker.Check(context.Background())
@@ -793,7 +932,7 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 				"env":             "demo",
 				"users":           []string{"alice", "bob", "charlie"},
 				"jwt_issuer_base": infra.Cfg.Auth.JWTIssuerBaseURL,
-				"data_store":      "in-memory",
+				"data_store":      "postgres",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
@@ -943,13 +1082,21 @@ func stopPhase2Workers(ctx context.Context, infra *infraBundle) {
 	}
 }
 
-// closePhase2Infra closes database and Kafka connections.
+// closePhase2Infra closes database, Redis, and Kafka connections.
 func closePhase2Infra(infra *infraBundle) {
 	if infra.KafkaProducer != nil {
 		if err := infra.KafkaProducer.Close(); err != nil {
 			infra.Log.Error("kafka producer close failed", "error", err)
 		} else {
 			infra.Log.Info("kafka producer closed")
+		}
+	}
+
+	if infra.RedisClient != nil {
+		if err := infra.RedisClient.Close(); err != nil {
+			infra.Log.Error("redis close failed", "error", err)
+		} else {
+			infra.Log.Info("redis closed")
 		}
 	}
 

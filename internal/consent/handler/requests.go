@@ -81,10 +81,10 @@ func validatePurposes(purposes []string) error {
 	// Phase 3: Syntax validation
 	for _, p := range purposes {
 		if p == "" {
-			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
+			return dErrors.New(dErrors.CodeValidation, "invalid purpose")
 		}
 		if _, err := models.ParsePurpose(p); err != nil {
-			return dErrors.New(dErrors.CodeValidation, "invalid purpose: "+p)
+			return dErrors.New(dErrors.CodeValidation, "invalid purpose")
 		}
 	}
 	return nil

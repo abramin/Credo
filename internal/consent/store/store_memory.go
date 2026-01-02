@@ -2,22 +2,23 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"credo/internal/consent/models"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
-	"credo/pkg/requestcontext"
 )
 
 // Error Contract:
 // All store methods follow this error pattern:
 // - Return ErrNotFound when the requested entity does not exist
+// - Return ErrConflict when a record already exists for user+purpose
 // - Return nil for successful operations
 // - Return wrapped errors with context for infrastructure failures (future: DB errors, network issues, etc.)
 
-// InMemoryStore stores consent records in memory for tests/dev.
+// InMemoryStore stores consent records in memory for tests.
 type InMemoryStore struct {
 	mu       sync.RWMutex
 	consents map[id.UserID]map[models.Purpose]*models.Record
@@ -29,6 +30,9 @@ func New() *InMemoryStore {
 }
 
 func (s *InMemoryStore) Save(_ context.Context, consent *models.Record) error {
+	if consent == nil {
+		return fmt.Errorf("consent record is required")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records, ok := s.consents[consent.UserID]
@@ -36,16 +40,19 @@ func (s *InMemoryStore) Save(_ context.Context, consent *models.Record) error {
 		records = make(map[models.Purpose]*models.Record)
 		s.consents[consent.UserID] = records
 	}
+	if _, ok := records[consent.Purpose]; ok {
+		return sentinel.ErrConflict
+	}
 	copyRecord := *consent
 	records[consent.Purpose] = &copyRecord
 	return nil
 }
 
-func (s *InMemoryStore) FindByUserAndPurpose(_ context.Context, userID id.UserID, purpose models.Purpose) (*models.Record, error) {
+func (s *InMemoryStore) FindByScope(_ context.Context, scope models.ConsentScope) (*models.Record, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	records := s.consents[userID]
-	record, ok := records[purpose]
+	records := s.consents[scope.UserID]
+	record, ok := records[scope.Purpose]
 	if !ok {
 		return nil, sentinel.ErrNotFound
 	}
@@ -59,19 +66,11 @@ func (s *InMemoryStore) ListByUser(ctx context.Context, userID id.UserID, filter
 	records := s.consents[userID]
 
 	var filtered []*models.Record
-	now := requestcontext.Now(ctx)
-
 	for _, record := range records {
 		// Apply filters if specified
 		if filter != nil {
 			if filter.Purpose != nil && record.Purpose != *filter.Purpose {
 				continue
-			}
-			if filter.Status != nil {
-				status := record.ComputeStatus(now)
-				if status != *filter.Status {
-					continue
-				}
 			}
 		}
 
@@ -100,20 +99,25 @@ func (s *InMemoryStore) Update(_ context.Context, consent *models.Record) error 
 	return nil
 }
 
-// RevokeByUserAndPurpose sets the RevokedAt timestamp for the latest active consent of the given purpose.
-// Returns the updated consent record or ErrNotFound if no active consent exists.
-func (s *InMemoryStore) RevokeByUserAndPurpose(_ context.Context, userID id.UserID, purpose models.Purpose, revokedAt time.Time) (*models.Record, error) {
+func (s *InMemoryStore) RevokeAllByUser(_ context.Context, userID id.UserID, now time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records := s.consents[userID]
-	record, ok := records[purpose]
-	if !ok || record.RevokedAt != nil {
-		return nil, sentinel.ErrNotFound
+	if records == nil {
+		return 0, nil
 	}
-	record.RevokedAt = &revokedAt
+	revokedCount := 0
+	for purpose, record := range records {
+		if !record.CanRevoke(now) {
+			continue
+		}
+		updated := *record
+		updated.RevokedAt = &now
+		records[purpose] = &updated
+		revokedCount++
+	}
 	s.consents[userID] = records
-	copyRecord := *record
-	return &copyRecord, nil
+	return revokedCount, nil
 }
 
 func (s *InMemoryStore) DeleteByUser(_ context.Context, userID id.UserID) error {
@@ -123,19 +127,25 @@ func (s *InMemoryStore) DeleteByUser(_ context.Context, userID id.UserID) error 
 	return nil
 }
 
-// RevokeAllByUser revokes all active consents for a user.
-// Returns the count of consents that were revoked.
-func (s *InMemoryStore) RevokeAllByUser(_ context.Context, userID id.UserID, revokedAt time.Time) (int, error) {
+// Execute atomically validates and mutates a consent record under lock.
+func (s *InMemoryStore) Execute(_ context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record) bool) (*models.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	records := s.consents[userID]
-	count := 0
-	for _, record := range records {
-		if record.RevokedAt == nil {
-			record.RevokedAt = &revokedAt
-			count++
-		}
+	records := s.consents[scope.UserID]
+	record, ok := records[scope.Purpose]
+	if !ok {
+		return nil, sentinel.ErrNotFound
 	}
-	s.consents[userID] = records
-	return count, nil
+
+	copyRecord := *record
+	if err := validate(&copyRecord); err != nil {
+		return nil, err
+	}
+
+	changed := mutate(&copyRecord)
+	if changed {
+		records[scope.Purpose] = &copyRecord
+		s.consents[scope.UserID] = records
+	}
+	return &copyRecord, nil
 }

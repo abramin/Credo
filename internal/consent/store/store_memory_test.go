@@ -55,7 +55,9 @@ func (s *InMemoryStoreSuite) TestSaveAndFind() {
 
 		s.Require().NoError(s.store.Save(s.ctx, record))
 
-		fetched, err := s.store.FindByUserAndPurpose(s.ctx, record.UserID, models.PurposeLogin)
+		scope, err := models.NewConsentScope(record.UserID, models.PurposeLogin)
+		s.Require().NoError(err)
+		fetched, err := s.store.FindByScope(s.ctx, scope)
 		s.Require().NoError(err)
 		s.Assert().Equal(record.ID, fetched.ID)
 		s.Assert().Equal(record.UserID, fetched.UserID)
@@ -65,9 +67,27 @@ func (s *InMemoryStoreSuite) TestSaveAndFind() {
 	s.Run("returns ErrNotFound when record does not exist", func() {
 		nonExistentUserID := id.UserID(uuid.New())
 
-		fetched, err := s.store.FindByUserAndPurpose(s.ctx, nonExistentUserID, models.PurposeLogin)
+		scope, err := models.NewConsentScope(nonExistentUserID, models.PurposeLogin)
+		s.Require().NoError(err)
+		fetched, err := s.store.FindByScope(s.ctx, scope)
 		s.Require().ErrorIs(err, sentinel.ErrNotFound)
 		s.Assert().Nil(fetched)
+	})
+
+	s.Run("returns ErrConflict when saving duplicate purpose", func() {
+		now := time.Now()
+		expiry := now.Add(time.Hour)
+		userID := id.UserID(uuid.New())
+		record := &models.Record{
+			ID:        id.ConsentID(uuid.New()),
+			UserID:    userID,
+			Purpose:   models.PurposeLogin,
+			GrantedAt: now,
+			ExpiresAt: &expiry,
+		}
+
+		s.Require().NoError(s.store.Save(s.ctx, record))
+		s.Require().ErrorIs(s.store.Save(s.ctx, record), sentinel.ErrConflict)
 	})
 }
 
@@ -94,7 +114,9 @@ func (s *InMemoryStoreSuite) TestUpdate() {
 		record.ExpiresAt = &newExpiry
 		s.Require().NoError(s.store.Update(s.ctx, record))
 
-		fetched, err := s.store.FindByUserAndPurpose(s.ctx, record.UserID, models.PurposeLogin)
+		scope, err := models.NewConsentScope(record.UserID, models.PurposeLogin)
+		s.Require().NoError(err)
+		fetched, err := s.store.FindByScope(s.ctx, scope)
 		s.Require().NoError(err)
 		s.Require().NotNil(fetched.ExpiresAt)
 		s.Assert().Equal(newExpiry, *fetched.ExpiresAt)
@@ -102,12 +124,12 @@ func (s *InMemoryStoreSuite) TestUpdate() {
 }
 
 // =============================================================================
-// Revoke - State Transitions
+// Execute - Atomic Mutation
 // =============================================================================
 
-// TestRevoke verifies revocation sets RevokedAt timestamp.
-// Invariant: Revoked records must have RevokedAt set to the provided time.
-func (s *InMemoryStoreSuite) TestRevoke() {
+// TestExecute verifies Execute applies validated mutations under lock.
+// Invariant: Mutations should be persisted atomically.
+func (s *InMemoryStoreSuite) TestExecute() {
 	s.Run("sets RevokedAt on record", func() {
 		now := time.Now()
 		expiry := now.Add(time.Hour)
@@ -121,11 +143,48 @@ func (s *InMemoryStoreSuite) TestRevoke() {
 		s.Require().NoError(s.store.Save(s.ctx, record))
 
 		revokeTime := now.Add(30 * time.Minute)
-		res, err := s.store.RevokeByUserAndPurpose(s.ctx, record.UserID, models.PurposeLogin, revokeTime)
+		scope, err := models.NewConsentScope(record.UserID, models.PurposeLogin)
+		s.Require().NoError(err)
+		res, err := s.store.Execute(s.ctx, scope,
+			func(_ *models.Record) error { return nil },
+			func(existing *models.Record) bool {
+				existing.RevokedAt = &revokeTime
+				return true
+			},
+		)
 		s.Require().NoError(err)
 		s.Assert().Equal(record.ID, res.ID)
 		s.Require().NotNil(res.RevokedAt)
 		s.Assert().Equal(revokeTime, *res.RevokedAt)
+	})
+
+	s.Run("skips persistence when mutate returns false", func() {
+		now := time.Now()
+		expiry := now.Add(time.Hour)
+		record := &models.Record{
+			ID:        id.ConsentID(uuid.New()),
+			UserID:    id.UserID(uuid.New()),
+			Purpose:   models.PurposeLogin,
+			GrantedAt: now,
+			ExpiresAt: &expiry,
+		}
+		s.Require().NoError(s.store.Save(s.ctx, record))
+
+		revokeTime := now.Add(30 * time.Minute)
+		scope, err := models.NewConsentScope(record.UserID, models.PurposeLogin)
+		s.Require().NoError(err)
+		_, err = s.store.Execute(s.ctx, scope,
+			func(_ *models.Record) error { return nil },
+			func(existing *models.Record) bool {
+				existing.RevokedAt = &revokeTime
+				return false
+			},
+		)
+		s.Require().NoError(err)
+
+		fetched, err := s.store.FindByScope(s.ctx, scope)
+		s.Require().NoError(err)
+		s.Assert().Nil(fetched.RevokedAt, "no-op mutate should not persist changes")
 	})
 }
 
@@ -160,7 +219,9 @@ func (s *InMemoryStoreSuite) TestCopySemanticsPreventsMutation() {
 		list[0].UserID = id.UserID(uuid.New())
 
 		// Verify original is unchanged
-		fetched, err := s.store.FindByUserAndPurpose(s.ctx, originalUserID, models.PurposeLogin)
+		scope, err := models.NewConsentScope(originalUserID, models.PurposeLogin)
+		s.Require().NoError(err)
+		fetched, err := s.store.FindByScope(s.ctx, scope)
 		s.Require().NoError(err)
 		s.Assert().Equal(originalUserID, fetched.UserID, "stored record should remain unchanged")
 	})
@@ -194,11 +255,15 @@ func (s *InMemoryStoreSuite) TestDeleteRemovesAllUserRecords() {
 		s.Require().NoError(s.store.DeleteByUser(s.ctx, userID))
 
 		// Verify all are gone
-		fetched, err := s.store.FindByUserAndPurpose(s.ctx, userID, models.PurposeLogin)
+		scope, err := models.NewConsentScope(userID, models.PurposeLogin)
+		s.Require().NoError(err)
+		fetched, err := s.store.FindByScope(s.ctx, scope)
 		s.Require().ErrorIs(err, sentinel.ErrNotFound)
 		s.Assert().Nil(fetched)
 
-		fetched, err = s.store.FindByUserAndPurpose(s.ctx, userID, models.PurposeRegistryCheck)
+		scope, err = models.NewConsentScope(userID, models.PurposeRegistryCheck)
+		s.Require().NoError(err)
+		fetched, err = s.store.FindByScope(s.ctx, scope)
 		s.Require().ErrorIs(err, sentinel.ErrNotFound)
 		s.Assert().Nil(fetched)
 	})

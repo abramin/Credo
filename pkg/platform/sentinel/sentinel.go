@@ -15,6 +15,7 @@ import "errors"
 // For validation errors (bad input, missing fields), use pkg/domain-errors directly.
 var (
 	ErrNotFound     = errors.New("not found")
+	ErrConflict     = errors.New("conflict")
 	ErrExpired      = errors.New("expired")
 	ErrAlreadyUsed  = errors.New("already used")
 	ErrInvalidState = errors.New("invalid state")

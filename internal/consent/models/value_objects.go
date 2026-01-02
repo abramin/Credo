@@ -1,8 +1,7 @@
 package models
 
 import (
-	"fmt"
-
+	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 )
 
@@ -35,7 +34,7 @@ func ParsePurpose(s string) (Purpose, error) {
 	}
 	p := Purpose(s)
 	if !p.IsValid() {
-		return "", dErrors.New(dErrors.CodeInvalidInput, fmt.Sprintf("invalid purpose: %s", s))
+		return "", dErrors.New(dErrors.CodeInvalidInput, "invalid purpose")
 	}
 	return p, nil
 }
@@ -67,7 +66,7 @@ func ParseStatus(s string) (Status, error) {
 	}
 	status := Status(s)
 	if !status.IsValid() {
-		return "", dErrors.New(dErrors.CodeInvalidInput, fmt.Sprintf("invalid status: %s", s))
+		return "", dErrors.New(dErrors.CodeInvalidInput, "invalid status")
 	}
 	return status, nil
 }
@@ -91,4 +90,22 @@ const (
 // String returns the string representation of the consent check state.
 func (c ConsentCheckState) String() string {
 	return string(c)
+}
+
+// ConsentScope identifies a consent aggregate by user and purpose.
+// It is the stable boundary for read/write operations on consent records.
+type ConsentScope struct {
+	UserID  id.UserID
+	Purpose Purpose
+}
+
+// NewConsentScope constructs a validated ConsentScope.
+func NewConsentScope(userID id.UserID, purpose Purpose) (ConsentScope, error) {
+	if userID.IsNil() {
+		return ConsentScope{}, dErrors.New(dErrors.CodeInvariantViolation, "user ID required")
+	}
+	if !purpose.IsValid() {
+		return ConsentScope{}, dErrors.New(dErrors.CodeInvariantViolation, "invalid consent purpose")
+	}
+	return ConsentScope{UserID: userID, Purpose: purpose}, nil
 }

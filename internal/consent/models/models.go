@@ -123,6 +123,33 @@ func (c Record) CanReGrant(now time.Time, cooldown time.Duration) bool {
 	return now.Sub(*c.RevokedAt) >= cooldown
 }
 
+// RenewAt returns an updated record with a new grant window applied.
+// It clears RevokedAt and sets ExpiresAt based on the provided TTL.
+func (c Record) RenewAt(now time.Time, ttl time.Duration) (Record, error) {
+	if now.IsZero() {
+		return Record{}, dErrors.New(dErrors.CodeInvariantViolation, "grant time required")
+	}
+	if ttl <= 0 {
+		return Record{}, dErrors.New(dErrors.CodeInvariantViolation, "consent TTL must be positive")
+	}
+	expiry := now.Add(ttl)
+	updated := c
+	updated.GrantedAt = now
+	updated.ExpiresAt = &expiry
+	updated.RevokedAt = nil
+	return updated, nil
+}
+
+// RevokeAt returns an updated record with RevokedAt set to the provided time.
+func (c Record) RevokeAt(now time.Time) (Record, error) {
+	if now.IsZero() {
+		return Record{}, dErrors.New(dErrors.CodeInvariantViolation, "revocation time required")
+	}
+	updated := c
+	updated.RevokedAt = &now
+	return updated, nil
+}
+
 // ComputeStatus reports the consent lifecycle state at the provided time.
 func (c Record) ComputeStatus(now time.Time) Status {
 	if c.RevokedAt != nil {

@@ -141,25 +141,9 @@ func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*a
 		result.User = user
 		result.UserWasCreated = wasCreated
 
-		// Step 2: Generate authorization code
+		// Step 2: Create session (pending consent)
+		// Note: Session must be created before auth code due to FK constraint
 		sessionID := id.SessionID(uuid.New())
-		authCode, err := models.NewAuthorizationCode(
-			uuid.New().String(),
-			sessionID,
-			params.RedirectURI,
-			params.Now,
-			params.Now.Add(10*time.Minute),
-			params.Now,
-		)
-		if err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create authorization code")
-		}
-		if err := stores.Codes.Create(ctx, authCode); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to save authorization code")
-		}
-		result.AuthCode = authCode
-
-		// Step 3: Create session (pending consent)
 		session, err := models.NewSession(
 			sessionID,
 			user.ID,
@@ -175,7 +159,7 @@ func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*a
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create session")
 		}
 
-		// Step 4: Attach device binding signals
+		// Step 3: Attach device binding signals
 		session.SetDeviceBinding(models.DeviceBinding{
 			DeviceID:            params.DeviceID,
 			FingerprintHash:     params.DeviceFingerprint,
@@ -187,6 +171,24 @@ func (s *Service) authorizeInTx(ctx context.Context, params authorizeParams) (*a
 			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to save session")
 		}
 		result.Session = session
+
+		// Step 4: Generate authorization code (after session exists for FK)
+		authCode, err := models.NewAuthorizationCode(
+			uuid.New(),
+			uuid.New().String(),
+			sessionID,
+			params.RedirectURI,
+			params.Now,
+			params.Now.Add(10*time.Minute),
+			params.Now,
+		)
+		if err != nil {
+			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create authorization code")
+		}
+		if err := stores.Codes.Create(ctx, authCode); err != nil {
+			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to save authorization code")
+		}
+		result.AuthCode = authCode
 
 		return nil
 	})

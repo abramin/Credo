@@ -33,6 +33,7 @@ import (
 	auditpublisher "credo/pkg/platform/audit/publisher"
 	auditstore "credo/pkg/platform/audit/store/memory"
 	"credo/pkg/platform/sentinel"
+	"credo/pkg/requestcontext"
 )
 
 type ServiceSuite struct {
@@ -90,21 +91,21 @@ func (s *ServiceSuite) TestGrant_ValidationErrors() {
 // Invariant: Store failures must surface as CodeInternal errors without leaking implementation details.
 // Reason not a feature test: Tests internal error wrapping boundary; feature tests cannot induce store failures.
 func (s *ServiceSuite) TestGrant_StoreErrorPropagation() {
-	s.Run("store error on find propagates as CodeInternal", func() {
+	s.Run("store error on execute propagates as CodeInternal", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
+			Execute(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(nil, assert.AnError)
 
 		_, err := s.service.Grant(context.Background(), userID, []models.Purpose{models.PurposeLogin})
 		s.Require().Error(err)
-		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store find error")
+		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store execute error")
 	})
 
 	s.Run("store error on save propagates as CodeInternal", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
+			Execute(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(nil, sentinel.ErrNotFound)
 
 		s.mockStore.EXPECT().
@@ -136,36 +137,92 @@ func (s *ServiceSuite) TestRevoke_ValidationErrors() {
 // Invariant: Store failures must surface as CodeInternal errors.
 // Reason not a feature test: Tests internal error wrapping boundary; feature tests cannot induce store failures.
 func (s *ServiceSuite) TestRevoke_StoreErrorPropagation() {
-	s.Run("store error on find propagates as CodeInternal", func() {
+	s.Run("store error on execute propagates as CodeInternal", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
+			Execute(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(nil, assert.AnError)
 
 		_, err := s.service.Revoke(context.Background(), userID, []models.Purpose{models.PurposeLogin})
 		s.Require().Error(err)
-		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store find error")
+		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store execute error")
 	})
+}
 
-	s.Run("store error on revoke propagates as CodeInternal", func() {
+// TestRevokeAll_Audit verifies audit behavior for bulk revocation.
+// Invariant: Bulk revoke emits a single audit event when any records are revoked.
+func (s *ServiceSuite) TestRevokeAll_Audit() {
+	s.Run("bulk revoke emits audit event when count > 0", func() {
 		userID := id.UserID(uuid.New())
-		existing := &models.Record{
-			ID:      id.ConsentID(uuid.New()),
-			Purpose: models.PurposeLogin,
-		}
-
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
-			Return(existing, nil)
+			RevokeAllByUser(gomock.Any(), userID, gomock.Any()).
+			Return(2, nil)
 
-		s.mockStore.EXPECT().
-			RevokeByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin, gomock.Any()).
-			Return(nil, assert.AnError)
+		count, err := s.service.RevokeAll(context.Background(), userID)
+		s.Require().NoError(err)
+		s.Assert().Equal(2, count)
 
-		_, err := s.service.Revoke(context.Background(), userID, []models.Purpose{models.PurposeLogin})
-		s.Require().Error(err)
-		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store revoke error")
+		events, err := s.auditStore.ListByUser(context.Background(), userID)
+		s.Require().NoError(err)
+		s.Require().Len(events, 1)
+		s.Assert().Equal(models.AuditActionConsentRevoked, events[0].Action)
+		s.Assert().Equal("bulk_revocation", events[0].Reason)
 	})
+
+	s.Run("bulk revoke emits no audit event when count == 0", func() {
+		userID := id.UserID(uuid.New())
+		s.mockStore.EXPECT().
+			RevokeAllByUser(gomock.Any(), userID, gomock.Any()).
+			Return(0, nil)
+
+		count, err := s.service.RevokeAll(context.Background(), userID)
+		s.Require().NoError(err)
+		s.Assert().Equal(0, count)
+
+		events, err := s.auditStore.ListByUser(context.Background(), userID)
+		s.Require().NoError(err)
+		s.Assert().Len(events, 0)
+	})
+}
+
+// TestGrant_IdempotentSkip verifies idempotent grants skip side effects.
+// Invariant: When a grant is within the idempotency window, no audit events are emitted.
+func (s *ServiceSuite) TestGrant_IdempotentSkip() {
+	now := time.Now()
+	userID := id.UserID(uuid.New())
+	scope, err := models.NewConsentScope(userID, models.PurposeLogin)
+	s.Require().NoError(err)
+	ctx := requestcontext.WithTime(context.Background(), now)
+
+	existing := &models.Record{
+		ID:        id.ConsentID(uuid.New()),
+		UserID:    userID,
+		Purpose:   models.PurposeLogin,
+		GrantedAt: now.Add(-time.Minute),
+		ExpiresAt: ptrTime(now.Add(time.Hour)),
+	}
+
+	s.mockStore.EXPECT().
+		Execute(gomock.Any(), scope, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record) bool) (*models.Record, error) {
+			if err := validate(existing); err != nil {
+				return nil, err
+			}
+			mutate(existing)
+			return existing, nil
+		})
+
+	records, err := s.service.Grant(ctx, userID, []models.Purpose{models.PurposeLogin})
+	s.Require().NoError(err)
+	s.Require().Len(records, 1)
+
+	events, err := s.auditStore.ListByUser(context.Background(), userID)
+	s.Require().NoError(err)
+	s.Assert().Len(events, 0)
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }
 
 // =============================================================================
@@ -197,7 +254,7 @@ func (s *ServiceSuite) TestRequire_ConsentStates() {
 	s.Run("missing consent returns CodeMissingConsent", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(nil, sentinel.ErrNotFound)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)
@@ -214,7 +271,7 @@ func (s *ServiceSuite) TestRequire_ConsentStates() {
 		}
 
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(record, nil)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)
@@ -231,7 +288,7 @@ func (s *ServiceSuite) TestRequire_ConsentStates() {
 		}
 
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(record, nil)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)
@@ -248,7 +305,7 @@ func (s *ServiceSuite) TestRequire_ConsentStates() {
 		}
 
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(record, nil)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)
@@ -271,7 +328,7 @@ func (s *ServiceSuite) TestRequire_TimeBoundary() {
 		}
 
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(record, nil)
 
 		// Service uses time.Now() internally, so ExpiresAt.Before(now) will be false initially
@@ -298,7 +355,7 @@ func (s *ServiceSuite) TestRequire_TimeBoundary() {
 		}
 
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(record, nil)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)
@@ -317,7 +374,7 @@ func (s *ServiceSuite) TestRequire_TimeBoundary() {
 		}
 
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(record, nil)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)
@@ -337,7 +394,7 @@ func (s *ServiceSuite) TestRequire_TimeBoundary() {
 		}
 
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(record, nil)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)
@@ -351,7 +408,7 @@ func (s *ServiceSuite) TestRequire_StoreErrorPropagation() {
 	s.Run("store error propagates as CodeInternal", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeVCIssuance).
+			FindByScope(gomock.Any(), gomock.Any()).
 			Return(nil, assert.AnError)
 
 		err := s.service.Require(context.Background(), userID, models.PurposeVCIssuance)

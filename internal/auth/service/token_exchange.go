@@ -39,19 +39,16 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 		return nil, err
 	}
 
-	// Add session ID to context for sharded locking
-	txCtx := context.WithValue(ctx, txSessionKeyCtx, sessionID)
-	txErr := s.tx.RunInTx(txCtx, func(stores txAuthStores) error {
+	txErr := s.tx.RunInTx(ctx, func(stores txAuthStores) error {
 		var err error
 		codeRecord, err = s.consumeCodeWithReplayProtection(ctx, stores, req.Code, req.RedirectURI, now)
 		if err != nil {
 			return err
 		}
 
-		session, err = stores.Sessions.FindByID(ctx, codeRecord.SessionID)
-		if err != nil {
-			return fmt.Errorf("fetch session: %w", err)
-		}
+		// Set tenant ID on the pre-fetched session for executeTokenFlowTx.
+		// The session is re-read inside executeTokenFlowTx via the Execute pattern,
+		// which provides atomic validation and mutation.
 		session.TenantID = tc.Tenant.ID
 
 		result, err := s.executeTokenFlowTx(ctx, stores, tokenFlowTxParams{

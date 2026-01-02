@@ -129,7 +129,7 @@ func (s *ServiceSuite) TestAuthorizationCodeFlow() {
 
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(mockClient, mockTenant, nil)
 		s.mockUserStore.EXPECT().FindOrCreateByTenantAndEmail(gomock.Any(), tenantID, req.Email, gomock.Any()).Return(existingUser, nil)
-		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
+		// Session is created before auth code due to FK constraint
 		s.mockSessionStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(assert.AnError)
 
 		result, err := s.service.Authorize(ctx, &req)

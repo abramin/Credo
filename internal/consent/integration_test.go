@@ -51,6 +51,7 @@ import (
 	id "credo/pkg/domain"
 	auditpublisher "credo/pkg/platform/audit/publisher"
 	auditstore "credo/pkg/platform/audit/store/memory"
+	adminmw "credo/pkg/platform/middleware/admin"
 	"credo/pkg/requestcontext"
 )
 
@@ -61,10 +62,12 @@ type consentTestHarness struct {
 	consentStore *store.InMemoryStore
 	auditStore   *auditstore.InMemoryStore
 	userID       id.UserID
+	adminToken   string
 }
 
 func newConsentTestHarness(userIDStr string) *consentTestHarness {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	adminToken := "test-admin-token"
 	consentStore := store.New()
 	auditStore := auditstore.NewInMemoryStore()
 	svc := service.New(
@@ -94,7 +97,10 @@ func newConsentTestHarness(userIDStr string) *consentTestHarness {
 	router.Post("/auth/consent/revoke-all", h.HandleRevokeAllConsents)
 	router.Get("/auth/consent", h.HandleGetConsents)
 	router.Delete("/auth/consent", h.HandleDeleteAllConsents)
-	router.Post("/admin/consent/users/{user_id}/revoke-all", h.HandleAdminRevokeAllConsents)
+	router.Group(func(r chi.Router) {
+		r.Use(adminmw.RequireAdminToken(adminToken, logger))
+		r.Post("/admin/consent/users/{user_id}/revoke-all", h.HandleAdminRevokeAllConsents)
+	})
 
 	userID, _ := id.ParseUserID(userIDStr)
 	return &consentTestHarness{
@@ -102,6 +108,7 @@ func newConsentTestHarness(userIDStr string) *consentTestHarness {
 		consentStore: consentStore,
 		auditStore:   auditStore,
 		userID:       userID,
+		adminToken:   adminToken,
 	}
 }
 
@@ -147,8 +154,23 @@ func (h *consentTestHarness) revokeConsent(t *testing.T, purposes []string) *han
 	return &data
 }
 
+func (h *consentTestHarness) revokeAllConsents(t *testing.T) *handler.RevokeResponse {
+	resp, err := http.Post(h.server.URL+"/auth/consent/revoke-all", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	respBody, _ := io.ReadAll(resp.Body)
+	var data handler.RevokeResponse
+	require.NoError(t, json.Unmarshal(respBody, &data))
+	return &data
+}
+
 func (h *consentTestHarness) adminRevokeAllConsents(t *testing.T, userID id.UserID) *handler.RevokeResponse {
-	resp, err := http.Post(h.server.URL+"/admin/consent/users/"+userID.String()+"/revoke-all", "application/json", nil)
+	req, err := http.NewRequest(http.MethodPost, h.server.URL+"/admin/consent/users/"+userID.String()+"/revoke-all", nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Admin-Token", h.adminToken)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -177,7 +199,9 @@ func TestConsentExpiryAndIDReuse(t *testing.T) {
 	h.revokeConsent(t, []string{"registry_check"})
 
 	// Get the vc_issuance consent ID before expiring it
-	vcRecord, err := h.consentStore.FindByUserAndPurpose(context.Background(), h.userID, consentModel.PurposeVCIssuance)
+	scope, err := consentModel.NewConsentScope(h.userID, consentModel.PurposeVCIssuance)
+	require.NoError(t, err)
+	vcRecord, err := h.consentStore.FindByScope(context.Background(), scope)
 	require.NoError(t, err)
 	require.NotNil(t, vcRecord)
 	originalVCID := vcRecord.ID
@@ -215,7 +239,9 @@ func TestConsentExpiryAndIDReuse(t *testing.T) {
 	assert.Equal(t, consentModel.StatusActive, regrantData.Granted[0].Status)
 
 	t.Log("Step 4: Verify consent ID was reused (not creating a new record)")
-	regrantedRecord, err := h.consentStore.FindByUserAndPurpose(context.Background(), h.userID, consentModel.PurposeVCIssuance)
+	scope, err = consentModel.NewConsentScope(h.userID, consentModel.PurposeVCIssuance)
+	require.NoError(t, err)
+	regrantedRecord, err := h.consentStore.FindByScope(context.Background(), scope)
 	require.NoError(t, err)
 	assert.Equal(t, originalVCID, regrantedRecord.ID, "consent ID should be reused when re-granting expired consent")
 
@@ -274,6 +300,38 @@ func TestAdminRevokeAllConsents(t *testing.T) {
 	}
 }
 
+func TestRevokeAllSkipsExpiredAndRevoked(t *testing.T) {
+	h := newConsentTestHarness("550e8400-e29b-41d4-a716-446655440004")
+	defer h.Close()
+
+	h.grantConsent(t, []string{"login", "registry_check", "vc_issuance"})
+	h.revokeConsent(t, []string{"registry_check"})
+
+	scope, err := consentModel.NewConsentScope(h.userID, consentModel.PurposeVCIssuance)
+	require.NoError(t, err)
+	record, err := h.consentStore.FindByScope(context.Background(), scope)
+	require.NoError(t, err)
+	expiredAt := time.Now().Add(-time.Hour)
+	record.ExpiresAt = &expiredAt
+	require.NoError(t, h.consentStore.Update(context.Background(), record))
+
+	resp := h.revokeAllConsents(t)
+	assert.Equal(t, "Consent revoked for 1 purpose", resp.Message)
+
+	listData := h.listConsents(t)
+	require.Len(t, listData.Consents, 3)
+	for _, consent := range listData.Consents {
+		switch consent.Purpose {
+		case consentModel.PurposeLogin:
+			assert.Equal(t, consentModel.StatusRevoked, consent.Status, "login should be revoked")
+		case consentModel.PurposeRegistryCheck:
+			assert.Equal(t, consentModel.StatusRevoked, consent.Status, "registry_check should remain revoked")
+		case consentModel.PurposeVCIssuance:
+			assert.Equal(t, consentModel.StatusExpired, consent.Status, "vc_issuance should remain expired")
+		}
+	}
+}
+
 // TestIdempotencyWindowBoundary tests the 5-minute idempotency window behavior.
 // This cannot be expressed in Gherkin because:
 // - Requires manual timestamp manipulation to simulate time passing
@@ -293,7 +351,9 @@ func TestIdempotencyWindowBoundary(t *testing.T) {
 	firstExpiresAt := grant1.Granted[0].ExpiresAt
 
 	// Get consent ID for verification
-	record1, err := h.consentStore.FindByUserAndPurpose(context.Background(), h.userID, consentModel.PurposeLogin)
+	scope, err := consentModel.NewConsentScope(h.userID, consentModel.PurposeLogin)
+	require.NoError(t, err)
+	record1, err := h.consentStore.FindByScope(context.Background(), scope)
 	require.NoError(t, err)
 	consentID := record1.ID
 
@@ -310,7 +370,9 @@ func TestIdempotencyWindowBoundary(t *testing.T) {
 	assert.Len(t, auditEvents, 1, "should only have 1 audit event (idempotent request didn't create new event)")
 
 	t.Log("Step 4: Manipulate timestamp to simulate time passing (6 minutes ago)")
-	record, err := h.consentStore.FindByUserAndPurpose(context.Background(), h.userID, consentModel.PurposeLogin)
+	scope, err = consentModel.NewConsentScope(h.userID, consentModel.PurposeLogin)
+	require.NoError(t, err)
+	record, err := h.consentStore.FindByScope(context.Background(), scope)
 	require.NoError(t, err)
 	record.GrantedAt = time.Now().Add(-6 * time.Minute)
 	require.NoError(t, h.consentStore.Update(context.Background(), record))
@@ -322,7 +384,9 @@ func TestIdempotencyWindowBoundary(t *testing.T) {
 	assert.True(t, grant3.Granted[0].ExpiresAt.After(*firstExpiresAt), "ExpiresAt should be updated after 5-min window")
 
 	t.Log("Step 6: Verify consent ID is still reused")
-	record3, err := h.consentStore.FindByUserAndPurpose(context.Background(), h.userID, consentModel.PurposeLogin)
+	scope, err = consentModel.NewConsentScope(h.userID, consentModel.PurposeLogin)
+	require.NoError(t, err)
+	record3, err := h.consentStore.FindByScope(context.Background(), scope)
 	require.NoError(t, err)
 	assert.Equal(t, consentID, record3.ID, "consent ID should still be reused")
 
@@ -392,7 +456,9 @@ func TestConcurrentGrantRevoke(t *testing.T) {
 	}
 
 	// Verify final state is consistent (exactly one record exists, in some valid state)
-	record, err := h.consentStore.FindByUserAndPurpose(context.Background(), h.userID, consentModel.PurposeLogin)
+	scope, err := consentModel.NewConsentScope(h.userID, consentModel.PurposeLogin)
+	require.NoError(t, err)
+	record, err := h.consentStore.FindByScope(context.Background(), scope)
 	require.NoError(t, err)
 	require.NotNil(t, record)
 
