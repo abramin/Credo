@@ -250,12 +250,6 @@ func (t *inMemoryAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStore
 	return fn(t.stores)
 }
 
-// txSessionKey is the context key for session-based transaction context.
-// Retained for compatibility but no longer used for sharding.
-type txSessionKey struct{}
-
-var txSessionKeyCtx = txSessionKey{}
-
 // WithLogger sets the logger used by auth operations.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Service) {

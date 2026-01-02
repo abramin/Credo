@@ -39,9 +39,7 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 		return nil, err
 	}
 
-	// Add session ID to context for sharded locking
-	txCtx := context.WithValue(ctx, txSessionKeyCtx, sessionID)
-	txErr := s.tx.RunInTx(txCtx, func(stores txAuthStores) error {
+	txErr := s.tx.RunInTx(ctx, func(stores txAuthStores) error {
 		var err error
 		codeRecord, err = s.consumeCodeWithReplayProtection(ctx, stores, req.Code, req.RedirectURI, now)
 		if err != nil {
