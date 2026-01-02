@@ -44,20 +44,10 @@ func NewRedisCache(client *redis.Client, cacheTTL time.Duration, metrics *metric
 func (c *RedisCache) FindCitizen(ctx context.Context, nationalID id.NationalID, regulated bool) (*models.CitizenRecord, error) {
 	start := time.Now()
 	key := citizenKey(nationalID, regulated)
-	data, err := c.client.Get(ctx, key).Bytes()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			c.recordMiss("citizen", start)
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("find citizen cache: %w", err)
-	}
-
 	var record models.CitizenRecord
-	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, fmt.Errorf("decode citizen cache: %w", err)
+	if err := c.getJSON(ctx, key, &record, "citizen", start); err != nil {
+		return nil, err
 	}
-	c.recordHit("citizen", start)
 	return &record, nil
 }
 
@@ -70,14 +60,7 @@ func (c *RedisCache) SaveCitizen(ctx context.Context, key id.NationalID, record 
 	if record == nil {
 		return fmt.Errorf("citizen record is required")
 	}
-	payload, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("encode citizen cache: %w", err)
-	}
-	if err := c.client.Set(ctx, citizenKey(key, regulated), payload, c.cacheTTL).Err(); err != nil {
-		return fmt.Errorf("save citizen cache: %w", err)
-	}
-	return nil
+	return c.setJSON(ctx, citizenKey(key, regulated), record, "citizen")
 }
 
 // FindSanction loads a cached sanctions record by national ID.
@@ -88,20 +71,10 @@ func (c *RedisCache) SaveCitizen(ctx context.Context, key id.NationalID, record 
 func (c *RedisCache) FindSanction(ctx context.Context, nationalID id.NationalID) (*models.SanctionsRecord, error) {
 	start := time.Now()
 	key := sanctionKey(nationalID)
-	data, err := c.client.Get(ctx, key).Bytes()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			c.recordMiss("sanctions", start)
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("find sanctions cache: %w", err)
-	}
-
 	var record models.SanctionsRecord
-	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, fmt.Errorf("decode sanctions cache: %w", err)
+	if err := c.getJSON(ctx, key, &record, "sanctions", start); err != nil {
+		return nil, err
 	}
-	c.recordHit("sanctions", start)
 	return &record, nil
 }
 
@@ -114,14 +87,7 @@ func (c *RedisCache) SaveSanction(ctx context.Context, key id.NationalID, record
 	if record == nil {
 		return fmt.Errorf("sanctions record is required")
 	}
-	payload, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("encode sanctions cache: %w", err)
-	}
-	if err := c.client.Set(ctx, sanctionKey(key), payload, c.cacheTTL).Err(); err != nil {
-		return fmt.Errorf("save sanctions cache: %w", err)
-	}
-	return nil
+	return c.setJSON(ctx, sanctionKey(key), record, "sanctions")
 }
 
 // recordHit emits cache hit metrics for the given record type.
@@ -140,6 +106,34 @@ func (c *RedisCache) recordMiss(recordType string, start time.Time) {
 	}
 	c.metrics.RecordCacheMiss(recordType)
 	c.metrics.ObserveLookupDuration(recordType, time.Since(start).Seconds())
+}
+
+func (c *RedisCache) getJSON(ctx context.Context, key string, dest any, recordType string, start time.Time) error {
+	data, err := c.client.Get(ctx, key).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			c.recordMiss(recordType, start)
+			return ErrNotFound
+		}
+		return fmt.Errorf("find %s cache: %w", recordType, err)
+	}
+
+	if err := json.Unmarshal(data, dest); err != nil {
+		return fmt.Errorf("decode %s cache: %w", recordType, err)
+	}
+	c.recordHit(recordType, start)
+	return nil
+}
+
+func (c *RedisCache) setJSON(ctx context.Context, key string, value any, recordType string) error {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("encode %s cache: %w", recordType, err)
+	}
+	if err := c.client.Set(ctx, key, payload, c.cacheTTL).Err(); err != nil {
+		return fmt.Errorf("save %s cache: %w", recordType, err)
+	}
+	return nil
 }
 
 func citizenKey(nationalID id.NationalID, regulated bool) string {
