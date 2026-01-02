@@ -17,7 +17,6 @@ import (
 	auditpublisher "credo/pkg/platform/audit/publisher"
 	"credo/pkg/platform/middleware/admin"
 	"credo/pkg/platform/sentinel"
-	platformsync "credo/pkg/platform/sync"
 	"credo/pkg/requestcontext"
 )
 
@@ -63,7 +62,7 @@ type Service struct {
 func New(store Store, auditor *auditpublisher.Publisher, logger *slog.Logger, opts ...Option) *Service {
 	svc := &Service{
 		store:                  store,
-		tx:                     &shardedConsentTx{mu: platformsync.NewShardedMutex(), store: store},
+		tx:                     newInMemoryConsentTx(store),
 		auditor:                auditor,
 		logger:                 logger,
 		consentTTL:             defaultConsentTTL,
@@ -149,10 +148,8 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 	if len(purposes) == 0 {
 		return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "purposes array must not be empty")
 	}
-	for _, purpose := range purposes {
-		if !purpose.IsValid() {
-			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
-		}
+	if err := validatePurposes(purposes); err != nil {
+		return nil, err
 	}
 
 	var (
@@ -160,13 +157,11 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 		effects []*grantEffect
 	)
 	// Wrap multi-purpose grant in transaction to ensure atomicity per AGENTS.md
-	// Add user ID to context for sharded locking
-	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
-	txErr := s.tx.RunInTx(txCtx, func(txCtx context.Context, txStore Store) error {
+	txErr := s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
 		for _, purpose := range purposes {
-			scope, err := models.NewConsentScope(userID, purpose)
+			scope, err := scopeForPurpose(userID, purpose)
 			if err != nil {
-				return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid consent scope")
+				return err
 			}
 			record, effect, err := s.upsertGrantTx(txCtx, txStore, scope)
 			if err != nil {
@@ -200,51 +195,97 @@ type grantEffect struct {
 	timestamp time.Time
 }
 
+type grantUpdate struct {
+	updated   models.Record
+	changed   bool
+	wasActive bool
+}
+
+func (s *Service) evaluateGrant(existing *models.Record, now time.Time) (grantUpdate, error) {
+	update := grantUpdate{wasActive: existing.IsActive(now)}
+	if update.wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
+		return update, nil
+	}
+
+	if !existing.CanReGrant(now, s.reGrantCooldown) {
+		return grantUpdate{}, pkgerrors.New(pkgerrors.CodeBadRequest,
+			fmt.Sprintf("consent was recently revoked; please wait before re-granting (cooldown: %v)", s.reGrantCooldown))
+	}
+
+	updated, err := existing.RenewAt(now, s.consentTTL)
+	if err != nil {
+		return grantUpdate{}, err
+	}
+	update.updated = updated
+	update.changed = true
+	return update, nil
+}
+
+func (s *Service) revokeScopeTx(ctx context.Context, txStore Store, scope models.ConsentScope, now time.Time) (*models.Record, bool, error) {
+	var (
+		changed bool
+		updated models.Record
+	)
+	record, err := txStore.Execute(ctx, scope,
+		func(existing *models.Record) error {
+			if !existing.CanRevoke(now) {
+				changed = false
+				return nil
+			}
+
+			var err error
+			updated, err = existing.RevokeAt(now)
+			if err != nil {
+				return err
+			}
+			changed = true
+			return nil
+		},
+		func(existing *models.Record) bool {
+			if !changed {
+				return false
+			}
+			*existing = updated
+			return true
+		},
+	)
+	if errors.Is(err, sentinel.ErrNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		var domainErr *pkgerrors.Error
+		if errors.As(err, &domainErr) {
+			return nil, false, err
+		}
+		return nil, false, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consent")
+	}
+	return record, changed, nil
+}
+
 func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, scope models.ConsentScope) (*models.Record, *grantEffect, error) {
 	now := requestcontext.Now(ctx)
 	for attempt := 0; attempt < 2; attempt++ {
-		var (
-			wasActive bool
-			changed   bool
-			updated   models.Record
-		)
+		var update grantUpdate
 
 		record, err := txStore.Execute(ctx, scope,
 			func(existing *models.Record) error {
-				wasActive = existing.IsActive(now)
-				if wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
-					changed = false
-					return nil
-				}
-
-				// Security: prevent rapid revoke→grant cycles
-				// If consent was recently revoked, enforce cooldown before allowing re-grant
-				if !existing.CanReGrant(now, s.reGrantCooldown) {
-					return pkgerrors.New(pkgerrors.CodeBadRequest,
-						fmt.Sprintf("consent was recently revoked; please wait before re-granting (cooldown: %v)", s.reGrantCooldown))
-				}
-
 				var err error
-				updated, err = existing.RenewAt(now, s.consentTTL)
-				if err != nil {
-					return err
-				}
-				changed = true
-				return nil
+				update, err = s.evaluateGrant(existing, now)
+				return err
 			},
 			func(existing *models.Record) bool {
-				if !changed {
+				if !update.changed {
 					return false
 				}
-				*existing = updated
+				*existing = update.updated
 				return true
 			},
 		)
 		if err == nil {
-			if !changed {
+			if !update.changed {
 				return record, nil, nil
 			}
-			return record, &grantEffect{record: record, wasActive: wasActive, timestamp: now}, nil
+			return record, &grantEffect{record: record, wasActive: update.wasActive, timestamp: now}, nil
 		}
 
 		if errors.Is(err, sentinel.ErrNotFound) {
@@ -311,64 +352,24 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	if userID.IsNil() {
 		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "user ID required")
 	}
-	for _, purpose := range purposes {
-		if !purpose.IsValid() {
-			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
-		}
+	if err := validatePurposes(purposes); err != nil {
+		return nil, err
 	}
 
 	var revoked []*models.Record
 	now := requestcontext.Now(ctx)
 
 	// Wrap multi-purpose revoke in transaction to ensure atomicity
-	// Add user ID to context for sharded locking
-	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
-	txErr := s.tx.RunInTx(txCtx, func(txCtx context.Context, txStore Store) error {
+	txErr := s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
 		for _, purpose := range purposes {
-			scope, err := models.NewConsentScope(userID, purpose)
+			scope, err := scopeForPurpose(userID, purpose)
 			if err != nil {
-				return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid consent scope")
+				return err
 			}
-			var (
-				changed bool
-				updated models.Record
-			)
-			record, err := txStore.Execute(txCtx, scope,
-				func(existing *models.Record) error {
-					// Guard: skip if not eligible for revocation (already revoked or expired)
-					if !existing.CanRevoke(now) {
-						changed = false
-						return nil
-					}
-
-					var err error
-					updated, err = existing.RevokeAt(now)
-					if err != nil {
-						return err
-					}
-					changed = true
-					return nil
-				},
-				func(existing *models.Record) bool {
-					if !changed {
-						return false
-					}
-					*existing = updated
-					return true
-				},
-			)
-			if errors.Is(err, sentinel.ErrNotFound) {
-				// Can't revoke what doesn't exist - skip silently
-				continue
-			}
+			record, changed, err := s.revokeScopeTx(txCtx, txStore, scope, now)
 			if err != nil {
-				var domainErr *pkgerrors.Error
-				if errors.As(err, &domainErr) {
-					return err
-				}
-				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consent")
+				return err
 			}
-
 			if !changed {
 				continue
 			}
@@ -408,9 +409,7 @@ func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) 
 	revokedCount := 0
 
 	// Wrap bulk revoke in transaction to ensure atomicity
-	// Add user ID to context for sharded locking
-	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
-	txErr := s.tx.RunInTx(txCtx, func(txCtx context.Context, txStore Store) error {
+	txErr := s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
 		count, err := txStore.RevokeAllByUser(txCtx, userID, now)
 		if err != nil {
 			return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consents")
@@ -487,6 +486,28 @@ func (s *Service) List(ctx context.Context, userID id.UserID, filter *models.Rec
 	s.observeRecordsPerUser(float64(len(records)))
 
 	return records, nil
+}
+
+func validatePurposes(purposes []models.Purpose) error {
+	for _, purpose := range purposes {
+		if !purpose.IsValid() {
+			return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
+		}
+	}
+	return nil
+}
+
+func scopeForPurpose(userID id.UserID, purpose models.Purpose) (models.ConsentScope, error) {
+	scope, err := models.NewConsentScope(userID, purpose)
+	if err != nil {
+		return models.ConsentScope{}, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid consent scope")
+	}
+	return scope, nil
+}
+
+func (s *Service) withUserTx(ctx context.Context, userID id.UserID, fn func(ctx context.Context, store Store) error) error {
+	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
+	return s.tx.RunInTx(txCtx, fn)
 }
 
 func filterRecords(records []*models.Record, filter *models.RecordFilter, now time.Time) []*models.Record {

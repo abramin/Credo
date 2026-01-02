@@ -495,21 +495,20 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 	refreshTokens := refreshTokenStore.NewPostgres(infra.DBPool.DB())
 	auditStore := auditpostgres.New(infra.DBPool.DB())
 
-	// Use Redis for sessions and TRL when configured, otherwise fall back to Postgres
+	// Sessions always use Postgres (auth_codes and refresh_tokens have FK constraints to sessions).
+	// TRL uses Redis when available for faster lookups (ephemeral data that can be rebuilt).
 	// sessionStoreAll satisfies authService.SessionStore, cleanup.SessionStore, and admin.SessionStore
 	type sessionStoreAll interface {
 		authService.SessionStore
 		DeleteExpiredSessions(ctx context.Context, now time.Time) (int, error)
 		ListAll(ctx context.Context) (map[id.SessionID]*models.Session, error)
 	}
-	var sessions sessionStoreAll
+	var sessions sessionStoreAll = sessionStore.NewPostgres(infra.DBPool.DB())
 	var trl authService.TokenRevocationList
 	if infra.RedisClient != nil {
-		sessions = sessionStore.NewRedis(infra.RedisClient.Client)
 		trl = revocationStore.NewRedisTRL(infra.RedisClient.Client)
-		infra.Log.Info("using Redis for sessions and token revocation")
+		infra.Log.Info("using Postgres for sessions, Redis for token revocation")
 	} else {
-		sessions = sessionStore.NewPostgres(infra.DBPool.DB())
 		trl = revocationStore.NewPostgresTRL(infra.DBPool.DB())
 		infra.Log.Info("using Postgres for sessions and token revocation")
 	}

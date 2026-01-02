@@ -2,26 +2,10 @@ package service
 
 import (
 	"context"
+	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-
 	pkgerrors "credo/pkg/domain-errors"
-	platformsync "credo/pkg/platform/sync"
-)
-
-// Shard contention metrics for monitoring lock behavior
-var (
-	shardLockWaitDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "credo_consent_shard_lock_wait_seconds",
-		Help:    "Time spent waiting to acquire shard lock",
-		Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1},
-	})
-	shardLockAcquisitions = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "credo_consent_shard_lock_acquisitions_total",
-		Help: "Total number of shard lock acquisitions",
-	})
 )
 
 // ConsentStoreTx provides a transactional boundary for consent store mutations.
@@ -33,13 +17,19 @@ type ConsentStoreTx interface {
 // defaultConsentTxTimeout is the maximum duration for a consent transaction.
 const defaultConsentTxTimeout = 5 * time.Second
 
-type shardedConsentTx struct {
-	mu      *platformsync.ShardedMutex
+// inMemoryConsentTx provides simple mutex-based transaction support for in-memory stores.
+// Used for tests and demo mode. Production uses PostgresTx with real database transactions.
+type inMemoryConsentTx struct {
+	mu      sync.Mutex
 	store   Store
 	timeout time.Duration
 }
 
-func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error {
+func newInMemoryConsentTx(store Store) *inMemoryConsentTx {
+	return &inMemoryConsentTx{store: store}
+}
+
+func (t *inMemoryConsentTx) RunInTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return pkgerrors.Wrap(err, pkgerrors.CodeTimeout, "transaction aborted: context cancelled")
@@ -56,14 +46,8 @@ func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(ctx context.Cont
 		defer cancel()
 	}
 
-	key := t.shardKey(ctx)
-
-	// Record lock acquisition timing for contention monitoring
-	lockStart := time.Now()
-	t.mu.Lock(key)
-	shardLockWaitDuration.Observe(time.Since(lockStart).Seconds())
-	shardLockAcquisitions.Inc()
-	defer t.mu.Unlock(key)
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	// Check again after acquiring lock
 	if err := ctx.Err(); err != nil {
@@ -71,14 +55,6 @@ func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(ctx context.Cont
 	}
 
 	return fn(ctx, t.store)
-}
-
-// shardKey picks a shard based on user ID from context, or defaults to shard 0.
-func (t *shardedConsentTx) shardKey(ctx context.Context) string {
-	if userID, ok := ctx.Value(txUserKeyCtx).(string); ok && userID != "" {
-		return userID
-	}
-	return ""
 }
 
 type txUserKey struct{}

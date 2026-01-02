@@ -6,11 +6,10 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"credo/internal/auth/device"
 	"credo/internal/auth/metrics"
@@ -21,22 +20,9 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
-	platformsync "credo/pkg/platform/sync"
 	"credo/pkg/requestcontext"
 )
 
-// Shard contention metrics for monitoring lock behavior
-var (
-	authShardLockWaitDuration = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "credo_auth_shard_lock_wait_seconds",
-		Help:    "Time spent waiting to acquire auth shard lock",
-		Buckets: []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1},
-	})
-	authShardLockAcquisitions = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "credo_auth_shard_lock_acquisitions_total",
-		Help: "Total number of auth shard lock acquisitions",
-	})
-)
 
 // TokenRevocationList manages revoked access tokens by JTI.
 // Production systems should use a persistent, shared store (PostgreSQL or Redis).
@@ -141,7 +127,7 @@ type Service struct {
 	sessions       SessionStore
 	codes          AuthCodeStore
 	refreshTokens  RefreshTokenStore
-	tx             *shardedAuthTx
+	tx             *inMemoryAuthTx
 	deviceService  *device.Service
 	trl            TokenRevocationList
 	logger         *slog.Logger
@@ -226,18 +212,17 @@ type txAuthStores struct {
 // defaultTxTimeout is the maximum duration for a transaction before it's aborted.
 const defaultTxTimeout = 5 * time.Second
 
-// shardedAuthTx provides fine-grained locking using sharded mutexes.
-// Uses platform ShardedMutex for lock distribution, with auth-specific timeout handling.
-type shardedAuthTx struct {
-	mu      *platformsync.ShardedMutex
+// inMemoryAuthTx provides simple mutex-based transaction support for in-memory stores.
+// Used for tests and demo mode. Production uses database transactions directly.
+type inMemoryAuthTx struct {
+	mu      sync.Mutex
 	stores  txAuthStores
 	timeout time.Duration
 }
 
-// RunInTx acquires a shard lock based on context and executes the transaction.
-// Falls back to shard 0 if no session key is in context.
+// RunInTx acquires a mutex and executes the transaction.
 // Enforces a timeout to prevent runaway operations.
-func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStores) error) error {
+func (t *inMemoryAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStores) error) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return dErrors.Wrap(err, dErrors.CodeTimeout, "transaction aborted: context cancelled")
@@ -254,15 +239,8 @@ func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStores
 		defer cancel()
 	}
 
-	// Get session key for shard selection
-	key := t.shardKey(ctx)
-
-	// Record lock acquisition timing for contention monitoring
-	lockStart := time.Now()
-	t.mu.Lock(key)
-	authShardLockWaitDuration.Observe(time.Since(lockStart).Seconds())
-	authShardLockAcquisitions.Inc()
-	defer t.mu.Unlock(key)
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	// Check again after acquiring lock
 	if err := ctx.Err(); err != nil {
@@ -272,15 +250,8 @@ func (t *shardedAuthTx) RunInTx(ctx context.Context, fn func(stores txAuthStores
 	return fn(t.stores)
 }
 
-// shardKey extracts the session ID from context for consistent sharding.
-func (t *shardedAuthTx) shardKey(ctx context.Context) string {
-	if sessionID, ok := ctx.Value(txSessionKeyCtx).(string); ok {
-		return sessionID
-	}
-	return ""
-}
-
-// txSessionKey is the context key for session-based sharding.
+// txSessionKey is the context key for session-based transaction context.
+// Retained for compatibility but no longer used for sharding.
 type txSessionKey struct{}
 
 var txSessionKeyCtx = txSessionKey{}
@@ -307,7 +278,7 @@ func WithMetrics(m *metrics.Metrics) Option {
 }
 
 // WithAuthStoreTx overrides the default transaction wrapper for auth stores.
-func WithAuthStoreTx(tx *shardedAuthTx) Option {
+func WithAuthStoreTx(tx *inMemoryAuthTx) Option {
 	return func(s *Service) {
 		s.tx = tx
 	}
@@ -369,8 +340,7 @@ func New(
 		refreshTokens:  refreshTokens,
 		jwt:            jwt,
 		clientResolver: clientResolver,
-		tx: &shardedAuthTx{
-			mu: platformsync.NewShardedMutex(),
+		tx: &inMemoryAuthTx{
 			stores: txAuthStores{
 				Users:         users,
 				Codes:         codes,
