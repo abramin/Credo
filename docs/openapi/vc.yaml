@@ -61,7 +61,7 @@ paths:
                 non_regulated:
                   summary: Non-regulated mode (full claims)
                   value:
-                    credential_id: "vc_abc123xyz"
+                    credential_id: "vc_550e8400-e29b-41d4-a716-446655440000"
                     type: "AgeOver18"
                     subject: "user_def456"
                     issuer: "credo"
@@ -72,7 +72,7 @@ paths:
                 regulated:
                   summary: Regulated mode (minimized claims)
                   value:
-                    credential_id: "vc_abc123xyz"
+                    credential_id: "vc_550e8400-e29b-41d4-a716-446655440000"
                     type: "AgeOver18"
                     issued_at: "2025-12-03T10:00:00Z"
                     claims:
@@ -106,7 +106,7 @@ paths:
             examples:
               default:
                 value:
-                  credential_id: "vc_abc123xyz"
+                  credential_id: "vc_550e8400-e29b-41d4-a716-446655440000"
       responses:
         "200":
           description: Credential found and verified
@@ -118,7 +118,7 @@ paths:
                 valid:
                   value:
                     valid: true
-                    credential_id: "vc_abc123xyz"
+                    credential_id: "vc_550e8400-e29b-41d4-a716-446655440000"
                     type: "AgeOver18"
                     subject: "user_def456"
                     issued_at: "2025-12-03T10:00:00Z"
@@ -169,10 +169,11 @@ components:
         credential_id:
           type: string
           description: Credential identifier
-          pattern: "^vc_"
-          maxLength: 64
+          pattern: "^vc_[0-9a-fA-F-]{36}$"
+          minLength: 39
+          maxLength: 39
       example:
-        credential_id: "vc_abc123xyz"
+        credential_id: "vc_550e8400-e29b-41d4-a716-446655440000"
 
     CredentialRecord:
       type: object
@@ -201,7 +202,7 @@ components:
           description: Credential claims
           additionalProperties: true
       example:
-        credential_id: "vc_abc123xyz"
+        credential_id: "vc_550e8400-e29b-41d4-a716-446655440000"
         type: "AgeOver18"
         subject: "user_def456"
         issuer: "credo"
@@ -211,40 +212,52 @@ components:
           verified_via: "national_registry"
 
     VerifyResponse:
-      type: object
-      required: [valid]
-      properties:
-        valid:
-          type: boolean
-          description: Whether the credential is valid
-        credential_id:
-          type: string
-          description: Credential identifier
-        type:
-          type: string
-          description: Credential type
-        subject:
-          type: string
-          description: Subject user ID
-        issued_at:
-          type: string
-          format: date-time
-          description: Issuance timestamp (RFC3339)
-        claims:
-          type: object
-          description: Credential claims
-          additionalProperties: true
-        reason:
-          type: string
-          description: Reason for invalid or missing credential
-      example:
-        valid: true
-        credential_id: "vc_abc123xyz"
-        type: "AgeOver18"
-        subject: "user_def456"
-        issued_at: "2025-12-03T10:00:00Z"
-        claims:
-          is_over_18: true
+      oneOf:
+        - type: object
+          required: [valid, credential_id, type, subject, issued_at, claims]
+          properties:
+            valid:
+              type: boolean
+              description: Whether the credential is valid
+              enum: [true]
+            credential_id:
+              type: string
+              description: Credential identifier
+            type:
+              type: string
+              description: Credential type
+            subject:
+              type: string
+              description: Subject user ID
+            issued_at:
+              type: string
+              format: date-time
+              description: Issuance timestamp (RFC3339)
+            claims:
+              type: object
+              description: Credential claims
+              additionalProperties: true
+          example:
+            valid: true
+            credential_id: "vc_550e8400-e29b-41d4-a716-446655440000"
+            type: "AgeOver18"
+            subject: "user_def456"
+            issued_at: "2025-12-03T10:00:00Z"
+            claims:
+              is_over_18: true
+        - type: object
+          required: [valid, reason]
+          properties:
+            valid:
+              type: boolean
+              description: Whether the credential is valid
+              enum: [false]
+            reason:
+              type: string
+              description: Reason for invalid or missing credential
+          example:
+            valid: false
+            reason: "credential_not_found"
 
     ErrorResponse:
       type: object
