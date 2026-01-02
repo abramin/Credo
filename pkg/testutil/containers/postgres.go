@@ -128,6 +128,41 @@ func (p *PostgresContainer) TruncateAll(ctx context.Context) error {
 	return p.TruncateTables(ctx, "outbox", "audit_events")
 }
 
+// TruncateModuleTables truncates all module tables for full integration test isolation.
+// Tables are truncated with CASCADE to handle foreign key dependencies.
+func (p *PostgresContainer) TruncateModuleTables(ctx context.Context) error {
+	// Order matters due to FK constraints; CASCADE handles dependencies
+	tables := []string{
+		// Audit tables (no FK dependencies on them)
+		"outbox",
+		"audit_events",
+
+		// Rate limit tables
+		"global_throttle",
+		"auth_lockouts",
+		"rate_limit_events",
+		"rate_limit_allowlist",
+
+		// Evidence tables (vc_credentials depends on users)
+		"vc_credentials",
+		"citizen_cache",
+		"sanctions_cache",
+		"token_revocations",
+
+		// Auth tables (sessions, codes, tokens depend on users/clients)
+		"refresh_tokens",
+		"authorization_codes",
+		"sessions",
+		"consents",
+
+		// Core tables (users depends on tenants via clients)
+		"users",
+		"clients",
+		"tenants",
+	}
+	return p.TruncateTables(ctx, tables...)
+}
+
 // Exec runs a SQL statement and returns the result.
 func (p *PostgresContainer) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return p.DB.ExecContext(ctx, query, args...)

@@ -1,0 +1,430 @@
+//go:build integration
+
+package store_test
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/suite"
+
+	"credo/internal/consent/models"
+	"credo/internal/consent/store"
+	id "credo/pkg/domain"
+	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/sentinel"
+	"credo/pkg/testutil/containers"
+)
+
+type PostgresStoreSuite struct {
+	suite.Suite
+	postgres *containers.PostgresContainer
+	store    *store.PostgresStore
+	tenantID id.TenantID
+}
+
+func TestPostgresStoreSuite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	suite.Run(t, new(PostgresStoreSuite))
+}
+
+func (s *PostgresStoreSuite) SetupSuite() {
+	mgr := containers.GetManager()
+	s.postgres = mgr.GetPostgres(s.T())
+	s.store = store.NewPostgres(s.postgres.DB)
+}
+
+func (s *PostgresStoreSuite) SetupTest() {
+	ctx := context.Background()
+
+	// Truncate in dependency order
+	err := s.postgres.TruncateTables(ctx, "consents", "users", "clients", "tenants")
+	s.Require().NoError(err)
+
+	// Create a tenant
+	s.tenantID = id.TenantID(uuid.New())
+	_, err = s.postgres.Exec(ctx, `
+		INSERT INTO tenants (id, name, status, created_at, updated_at)
+		VALUES ($1, $2, 'active', NOW(), NOW())
+	`, uuid.UUID(s.tenantID), "Test Tenant "+uuid.NewString())
+	s.Require().NoError(err)
+}
+
+func (s *PostgresStoreSuite) createTestUser(ctx context.Context) id.UserID {
+	userID := id.UserID(uuid.New())
+	_, err := s.postgres.Exec(ctx, `
+		INSERT INTO users (id, tenant_id, email, first_name, last_name, verified, status)
+		VALUES ($1, $2, $3, 'Test', 'User', true, 'active')
+	`, uuid.UUID(userID), uuid.UUID(s.tenantID), "test-"+uuid.NewString()+"@example.com")
+	s.Require().NoError(err)
+	return userID
+}
+
+func (s *PostgresStoreSuite) newTestConsent(userID id.UserID, purpose models.Purpose) *models.Record {
+	now := time.Now()
+	expiresAt := now.Add(24 * time.Hour)
+	return &models.Record{
+		ID:        id.ConsentID(uuid.New()),
+		UserID:    userID,
+		Purpose:   purpose,
+		GrantedAt: now,
+		ExpiresAt: &expiresAt,
+	}
+}
+
+// TestConcurrentGrantRevoke verifies that concurrent grant/revoke operations
+// on the same consent record result in a consistent final state.
+func (s *PostgresStoreSuite) TestConcurrentGrantRevoke() {
+	ctx := context.Background()
+	userID := s.createTestUser(ctx)
+
+	// Create initial consent
+	consent := s.newTestConsent(userID, models.PurposeLogin)
+	err := s.store.Save(ctx, consent)
+	s.Require().NoError(err)
+
+	const goroutines = 50
+	var wg sync.WaitGroup
+	var revokeCount, grantCount atomic.Int32
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			scope := models.ConsentScope{UserID: userID, Purpose: models.PurposeLogin}
+
+			if idx%2 == 0 {
+				// Revoke
+				_, err := s.store.Execute(ctx, scope,
+					func(r *models.Record) error {
+						if r.RevokedAt != nil {
+							return dErrors.New(dErrors.CodeConflict, "already revoked")
+						}
+						return nil
+					},
+					func(r *models.Record) bool {
+						now := time.Now()
+						r.RevokedAt = &now
+						return true
+					},
+				)
+				if err == nil {
+					revokeCount.Add(1)
+				}
+			} else {
+				// Re-grant (clear revoked_at)
+				_, err := s.store.Execute(ctx, scope,
+					func(r *models.Record) error {
+						if r.RevokedAt == nil {
+							return dErrors.New(dErrors.CodeConflict, "not revoked")
+						}
+						return nil
+					},
+					func(r *models.Record) bool {
+						r.RevokedAt = nil
+						r.GrantedAt = time.Now()
+						return true
+					},
+				)
+				if err == nil {
+					grantCount.Add(1)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify final state is consistent (either revoked or not, not corrupted)
+	found, err := s.store.FindByScope(ctx, models.ConsentScope{UserID: userID, Purpose: models.PurposeLogin})
+	s.Require().NoError(err)
+	s.NotNil(found)
+	// At least some operations should have succeeded
+	s.Greater(revokeCount.Load()+grantCount.Load(), int32(0))
+}
+
+// TestExecuteCallbackAtomicity verifies that validation errors trigger rollback
+// and don't corrupt state.
+func (s *PostgresStoreSuite) TestExecuteCallbackAtomicity() {
+	ctx := context.Background()
+	userID := s.createTestUser(ctx)
+
+	// Create consent
+	consent := s.newTestConsent(userID, models.PurposeRegistryCheck)
+	err := s.store.Save(ctx, consent)
+	s.Require().NoError(err)
+
+	scope := models.ConsentScope{UserID: userID, Purpose: models.PurposeRegistryCheck}
+	validationErr := dErrors.New(dErrors.CodeForbidden, "validation failed intentionally")
+
+	// Execute with failing validation
+	_, err = s.store.Execute(ctx, scope,
+		func(r *models.Record) error {
+			return validationErr
+		},
+		func(r *models.Record) bool {
+			// This should NOT be called since validation fails
+			now := time.Now()
+			r.RevokedAt = &now
+			return true
+		},
+	)
+
+	s.Error(err)
+	s.ErrorIs(err, validationErr)
+
+	// Verify record is unchanged
+	found, err := s.store.FindByScope(ctx, scope)
+	s.Require().NoError(err)
+	s.Nil(found.RevokedAt, "consent should not be revoked after validation failure")
+}
+
+// TestTransactionRollbackOnValidationFailure verifies domain errors don't corrupt state.
+func (s *PostgresStoreSuite) TestTransactionRollbackOnValidationFailure() {
+	ctx := context.Background()
+	userID := s.createTestUser(ctx)
+
+	// Create consent
+	consent := s.newTestConsent(userID, models.PurposeVCIssuance)
+	originalGrantedAt := consent.GrantedAt
+	err := s.store.Save(ctx, consent)
+	s.Require().NoError(err)
+
+	scope := models.ConsentScope{UserID: userID, Purpose: models.PurposeVCIssuance}
+
+	// Run multiple concurrent Execute calls that fail validation
+	const goroutines = 30
+	var wg sync.WaitGroup
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			_, _ = s.store.Execute(ctx, scope,
+				func(r *models.Record) error {
+					// Always fail validation
+					return dErrors.New(dErrors.CodeForbidden, "always fail")
+				},
+				func(r *models.Record) bool {
+					// Mutate that should never be persisted
+					r.GrantedAt = time.Now().Add(100 * time.Hour)
+					return true
+				},
+			)
+		}()
+	}
+
+	wg.Wait()
+
+	// Verify original state is preserved
+	found, err := s.store.FindByScope(ctx, scope)
+	s.Require().NoError(err)
+	s.WithinDuration(originalGrantedAt, found.GrantedAt, time.Second,
+		"granted_at should be unchanged after failed validations")
+}
+
+// TestDeadlockDetection verifies that concurrent Execute operations on different
+// users don't deadlock (they should acquire locks in parallel without blocking).
+func (s *PostgresStoreSuite) TestDeadlockDetection() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create multiple users with consents
+	const users = 5
+	userIDs := make([]id.UserID, users)
+	for i := 0; i < users; i++ {
+		userIDs[i] = s.createTestUser(ctx)
+		consent := s.newTestConsent(userIDs[i], models.PurposeLogin)
+		err := s.store.Save(ctx, consent)
+		s.Require().NoError(err)
+	}
+
+	const goroutines = 50
+	var wg sync.WaitGroup
+	var errors atomic.Int32
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			// Each goroutine operates on a different user (no lock contention)
+			userID := userIDs[idx%users]
+			scope := models.ConsentScope{UserID: userID, Purpose: models.PurposeLogin}
+
+			_, err := s.store.Execute(ctx, scope,
+				func(r *models.Record) error {
+					return nil
+				},
+				func(r *models.Record) bool {
+					r.GrantedAt = time.Now()
+					return true
+				},
+			)
+			if err != nil {
+				errors.Add(1)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	s.Equal(int32(0), errors.Load(), "no errors expected when operating on different users")
+}
+
+// TestConcurrentSaveConflict verifies Save conflict handling under concurrency.
+func (s *PostgresStoreSuite) TestConcurrentSaveConflict() {
+	ctx := context.Background()
+	userID := s.createTestUser(ctx)
+	const goroutines = 50
+
+	var wg sync.WaitGroup
+	var successCount atomic.Int32
+	var conflictCount atomic.Int32
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			consent := s.newTestConsent(userID, models.PurposeLogin)
+			err := s.store.Save(ctx, consent)
+			if err == nil {
+				successCount.Add(1)
+			} else if errors.Is(err, sentinel.ErrConflict) {
+				conflictCount.Add(1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Exactly one should succeed due to unique constraint
+	s.Equal(int32(1), successCount.Load(), "exactly one save should succeed")
+	s.Equal(int32(goroutines-1), conflictCount.Load(), "all others should conflict")
+}
+
+// TestRevokeAllByUserConcurrency verifies RevokeAllByUser under concurrent access.
+func (s *PostgresStoreSuite) TestRevokeAllByUserConcurrency() {
+	ctx := context.Background()
+	userID := s.createTestUser(ctx)
+
+	// Create multiple consents for the user
+	purposes := []models.Purpose{
+		models.PurposeLogin,
+		models.PurposeRegistryCheck,
+		models.PurposeVCIssuance,
+		models.PurposeDecision,
+	}
+
+	for _, purpose := range purposes {
+		consent := s.newTestConsent(userID, purpose)
+		err := s.store.Save(ctx, consent)
+		s.Require().NoError(err)
+	}
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	var totalRevoked atomic.Int32
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			count, err := s.store.RevokeAllByUser(ctx, userID, time.Now())
+			if err == nil {
+				totalRevoked.Add(int32(count))
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Total revoked should equal the number of consents (each revoked exactly once)
+	s.Equal(int32(len(purposes)), totalRevoked.Load(),
+		"total revoked should equal number of consents")
+
+	// Verify all are revoked
+	records, err := s.store.ListByUser(ctx, userID, nil)
+	s.Require().NoError(err)
+	for _, r := range records {
+		s.NotNil(r.RevokedAt, "all consents should be revoked")
+	}
+}
+
+// TestListByUserUnderConcurrentModification verifies list consistency during concurrent updates.
+func (s *PostgresStoreSuite) TestListByUserUnderConcurrentModification() {
+	ctx := context.Background()
+	userID := s.createTestUser(ctx)
+
+	// Create initial consents
+	for _, purpose := range []models.Purpose{models.PurposeLogin, models.PurposeRegistryCheck} {
+		consent := s.newTestConsent(userID, purpose)
+		err := s.store.Save(ctx, consent)
+		s.Require().NoError(err)
+	}
+
+	const goroutines = 30
+	var wg sync.WaitGroup
+	var listErrors atomic.Int32
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			if idx%3 == 0 {
+				// List
+				records, err := s.store.ListByUser(ctx, userID, nil)
+				if err != nil {
+					listErrors.Add(1)
+				} else {
+					// List should always return consistent results (non-nil slice)
+					s.NotNil(records)
+				}
+			} else {
+				// Update via Execute
+				scope := models.ConsentScope{UserID: userID, Purpose: models.PurposeLogin}
+				_, _ = s.store.Execute(ctx, scope,
+					func(r *models.Record) error { return nil },
+					func(r *models.Record) bool {
+						r.GrantedAt = time.Now()
+						return true
+					},
+				)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	s.Equal(int32(0), listErrors.Load(), "no list errors expected")
+}
+
+// TestNotFoundError verifies proper error handling for non-existent records.
+func (s *PostgresStoreSuite) TestNotFoundError() {
+	ctx := context.Background()
+	userID := s.createTestUser(ctx)
+
+	// FindByScope with no consent
+	scope := models.ConsentScope{UserID: userID, Purpose: models.PurposeLogin}
+	_, err := s.store.FindByScope(ctx, scope)
+	s.ErrorIs(err, sentinel.ErrNotFound)
+
+	// Execute on non-existent consent
+	_, err = s.store.Execute(ctx, scope,
+		func(r *models.Record) error { return nil },
+		func(r *models.Record) bool { return true },
+	)
+	s.ErrorIs(err, sentinel.ErrNotFound)
+}

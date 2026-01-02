@@ -15,6 +15,7 @@ type Manager struct {
 	mu       sync.Mutex
 	postgres *PostgresContainer
 	kafka    *KafkaContainer
+	redis    *RedisContainer
 }
 
 var (
@@ -57,4 +58,18 @@ func (m *Manager) GetKafka(t *testing.T) *KafkaContainer {
 		m.kafka = NewKafkaContainer(t)
 	}
 	return m.kafka
+}
+
+// GetRedis returns a Redis container, starting it if necessary.
+// The container persists across test suites in the same package.
+func (m *Manager) GetRedis(t *testing.T) *RedisContainer {
+	t.Helper()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.redis == nil {
+		m.redis = NewRedisContainer(t)
+	}
+	return m.redis
 }
