@@ -75,6 +75,40 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redpanda topic initialization
+  redpanda-init:
+    image: redpandadata/redpanda:latest
+    container_name: credo-redpanda-init
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "Waiting for Redpanda to be ready..."
+        sleep 5
+        echo "Creating audit topics..."
+        # Compliance: 6 partitions, high durability
+        rpk topic create audit.compliance --brokers redpanda:9092 \
+          --partitions 6 \
+          --config retention.ms=220898880000 \
+          --config cleanup.policy=delete || true
+        # Security: 12 partitions, medium retention
+        rpk topic create audit.security --brokers redpanda:9092 \
+          --partitions 12 \
+          --config retention.ms=7776000000 \
+          --config cleanup.policy=delete || true
+        # Ops: 24 partitions, short retention (high volume)
+        rpk topic create audit.ops --brokers redpanda:9092 \
+          --partitions 24 \
+          --config retention.ms=2592000000 \
+          --config cleanup.policy=delete || true
+        echo "Topics created successfully"
+        rpk topic list --brokers redpanda:9092
+    networks:
+      - credo-network
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
   # Redpanda Console - Kafka Web UI
   redpanda-console:
     image: redpandadata/console:latest
@@ -88,6 +122,8 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # Prometheus - Metrics scraper

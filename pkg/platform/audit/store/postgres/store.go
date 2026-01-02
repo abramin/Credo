@@ -255,3 +255,123 @@ func (s *Store) scanEvents(rows *sql.Rows) ([]audit.Event, error) {
 
 	return events, nil
 }
+
+// -----------------------------------------------------------------------------
+// Category-specific storage methods for partitioned tables
+// -----------------------------------------------------------------------------
+
+// ComplianceRecord represents a compliance audit event for the audit_compliance table.
+type ComplianceRecord struct {
+	Timestamp     time.Time
+	UserID        id.UserID
+	Subject       string
+	Action        string
+	Purpose       string
+	Decision      string
+	SubjectIDHash string
+	RequestID     string
+	ActorID       string
+}
+
+// AppendCompliance inserts a compliance event into the audit_compliance table.
+// Idempotent via ON CONFLICT DO NOTHING.
+func (s *Store) AppendCompliance(ctx context.Context, eventID uuid.UUID, record ComplianceRecord) error {
+	query := `
+		INSERT INTO audit_compliance (
+			id, timestamp, user_id, subject, action,
+			purpose, decision, subject_id_hash, request_id, actor_id
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (id) DO NOTHING
+	`
+
+	_, err := s.db.ExecContext(ctx, query,
+		eventID,
+		record.Timestamp,
+		uuid.UUID(record.UserID),
+		record.Subject,
+		record.Action,
+		record.Purpose,
+		record.Decision,
+		record.SubjectIDHash,
+		record.RequestID,
+		record.ActorID,
+	)
+	if err != nil {
+		return fmt.Errorf("insert compliance event: %w", err)
+	}
+	return nil
+}
+
+// SecurityRecord represents a security audit event for the audit_security table.
+type SecurityRecord struct {
+	Timestamp time.Time
+	Subject   string
+	Action    string
+	Reason    string
+	IP        string
+	RequestID string
+	ActorID   string
+	Severity  string
+}
+
+// AppendSecurity inserts a security event into the audit_security table.
+// Idempotent via ON CONFLICT DO NOTHING.
+func (s *Store) AppendSecurity(ctx context.Context, eventID uuid.UUID, record SecurityRecord) error {
+	query := `
+		INSERT INTO audit_security (
+			id, timestamp, subject, action, reason,
+			ip, request_id, actor_id, severity
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (id) DO NOTHING
+	`
+
+	_, err := s.db.ExecContext(ctx, query,
+		eventID,
+		record.Timestamp,
+		record.Subject,
+		record.Action,
+		record.Reason,
+		record.IP,
+		record.RequestID,
+		record.ActorID,
+		record.Severity,
+	)
+	if err != nil {
+		return fmt.Errorf("insert security event: %w", err)
+	}
+	return nil
+}
+
+// OpsRecord represents an operational audit event for the audit_ops table.
+type OpsRecord struct {
+	Timestamp time.Time
+	Subject   string
+	Action    string
+	RequestID string
+}
+
+// AppendOps inserts an ops event into the audit_ops table.
+// Idempotent via ON CONFLICT DO NOTHING.
+func (s *Store) AppendOps(ctx context.Context, eventID uuid.UUID, record OpsRecord) error {
+	query := `
+		INSERT INTO audit_ops (
+			id, timestamp, subject, action, request_id
+		)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id, timestamp) DO NOTHING
+	`
+
+	_, err := s.db.ExecContext(ctx, query,
+		eventID,
+		record.Timestamp,
+		record.Subject,
+		record.Action,
+		record.RequestID,
+	)
+	if err != nil {
+		return fmt.Errorf("insert ops event: %w", err)
+	}
+	return nil
+}
