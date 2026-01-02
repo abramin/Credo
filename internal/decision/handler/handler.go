@@ -18,6 +18,7 @@ import (
 
 // Service defines the interface for decision operations.
 type Service interface {
+	// Evaluate performs a decision evaluation for the provided request.
 	Evaluate(ctx context.Context, req decision.EvaluateRequest) (*decision.EvaluateResult, error)
 }
 
@@ -43,6 +44,9 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 // HandleEvaluate handles POST /decision/evaluate requests.
+//
+// Side effects: validates input, enforces authentication from context, calls the
+// decision service, writes an HTTP response, and logs request outcomes.
 func (h *Handler) HandleEvaluate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := requestcontext.RequestID(ctx)

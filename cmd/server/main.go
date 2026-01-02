@@ -822,7 +822,7 @@ func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Servic
 	metrics := decisionmetrics.New()
 
 	// Create service
-	svc := decision.New(
+	svc, err := decision.New(
 		registryAdapter,
 		vcAdapter,
 		consentAdapter,
@@ -830,6 +830,9 @@ func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Servic
 		decision.WithMetrics(metrics),
 		decision.WithLogger(infra.Log),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	return &decisionModule{
 		Service: svc,

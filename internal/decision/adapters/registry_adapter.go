@@ -29,6 +29,7 @@ func NewRegistryAdapter(registryService *registryService.Service) ports.Registry
 }
 
 // CheckCitizen retrieves citizen record by national ID.
+// Side effects: calls the registry service and may perform external I/O.
 // Uses CitizenWithDetails to get DOB for age derivation, then maps to contract type.
 func (a *RegistryAdapter) CheckCitizen(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrycontracts.CitizenRecord, error) {
 	record, err := a.registryService.CitizenWithDetails(ctx, userID, nationalID)
@@ -44,6 +45,7 @@ func (a *RegistryAdapter) CheckCitizen(ctx context.Context, userID id.UserID, na
 }
 
 // CheckSanctions retrieves sanctions record by national ID.
+// Side effects: calls the registry service and may perform external I/O.
 func (a *RegistryAdapter) CheckSanctions(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrycontracts.SanctionsRecord, error) {
 	record, err := a.registryService.Sanctions(ctx, userID, nationalID)
 	if err != nil {

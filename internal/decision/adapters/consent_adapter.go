@@ -22,7 +22,7 @@ func NewConsentAdapter(consent *consentService.Service) ports.ConsentPort {
 }
 
 // HasConsent checks if a user has active consent for a purpose.
-// This is implemented via RequireConsent - if no error, consent exists.
+// Side effects: calls the consent service; missing consent maps to false.
 func (a *ConsentAdapter) HasConsent(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) (bool, error) {
 	err := a.consent.Require(ctx, userID, purpose)
 	if err != nil {
@@ -36,7 +36,7 @@ func (a *ConsentAdapter) HasConsent(ctx context.Context, userID id.UserID, purpo
 }
 
 // RequireConsent enforces consent requirement.
-// Returns nil if consent is active, error otherwise.
+// Side effects: calls the consent service and returns its error.
 func (a *ConsentAdapter) RequireConsent(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) error {
 	return a.consent.Require(ctx, userID, purpose)
 }

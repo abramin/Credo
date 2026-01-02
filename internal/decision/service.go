@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -24,6 +25,8 @@ const (
 	consentPurpose id.ConsentPurpose = id.ConsentPurposeDecision
 )
 
+// AuditPublisher publishes decision audit events to an external sink.
+// Implementations may perform I/O and return errors on write failures.
 type AuditPublisher interface {
 	Emit(ctx context.Context, event audit.Event) error
 }
@@ -57,27 +60,27 @@ func WithLogger(l *slog.Logger) Option {
 }
 
 // New creates a new decision service with required dependencies.
-// Panics if required dependencies are nil - fail fast at startup.
-// All ports are required for compliance: consent gates data access,
-// auditor ensures regulatory audit trail.
+// Returns an error when required dependencies are nil; treat this as startup
+// misconfiguration. All ports are required for compliance: consent gates data
+// access and the auditor ensures regulatory audit trail.
 func New(
 	registry ports.RegistryPort,
 	vc ports.VCPort,
 	consent ports.ConsentPort,
 	auditor AuditPublisher,
 	opts ...Option,
-) *Service {
+) (*Service, error) {
 	if registry == nil {
-		panic("decision.New: registry port is required")
+		return nil, errors.New("decision.New: registry port is required")
 	}
 	if vc == nil {
-		panic("decision.New: vc port is required")
+		return nil, errors.New("decision.New: vc port is required")
 	}
 	if consent == nil {
-		panic("decision.New: consent port is required for compliance")
+		return nil, errors.New("decision.New: consent port is required for compliance")
 	}
 	if auditor == nil {
-		panic("decision.New: auditor is required for compliance audit trail")
+		return nil, errors.New("decision.New: auditor is required for compliance audit trail")
 	}
 
 	s := &Service{
@@ -89,12 +92,20 @@ func New(
 	for _, opt := range opts {
 		opt(s)
 	}
-	return s
+	return s, nil
 }
 
 // Evaluate performs a complete decision evaluation for the given request.
 // It checks consent, gathers registry/VC evidence, evaluates rules, emits an audit event,
 // and records metrics using a single evaluation timestamp.
+//
+// Usage: callers should pass validated identifiers from a trusted boundary.
+//
+// Side effects: calls consent and evidence services (with timeouts and goroutines),
+// emits audit events, logs audit failures, and records metrics.
+//
+// Errors: propagates consent/evidence errors; audit failures are fail-closed for
+// sanctions decisions and fail-open for age verification.
 func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateResult, error) {
 	// Single authoritative timestamp for the entire evaluation.
 	// Extracted from context (set by middleware) for deterministic testing and consistent audit trails.
@@ -149,6 +160,8 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateR
 	return result, nil
 }
 
+// requireConsent enforces the decision consent gate before evidence access.
+// Side effects: calls the consent service and returns its error verbatim.
 func (s *Service) requireConsent(ctx context.Context, userID id.UserID) error {
 	return s.consent.RequireConsent(ctx, userID, consentPurpose)
 }
@@ -184,6 +197,8 @@ func (s *Service) buildInput(evidence *GatheredEvidence, derived DerivedIdentity
 
 // emitAudit publishes a decision audit event.
 //
+// Side effects: writes audit records and logs on failure.
+//
 // Audit semantics vary by decision type:
 //   - Sanctions decisions: fail-closed (audit failure blocks response).
 //     Regulatory compliance requires audit trail guarantees for high-consequence decisions.
@@ -217,6 +232,8 @@ func hashSubjectID(subjectID string) string {
 	return hex.EncodeToString(h[:])
 }
 
+// emitAuditFailClosed publishes audit events for sanctions decisions and fails closed
+// when the audit sink is unavailable.
 func (s *Service) emitAuditFailClosed(ctx context.Context, event audit.Event, req EvaluateRequest) error {
 	if err := s.auditor.Emit(ctx, event); err != nil {
 		if s.logger != nil {
@@ -231,6 +248,8 @@ func (s *Service) emitAuditFailClosed(ctx context.Context, event audit.Event, re
 	return nil
 }
 
+// emitAuditBestEffort publishes audit events for non-sanctions decisions.
+// Audit failures are logged but do not block the response.
 func (s *Service) emitAuditBestEffort(ctx context.Context, event audit.Event, req EvaluateRequest) {
 	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
 		s.logger.WarnContext(ctx, "failed to emit decision audit event",

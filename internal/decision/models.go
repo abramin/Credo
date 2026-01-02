@@ -75,6 +75,10 @@ const (
 )
 
 // ParsePurpose validates and parses a purpose string.
+//
+// Usage: call at trust boundaries for external input.
+//
+// Errors: returns CodeBadRequest for unsupported purposes.
 func ParsePurpose(s string) (Purpose, error) {
 	switch Purpose(s) {
 	case PurposeAgeVerification, PurposeSanctionsScreening:

@@ -42,9 +42,10 @@ func (s *RuleEvaluationSuite) SetupTest() {
 	s.consent = &mockConsentPort{}
 	s.auditor = &mockAuditPublisher{}
 
-	s.service = New(s.registry, s.vc, s.consent, s.auditor)
-
 	var err error
+	s.service, err = New(s.registry, s.vc, s.consent, s.auditor)
+	s.Require().NoError(err)
+
 	// Use a valid UUID format for user ID
 	s.testUserID, err = id.ParseUserID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 	s.Require().NoError(err)

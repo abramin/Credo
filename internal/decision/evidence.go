@@ -26,6 +26,10 @@ type evidenceFetchResult struct {
 // Each fetch writes to isolated variables to avoid data races, then results are assembled
 // after all goroutines complete. The evalTime parameter ensures consistent timestamps
 // across the evaluation for deterministic testing and audit trail consistency.
+//
+// Side effects: calls external evidence services, spawns goroutines, and records
+// per-source latency metrics. Credential fetch failures are treated as soft-fail
+// for age verification.
 func (s *Service) gatherEvidence(ctx context.Context, req EvaluateRequest, evalTime time.Time) (*GatheredEvidence, error) {
 	ctx, cancel := context.WithTimeout(ctx, evidenceTimeout)
 	defer cancel()
@@ -110,6 +114,8 @@ func (s *Service) gatherEvidence(ctx context.Context, req EvaluateRequest, evalT
 	}, nil
 }
 
+// launchEvidenceFetch runs a single evidence fetch in a goroutine and records latency.
+// Side effects: spawns a goroutine, calls external fetchers, and emits metrics.
 func (s *Service) launchEvidenceFetch(
 	ctx context.Context,
 	g *errgroup.Group,

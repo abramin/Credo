@@ -2,8 +2,11 @@ package domain
 
 import dErrors "credo/pkg/domain-errors"
 
-// ConsentPurpose labels why data is processed. Purpose binding allows selective
-// revocation without affecting other flows.
+// ConsentPurpose is a domain value that identifies why data is processed.
+// Invariant: the value must be one of the supported consent purposes.
+//
+// Usage: construct via ParseConsentPurpose at trust boundaries to enforce the
+// allowlist; direct casting bypasses validation.
 type ConsentPurpose string
 
 // Supported consent purposes.
@@ -23,8 +26,12 @@ var validConsentPurposes = map[ConsentPurpose]bool{
 	ConsentPurposeDecision:      true,
 }
 
-// ParseConsentPurpose creates a ConsentPurpose from a string, validating it against
-// the allowed set. Returns error if the purpose is empty or unsupported.
+// ParseConsentPurpose constructs a ConsentPurpose from external input.
+//
+// Usage: call from handlers/adapters when parsing requests.
+//
+// Errors: returns CodeInvalidInput when the value is empty or unsupported; no
+// other errors are expected.
 func ParseConsentPurpose(s string) (ConsentPurpose, error) {
 	if s == "" {
 		return "", dErrors.New(dErrors.CodeInvalidInput, "purpose cannot be empty")
