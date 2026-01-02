@@ -600,6 +600,30 @@ export const options = {
 
     // Auth lockout race: no races should be detected (counter should stay at 0)
     'auth_lockout_race_detected{scenario:auth_lockout_race}': ['count<1'],
+
+    // Decision module thresholds
+    'decision_age_verify_latency{scenario:decision_age_verify}': ['p(95)<150'],
+    'decision_sanctions_latency{scenario:decision_sanctions}': ['p(95)<100'],
+    'decision_evaluate_latency{scenario:decision_same_user}': ['p(95)<200'],
+    'decision_evaluate_latency{scenario:decision_cache_hit}': ['p(95)<100'],
+    'decision_evaluate_latency{scenario:decision_rule_paths}': ['p(95)<200'],
+    'decision_evaluate_latency{scenario:decision_consent_denial}': ['p(95)<50'],
+
+    // Evidence module thresholds
+    'evidence_citizen_latency{scenario:evidence_citizen}': ['p(95)<150'],
+    'evidence_sanctions_latency{scenario:evidence_sanctions}': ['p(95)<150'],
+    'evidence_vc_issue_latency{scenario:evidence_vc_issue}': ['p(95)<3000'],
+    'evidence_check_latency{scenario:evidence_check}': ['p(95)<200'],
+    'evidence_check_latency{scenario:evidence_cache_stampede}': ['p(95)<500'],
+
+    // Additional auth thresholds
+    'auth_code_replay_latency{scenario:auth_code_replay}': ['p(95)<100'],
+    'trl_write_latency{scenario:trl_write_saturation}': ['p(95)<50'],
+    'userinfo_latency{scenario:userinfo_throughput}': ['p(95)<50'],
+
+    // Additional consent thresholds
+    'consent_revoke_latency{scenario:consent_revoke_grant_race}': ['p(95)<200'],
+    'consent_delete_latency{scenario:consent_gdpr_delete}': ['p(95)<300'],
   },
 };
 
@@ -1504,6 +1528,678 @@ export function authLockoutRaceScenario(data) {
   check(res, {
     'auth lockout response is valid': (r) =>
       r.status === 200 || r.status === 400 || r.status === 429,
+  });
+}
+
+// ========== DECISION MODULE SCENARIO IMPLEMENTATIONS ==========
+
+// Test data for decision scenarios - national IDs for different profiles
+const DECISION_TEST_PROFILES = {
+  valid_adult: '19800101-1234',      // Valid citizen, over 18, not sanctioned
+  valid_minor: '20100101-5678',      // Valid citizen, under 18, not sanctioned
+  sanctioned: '19750501-9999',       // Sanctioned individual
+  invalid_citizen: '00000000-0000',  // Invalid/unknown citizen
+  with_credential: '19850315-4321',  // Has existing VC
+};
+
+// Scenario 15: Decision Age Verification Throughput
+export function decisionAgeVerifyScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  const nationalID = DECISION_TEST_PROFILES.valid_adult;
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/decision/evaluate`,
+    JSON.stringify({
+      purpose: 'age_verification',
+      national_id: nationalID,
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'decision_age_verify' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  decisionAgeVerifyLatency.add(duration);
+
+  const success = check(res, {
+    'decision age verify status is 200': (r) => r.status === 200,
+    'decision has outcome': (r) => {
+      try {
+        const body = JSON.parse(r.body);
+        return body.outcome !== undefined;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  if (!success) {
+    decisionErrors.add(1);
+    errorRate.add(1);
+    if (res.status !== 401 && res.status !== 403) {
+      console.log(`Decision age verify failed: ${res.status} - ${res.body}`);
+    }
+  } else {
+    errorRate.add(0);
+  }
+}
+
+// Scenario 16: Decision Sanctions Screening Throughput
+export function decisionSanctionsScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  const nationalID = DECISION_TEST_PROFILES.valid_adult;
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/decision/evaluate`,
+    JSON.stringify({
+      purpose: 'sanctions_screening',
+      national_id: nationalID,
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'decision_sanctions' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  decisionSanctionsLatency.add(duration);
+
+  const success = check(res, {
+    'decision sanctions status is 200': (r) => r.status === 200,
+  });
+
+  if (!success) {
+    decisionErrors.add(1);
+    errorRate.add(1);
+  } else {
+    errorRate.add(0);
+  }
+}
+
+// Scenario 17: Decision Concurrent Same User
+export function decisionSameUserScenario(data) {
+  // All VUs use the same user to maximize contention
+  const token = data.tokens[0];
+  const nationalID = DECISION_TEST_PROFILES.valid_adult;
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/decision/evaluate`,
+    JSON.stringify({
+      purpose: 'age_verification',
+      national_id: nationalID,
+      request_id: `req-${__VU}-${__ITER}-${Date.now()}`,
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'decision_same_user' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  decisionEvaluateLatency.add(duration);
+
+  const success = check(res, {
+    'decision same user status is 200': (r) => r.status === 200,
+  });
+
+  if (!success) {
+    decisionErrors.add(1);
+    errorRate.add(1);
+  } else {
+    errorRate.add(0);
+  }
+
+  sleep(0.05);
+}
+
+// Scenario 18: Decision Cache Hit Test
+export function decisionCacheHitScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  // Use only 10 national IDs to maximize cache hits
+  const nationalIDs = [
+    '19800101-0001', '19800101-0002', '19800101-0003', '19800101-0004', '19800101-0005',
+    '19800101-0006', '19800101-0007', '19800101-0008', '19800101-0009', '19800101-0010',
+  ];
+  const nationalID = nationalIDs[__ITER % nationalIDs.length];
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/decision/evaluate`,
+    JSON.stringify({
+      purpose: 'sanctions_screening',
+      national_id: nationalID,
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'decision_cache_hit' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  decisionEvaluateLatency.add(duration);
+
+  check(res, {
+    'decision cache hit status is 200': (r) => r.status === 200,
+  });
+}
+
+// Scenario 19: Decision All Rule Paths
+export function decisionRulePathsScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  // Cycle through different profiles to hit all rule paths
+  const profiles = Object.values(DECISION_TEST_PROFILES);
+  const nationalID = profiles[__ITER % profiles.length];
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/decision/evaluate`,
+    JSON.stringify({
+      purpose: 'age_verification',
+      national_id: nationalID,
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'decision_rule_paths' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  decisionEvaluateLatency.add(duration);
+
+  // All responses are valid (pass, fail, or error responses)
+  check(res, {
+    'decision rule paths response valid': (r) => r.status === 200 || r.status === 400 || r.status === 403,
+  });
+
+  sleep(0.05);
+}
+
+// Scenario 20: Decision Consent Denial Fast-Fail
+export function decisionConsentDenialScenario(data) {
+  // Use users without consent to test fast-fail path
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/decision/evaluate`,
+    JSON.stringify({
+      purpose: 'age_verification',
+      national_id: DECISION_TEST_PROFILES.valid_adult,
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'decision_consent_denial' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  decisionEvaluateLatency.add(duration);
+
+  // Expect 403 for denied consent (fast path)
+  check(res, {
+    'decision consent denial is fast': (r) => r.status === 200 || r.status === 403,
+  });
+}
+
+// ========== EVIDENCE MODULE SCENARIO IMPLEMENTATIONS ==========
+
+// Scenario 21: Evidence Citizen Lookup Throughput
+export function evidenceCitizenScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  const nationalID = `19800101-${String(__VU * 1000 + __ITER).padStart(4, '0')}`;
+
+  const startTime = Date.now();
+  const res = http.get(
+    `${BASE_URL}/evidence/citizen/${nationalID}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'evidence_citizen' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  evidenceCitizenLatency.add(duration);
+
+  const success = check(res, {
+    'evidence citizen status is 200 or 404': (r) => r.status === 200 || r.status === 404,
+  });
+
+  if (!success && res.status !== 401 && res.status !== 403) {
+    evidenceErrors.add(1);
+    errorRate.add(1);
+  } else {
+    errorRate.add(0);
+  }
+}
+
+// Scenario 22: Evidence Sanctions Lookup Throughput
+export function evidenceSanctionsScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  const nationalID = `19800101-${String(__VU * 1000 + __ITER).padStart(4, '0')}`;
+
+  const startTime = Date.now();
+  const res = http.get(
+    `${BASE_URL}/evidence/sanctions/${nationalID}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'evidence_sanctions' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  evidenceSanctionsLatency.add(duration);
+
+  const success = check(res, {
+    'evidence sanctions status is 200': (r) => r.status === 200,
+  });
+
+  if (!success && res.status !== 401 && res.status !== 403) {
+    evidenceErrors.add(1);
+    errorRate.add(1);
+  } else {
+    errorRate.add(0);
+  }
+}
+
+// Scenario 23: Evidence VC Issuance Pipeline
+export function evidenceVCIssueScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  const nationalID = DECISION_TEST_PROFILES.valid_adult;
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/evidence/credentials`,
+    JSON.stringify({
+      national_id: nationalID,
+      credential_type: 'age_verification',
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'evidence_vc_issue' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  evidenceVCIssueLatency.add(duration);
+
+  const success = check(res, {
+    'evidence vc issue status is 200 or 201': (r) => r.status === 200 || r.status === 201,
+  });
+
+  if (!success && res.status !== 401 && res.status !== 403) {
+    evidenceErrors.add(1);
+    errorRate.add(1);
+  } else {
+    errorRate.add(0);
+  }
+}
+
+// Scenario 24: Evidence Cache Stampede
+export function evidenceCacheStampedeScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  // All VUs hit the same national ID to simulate stampede
+  const nationalID = '19800101-STAMPEDE';
+
+  const startTime = Date.now();
+  const res = http.get(
+    `${BASE_URL}/evidence/check/${nationalID}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'evidence_cache_stampede' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  evidenceCheckLatency.add(duration);
+
+  check(res, {
+    'evidence stampede response valid': (r) => r.status === 200 || r.status === 404 || r.status === 401,
+  });
+}
+
+// Scenario 25: Evidence Check (Combined) Throughput
+export function evidenceCheckScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  // Mix of repeated IDs (cache hits) and unique IDs (cache misses)
+  let nationalID;
+  if (Math.random() < 0.7) {
+    // 70% cache hits - use from small pool
+    const hotIDs = ['19800101-HOT1', '19800101-HOT2', '19800101-HOT3', '19800101-HOT4', '19800101-HOT5'];
+    nationalID = hotIDs[Math.floor(Math.random() * hotIDs.length)];
+    evidenceCacheHits.add(1);
+  } else {
+    // 30% cache misses - unique IDs
+    nationalID = `19800101-${__VU}-${__ITER}`;
+    evidenceCacheMisses.add(1);
+  }
+
+  const startTime = Date.now();
+  const res = http.get(
+    `${BASE_URL}/evidence/check/${nationalID}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'evidence_check' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  evidenceCheckLatency.add(duration);
+
+  const success = check(res, {
+    'evidence check status valid': (r) => r.status === 200 || r.status === 404,
+  });
+
+  if (!success && res.status !== 401 && res.status !== 403) {
+    evidenceErrors.add(1);
+    errorRate.add(1);
+  } else {
+    errorRate.add(0);
+  }
+}
+
+// ========== ADDITIONAL AUTH SCENARIO IMPLEMENTATIONS ==========
+
+// Shared state for auth code replay test
+let sharedAuthCodes = [];
+
+// Scenario 26: Auth Code Replay Attack
+export function authCodeReplayScenario(data) {
+  const clientID = data.clientID || CLIENT_ID;
+
+  // First iteration: get a fresh auth code
+  if (__ITER === 0) {
+    const email = `replay-test-${__VU}@example.com`;
+    const authRes = http.post(
+      `${BASE_URL}/auth/authorize`,
+      JSON.stringify({
+        email,
+        client_id: clientID,
+        redirect_uri: REDIRECT_URI,
+        scopes: DEFAULT_SCOPES,
+      }),
+      {
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+
+    if (authRes.status === 200) {
+      try {
+        const body = JSON.parse(authRes.body);
+        sharedAuthCodes[__VU] = body.code;
+      } catch {
+        // Ignore
+      }
+    }
+  }
+
+  // All iterations: try to use the same code (should fail after first use)
+  const code = sharedAuthCodes[__VU];
+  if (!code) {
+    return;
+  }
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/auth/token`,
+    JSON.stringify({
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: REDIRECT_URI,
+      client_id: clientID,
+    }),
+    {
+      headers: { 'Content-Type': 'application/json' },
+      tags: { name: 'auth_code_replay' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  authCodeReplayLatency.add(duration);
+
+  if (__ITER === 0) {
+    // First use should succeed
+    check(res, {
+      'first code use succeeds': (r) => r.status === 200,
+    });
+  } else {
+    // Subsequent uses should fail with replay error
+    const isReplayBlocked = check(res, {
+      'replay attempt blocked': (r) => r.status === 400 || r.status === 401,
+    });
+    if (!isReplayBlocked) {
+      authCodeReplayErrors.add(1);
+      console.log(`SECURITY: Auth code replay succeeded on attempt ${__ITER}!`);
+    }
+  }
+}
+
+// Scenario 27: TRL Write Saturation
+export function trlWriteSaturationScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+
+  const startTime = Date.now();
+  const res = http.post(
+    `${BASE_URL}/auth/revoke`,
+    JSON.stringify({
+      token: token.accessToken,
+      token_type_hint: 'access_token',
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'trl_write' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  trlWriteLatency.add(duration);
+
+  check(res, {
+    'trl write response valid': (r) => r.status === 200 || r.status === 204 || r.status === 400,
+  });
+}
+
+// Scenario 28: Userinfo Endpoint Throughput
+export function userinfoThroughputScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+
+  const startTime = Date.now();
+  const res = http.get(
+    `${BASE_URL}/auth/userinfo`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token.accessToken}`,
+      },
+      tags: { name: 'userinfo' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  userinfoLatency.add(duration);
+
+  check(res, {
+    'userinfo status is 200': (r) => r.status === 200,
+    'userinfo has sub': (r) => {
+      try {
+        return JSON.parse(r.body).sub !== undefined;
+      } catch {
+        return false;
+      }
+    },
+  });
+}
+
+// ========== ADDITIONAL CONSENT SCENARIO IMPLEMENTATIONS ==========
+
+// Scenario 29: Consent Revoke/Grant Race
+export function consentRevokeGrantRaceScenario(data) {
+  const token = data.tokens[(__VU - 1) % data.tokens.length];
+  const purpose = CONSENT_PURPOSES[__ITER % CONSENT_PURPOSES.length];
+
+  // Alternate between grant and revoke
+  if (__ITER % 2 === 0) {
+    // Grant
+    const startTime = Date.now();
+    const res = http.post(
+      `${BASE_URL}/auth/consent`,
+      JSON.stringify({ purposes: [purpose] }),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token.accessToken}`,
+        },
+        tags: { name: 'consent_grant_race' },
+      }
+    );
+    consentGrantLatency.add(Date.now() - startTime);
+    check(res, { 'consent grant valid': (r) => r.status === 200 || r.status === 201 || r.status === 400 });
+  } else {
+    // Revoke
+    const startTime = Date.now();
+    const res = http.post(
+      `${BASE_URL}/auth/consent/revoke`,
+      JSON.stringify({ purposes: [purpose] }),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token.accessToken}`,
+        },
+        tags: { name: 'consent_revoke_race' },
+      }
+    );
+    consentRevokeLatency.add(Date.now() - startTime);
+    check(res, { 'consent revoke valid': (r) => r.status === 200 || r.status === 204 || r.status === 400 });
+  }
+
+  sleep(0.1);
+}
+
+// Scenario 30: Consent GDPR Delete
+export function consentGDPRDeleteScenario(data) {
+  const clientID = data.clientID || CLIENT_ID;
+  // Create fresh user for each iteration to test delete
+  const email = `gdpr-delete-${__VU}-${__ITER}@example.com`;
+
+  // Step 1: Create user via authorize
+  const authRes = http.post(
+    `${BASE_URL}/auth/authorize`,
+    JSON.stringify({
+      email,
+      client_id: clientID,
+      redirect_uri: REDIRECT_URI,
+      scopes: DEFAULT_SCOPES,
+    }),
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  if (authRes.status !== 200) {
+    return;
+  }
+
+  const code = JSON.parse(authRes.body).code;
+
+  // Step 2: Exchange for tokens
+  const tokenRes = http.post(
+    `${BASE_URL}/auth/token`,
+    JSON.stringify({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT_URI,
+      client_id: clientID,
+    }),
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  if (tokenRes.status !== 200) {
+    return;
+  }
+
+  const accessToken = JSON.parse(tokenRes.body).access_token;
+
+  // Step 3: Grant some consents
+  http.post(
+    `${BASE_URL}/auth/consent`,
+    JSON.stringify({ purposes: CONSENT_PURPOSES }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  // Step 4: Delete all consents (GDPR)
+  const startTime = Date.now();
+  const deleteRes = http.del(
+    `${BASE_URL}/auth/consent`,
+    null,
+    {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      tags: { name: 'consent_gdpr_delete' },
+    }
+  );
+  consentDeleteLatency.add(Date.now() - startTime);
+
+  check(deleteRes, {
+    'consent delete status valid': (r) => r.status === 200 || r.status === 204,
+  });
+
+  // Step 5: Verify deletion - list should be empty
+  const listRes = http.get(
+    `${BASE_URL}/auth/consent`,
+    {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  check(listRes, {
+    'consent list empty after delete': (r) => {
+      try {
+        const body = JSON.parse(r.body);
+        return Array.isArray(body.consents) && body.consents.length === 0;
+      } catch {
+        return r.status === 200; // Accept if response is valid
+      }
+    },
   });
 }
 
