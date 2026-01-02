@@ -80,7 +80,9 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		// 3. Validate client and user status (PRD-026A FR-4.5.4)
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientID).Return(mockClient, mockTenant, nil)
 		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
-		// 4. Inside transaction: consume refresh token, re-find session, generate tokens
+		// 4. Inside transaction: consume refresh token, update session, generate tokens
+		// Note: Session is NOT re-fetched here - executeTokenFlowTx uses the Execute pattern
+		// which reads the session atomically inside the store's Execute method
 		s.mockRefreshStore.EXPECT().Execute(gomock.Any(), refreshTokenString, gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, token string, validate func(*models.RefreshTokenRecord) error, mutate func(*models.RefreshTokenRecord)) (*models.RefreshTokenRecord, error) {
 				if err := validate(&refreshRec); err != nil {
@@ -89,7 +91,6 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 				mutate(&refreshRec)
 				return &refreshRec, nil
 			})
-		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		accessToken, _, idToken, refreshToken := s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
 		// Inside RunInTx: Execute session validation and mutation
 		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sess.ID, gomock.Any(), gomock.Any()).DoAndReturn(
@@ -216,6 +217,7 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), clientID).Return(mockClient, mockTenant, nil)
 		s.mockUserStore.EXPECT().FindByID(gomock.Any(), userID).Return(mockUser, nil)
 		// Inside transaction
+		// Note: Session is NOT re-fetched here - executeTokenFlowTx uses the Execute pattern
 		s.mockRefreshStore.EXPECT().Execute(gomock.Any(), refreshTokenString, gomock.Any(), gomock.Any()).DoAndReturn(
 			func(ctx context.Context, token string, validate func(*models.RefreshTokenRecord) error, mutate func(*models.RefreshTokenRecord)) (*models.RefreshTokenRecord, error) {
 				if err := validate(&refreshRec); err != nil {
@@ -224,7 +226,6 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 				mutate(&refreshRec)
 				return &refreshRec, nil
 			})
-		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		s.expectTokenGeneration(userID, sessionID, clientUUID, tenantID, sess.RequestedScope)
 		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sess.ID, gomock.Any(), gomock.Any()).
 			DoAndReturn(func(ctx context.Context, sessionID id.SessionID, validate func(*models.Session) error, mutate func(*models.Session)) (*models.Session, error) {

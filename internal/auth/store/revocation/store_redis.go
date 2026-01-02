@@ -5,7 +5,17 @@ import (
 	"errors"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
+)
+
+var (
+	isRevokedDurationMs = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "credo_is_token_revoked_duration_ms",
+		Help:    "Latency of token revocation checks in milliseconds",
+		Buckets: []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25},
+	})
 )
 
 const (
@@ -50,6 +60,11 @@ func (t *RedisTRL) RevokeToken(ctx context.Context, jti string, ttl time.Duratio
 // IsRevoked checks if a token is in the revocation list.
 // Returns false if the key doesn't exist (not revoked or expired).
 func (t *RedisTRL) IsRevoked(ctx context.Context, jti string) (bool, error) {
+	start := time.Now()
+	defer func() {
+		isRevokedDurationMs.Observe(float64(time.Since(start).Microseconds()) / 1000.0)
+	}()
+
 	if jti == "" {
 		return false, nil
 	}

@@ -19,6 +19,10 @@ const (
 	// Redis key prefixes for session data
 	sessionKeyPrefix     = "session:"
 	userSessionKeyPrefix = "user_sessions:"
+
+	// maxSessionsPerUser caps the number of sessions loaded per user to prevent
+	// unbounded memory growth. Sessions beyond this limit are not loaded.
+	maxSessionsPerUser = 100
 )
 
 // sessionJSON is the JSON-serializable representation of a Session.
@@ -191,8 +195,9 @@ func (s *RedisStore) FindByID(ctx context.Context, sessionID id.SessionID) (*mod
 func (s *RedisStore) ListByUser(ctx context.Context, userID id.UserID) ([]*models.Session, error) {
 	userKey := s.userSessionsKey(userID)
 
-	// Get all session IDs for this user
-	sessionIDs, err := s.client.SMembers(ctx, userKey).Result()
+	// Get session IDs for this user (capped to prevent unbounded memory growth)
+	// Using SRandMember with count returns up to N distinct members
+	sessionIDs, err := s.client.SRandMemberN(ctx, userKey, maxSessionsPerUser).Result()
 	if err != nil {
 		return nil, fmt.Errorf("list session ids by user: %w", err)
 	}

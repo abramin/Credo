@@ -50,13 +50,10 @@ func (s *Service) refreshWithRefreshToken(ctx context.Context, req *models.Token
 			return err
 		}
 
-		// Step 2: Load session for token generation
-		session, err = stores.Sessions.FindByID(ctx, refreshRecord.SessionID)
-		if err != nil {
-			return fmt.Errorf("fetch session: %w", err)
-		}
-
-		// Step 3: Update session and persist refresh token (artifacts pre-generated)
+		// Step 2: Update session and persist refresh token (artifacts pre-generated)
+		// Note: Session is re-read inside executeTokenFlowTx via the Execute pattern,
+		// which provides atomic validation and mutation. The pre-fetched session is
+		// used only for device state extraction and pending consent check.
 		result, err := s.executeTokenFlowTx(ctx, stores, tokenFlowTxParams{
 			Session:            session,
 			TokenContext:       tc,

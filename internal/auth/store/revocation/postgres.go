@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // PostgresTRL persists revoked token JTIs in PostgreSQL.
@@ -50,34 +52,35 @@ func (t *PostgresTRL) IsRevoked(ctx context.Context, jti string) (bool, error) {
 }
 
 // RevokeSessionTokens revokes multiple tokens associated with a session.
+// Uses batch INSERT with unnest for efficiency instead of per-row inserts.
 func (t *PostgresTRL) RevokeSessionTokens(ctx context.Context, sessionID string, jtis []string, ttl time.Duration) error {
 	if len(jtis) == 0 {
 		return nil
 	}
+
+	// Filter empty JTIs
+	validJTIs := make([]string, 0, len(jtis))
+	for _, jti := range jtis {
+		if jti != "" {
+			validJTIs = append(validJTIs, jti)
+		}
+	}
+	if len(validJTIs) == 0 {
+		return nil
+	}
+
 	expiresAt := time.Now().Add(ttl)
 
-	tx, err := t.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin revoke session tokens tx: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
+	// Batch insert using unnest for O(1) round trips instead of O(n)
 	query := `
 		INSERT INTO token_revocations (jti, expires_at)
-		VALUES ($1, $2)
+		SELECT unnest($1::text[]), $2
 		ON CONFLICT (jti) DO UPDATE SET
 			expires_at = EXCLUDED.expires_at
 	`
-	for _, jti := range jtis {
-		if _, err := tx.ExecContext(ctx, query, jti, expiresAt); err != nil {
-			return fmt.Errorf("revoke session token: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit revoke session tokens: %w", err)
+	_, err := t.db.ExecContext(ctx, query, pq.Array(validJTIs), expiresAt)
+	if err != nil {
+		return fmt.Errorf("revoke session tokens batch: %w", err)
 	}
 	return nil
 }

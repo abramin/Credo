@@ -48,10 +48,9 @@ func (s *Service) exchangeAuthorizationCode(ctx context.Context, req *models.Tok
 			return err
 		}
 
-		session, err = stores.Sessions.FindByID(ctx, codeRecord.SessionID)
-		if err != nil {
-			return fmt.Errorf("fetch session: %w", err)
-		}
+		// Set tenant ID on the pre-fetched session for executeTokenFlowTx.
+		// The session is re-read inside executeTokenFlowTx via the Execute pattern,
+		// which provides atomic validation and mutation.
 		session.TenantID = tc.Tenant.ID
 
 		result, err := s.executeTokenFlowTx(ctx, stores, tokenFlowTxParams{
