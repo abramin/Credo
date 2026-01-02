@@ -518,7 +518,7 @@ components:
             - `active`: Session is valid and can be used for token operations
             - `pending_consent`: Session created but awaiting required user consent.
               Transitions to `active` automatically when the user grants consent
-              via `POST /auth/consent`. Token operations will fail until consent is granted.
+              via `POST /consents` (see consent.yaml). Token operations will fail until consent is granted.
             - `revoked`: Session has been invalidated and cannot be used
     RevokeSessionResponse:
       type: object
