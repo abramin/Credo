@@ -15,8 +15,10 @@ import (
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
 	authmetrics "credo/internal/auth/metrics"
+	"credo/internal/auth/models"
 	authPorts "credo/internal/auth/ports"
 	authService "credo/internal/auth/service"
+	id "credo/pkg/domain"
 	authCodeStore "credo/internal/auth/store/authorization-code"
 	refreshTokenStore "credo/internal/auth/store/refresh-token"
 	revocationStore "credo/internal/auth/store/revocation"
@@ -49,6 +51,7 @@ import (
 	"credo/internal/platform/database"
 	"credo/internal/platform/health"
 	"credo/internal/platform/httpserver"
+	platformredis "credo/internal/platform/redis"
 	"credo/internal/platform/kafka"
 	kafkaconsumer "credo/internal/platform/kafka/consumer"
 	kafkaproducer "credo/internal/platform/kafka/producer"
@@ -104,6 +107,7 @@ type infraBundle struct {
 
 	// Phase 2: Infrastructure
 	DBPool             *database.Pool
+	RedisClient        *platformredis.Client
 	KafkaProducer      *kafkaproducer.Producer
 	OutboxWorker       *outboxworker.Worker
 	OutboxMetrics      *outboxmetrics.Metrics
@@ -396,6 +400,16 @@ func initPhase2Infra(bundle *infraBundle, cfg *config.Server, log *slog.Logger) 
 		log.Info("database connected", "url", cfg.Database.URL[:min(len(cfg.Database.URL), 50)]+"...")
 	}
 
+	// Initialize Redis client if configured
+	if cfg.Redis.URL != "" {
+		redisClient, err := platformredis.New(cfg.Redis)
+		if err != nil {
+			return fmt.Errorf("initialize redis: %w", err)
+		}
+		bundle.RedisClient = redisClient
+		log.Info("redis connected", "url", cfg.Redis.URL)
+	}
+
 	// Initialize Kafka producer if configured
 	if cfg.Kafka.Brokers != "" {
 		producer, err := kafkaproducer.New(kafkaproducer.Config{
@@ -460,10 +474,28 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 	}
 
 	users := userStore.NewPostgres(infra.DBPool.DB())
-	sessions := sessionStore.NewPostgres(infra.DBPool.DB())
 	codes := authCodeStore.NewPostgres(infra.DBPool.DB())
 	refreshTokens := refreshTokenStore.NewPostgres(infra.DBPool.DB())
 	auditStore := auditpostgres.New(infra.DBPool.DB())
+
+	// Use Redis for sessions and TRL when configured, otherwise fall back to Postgres
+	// sessionStoreAll satisfies authService.SessionStore, cleanup.SessionStore, and admin.SessionStore
+	type sessionStoreAll interface {
+		authService.SessionStore
+		DeleteExpiredSessions(ctx context.Context, now time.Time) (int, error)
+		ListAll(ctx context.Context) (map[id.SessionID]*models.Session, error)
+	}
+	var sessions sessionStoreAll
+	var trl authService.TokenRevocationList
+	if infra.RedisClient != nil {
+		sessions = sessionStore.NewRedis(infra.RedisClient.Client)
+		trl = revocationStore.NewRedisTRL(infra.RedisClient.Client)
+		infra.Log.Info("using Redis for sessions and token revocation")
+	} else {
+		sessions = sessionStore.NewPostgres(infra.DBPool.DB())
+		trl = revocationStore.NewPostgresTRL(infra.DBPool.DB())
+		infra.Log.Info("using Postgres for sessions and token revocation")
+	}
 
 	authCfg := &authService.Config{
 		SessionTTL:             infra.Cfg.Auth.SessionTTL,
@@ -471,7 +503,6 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		AllowedRedirectSchemes: infra.Cfg.Auth.AllowedRedirectSchemes,
 		DeviceBindingEnabled:   infra.Cfg.Auth.DeviceBindingEnabled,
 	}
-	trl := revocationStore.NewPostgresTRL(infra.DBPool.DB())
 
 	// Wrap tenant service with circuit breaker for resilience
 	resilientClientResolver := authAdapters.NewResilientClientResolver(
@@ -784,6 +815,11 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 			return infra.DBPool.Health(context.Background())
 		})
 	}
+	if infra.RedisClient != nil {
+		healthHandler.RegisterCheck("redis", func() error {
+			return infra.RedisClient.Health(context.Background())
+		})
+	}
 	if infra.KafkaHealthChecker != nil {
 		healthHandler.RegisterCheck("kafka", func() error {
 			return infra.KafkaHealthChecker.Check(context.Background())
@@ -953,13 +989,21 @@ func stopPhase2Workers(ctx context.Context, infra *infraBundle) {
 	}
 }
 
-// closePhase2Infra closes database and Kafka connections.
+// closePhase2Infra closes database, Redis, and Kafka connections.
 func closePhase2Infra(infra *infraBundle) {
 	if infra.KafkaProducer != nil {
 		if err := infra.KafkaProducer.Close(); err != nil {
 			infra.Log.Error("kafka producer close failed", "error", err)
 		} else {
 			infra.Log.Info("kafka producer closed")
+		}
+	}
+
+	if infra.RedisClient != nil {
+		if err := infra.RedisClient.Close(); err != nil {
+			infra.Log.Error("redis close failed", "error", err)
+		} else {
+			infra.Log.Info("redis closed")
 		}
 	}
 

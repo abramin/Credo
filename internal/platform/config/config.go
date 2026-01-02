@@ -27,6 +27,7 @@ type Server struct {
 
 	// Infrastructure (Phase 2)
 	Database DatabaseConfig
+	Redis    RedisConfig
 	Kafka    KafkaConfig
 	Outbox   OutboxConfig
 }
@@ -54,6 +55,16 @@ type OutboxConfig struct {
 	PollInterval  time.Duration
 	BatchSize     int
 	RetentionDays int
+}
+
+// RedisConfig holds Redis connection configuration.
+type RedisConfig struct {
+	URL          string
+	PoolSize     int
+	MinIdleConns int
+	DialTimeout  time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
 }
 
 // AuthConfig holds authentication and session configuration
@@ -128,6 +139,13 @@ var (
 	DefaultOutboxPollInterval  = 100 * time.Millisecond
 	DefaultOutboxBatchSize     = 100
 	DefaultOutboxRetentionDays = 7
+
+	// Redis defaults
+	DefaultRedisPoolSize     = 10
+	DefaultRedisMinIdleConns = 2
+	DefaultRedisDialTimeout  = 5 * time.Second
+	DefaultRedisReadTimeout  = 3 * time.Second
+	DefaultRedisWriteTimeout = 3 * time.Second
 )
 
 // FromEnv builds config from environment variables
@@ -146,6 +164,7 @@ func FromEnv() (Server, error) {
 		Security:            loadSecurityConfig(env, demoMode),
 		DisableRateLimiting: disableRateLimiting,
 		Database:            loadDatabaseConfig(),
+		Redis:               loadRedisConfig(),
 		Kafka:               loadKafkaConfig(),
 		Outbox:              loadOutboxConfig(),
 	}
@@ -254,6 +273,17 @@ func loadOutboxConfig() OutboxConfig {
 		PollInterval:  parseDuration("OUTBOX_POLL_INTERVAL", DefaultOutboxPollInterval),
 		BatchSize:     parseInt("OUTBOX_BATCH_SIZE", DefaultOutboxBatchSize),
 		RetentionDays: parseInt("OUTBOX_RETENTION_DAYS", DefaultOutboxRetentionDays),
+	}
+}
+
+func loadRedisConfig() RedisConfig {
+	return RedisConfig{
+		URL:          os.Getenv("REDIS_URL"),
+		PoolSize:     parseInt("REDIS_POOL_SIZE", DefaultRedisPoolSize),
+		MinIdleConns: parseInt("REDIS_MIN_IDLE_CONNS", DefaultRedisMinIdleConns),
+		DialTimeout:  parseDuration("REDIS_DIAL_TIMEOUT", DefaultRedisDialTimeout),
+		ReadTimeout:  parseDuration("REDIS_READ_TIMEOUT", DefaultRedisReadTimeout),
+		WriteTimeout: parseDuration("REDIS_WRITE_TIMEOUT", DefaultRedisWriteTimeout),
 	}
 }
 

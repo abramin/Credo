@@ -97,6 +97,7 @@ python3 -m http.server 8000  # http://localhost:8000
 - E2E (godog): `go test -v ./e2e -- -godog.tags=@normal`
 - Latest E2E results: https://abramin.github.io/Credo/e2e/
 - In-memory stores/caches remain available for unit and E2E tests; runtime wiring uses Postgres/Redis.
+- Redis stores sessions and token revocation lists when `REDIS_URL` is configured; falls back to Postgres otherwise.
 
 ## API quick reference
 

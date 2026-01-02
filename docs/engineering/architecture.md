@@ -1007,7 +1007,8 @@ Credo follows a **progressive enhancement** approach to storage and caching:
 **Phase 2 - Production Baseline:**
 
 - Persistent stores (PostgreSQL for canonical data)
-- Redis for hot caches (sessions, consent projections, evidence lookups)
+- Redis for sessions and token revocation (implemented)
+- Redis for hot caches (consent projections, evidence lookups - planned)
 - Kafka/NATS event bus for audit, consent changes, decision outcomes
 
 **Phase 3 - Scale and Observability:**
@@ -1021,8 +1022,9 @@ Credo follows a **progressive enhancement** approach to storage and caching:
 
 | Tier      | Technology             | Use Cases                                                | TTL Strategy                                  |
 | --------- | ---------------------- | -------------------------------------------------------- | --------------------------------------------- |
-| **Write** | PostgreSQL / In-Memory | Canonical consent, sessions, user data (source of truth) | N/A (durable)                                 |
-| **Hot**   | Redis Cluster          | Consent projections, registry cache, session throttling  | Align with domain expiry (consent, sanctions) |
+| **Write** | PostgreSQL / In-Memory | Canonical consent, users, auth codes, refresh tokens     | N/A (durable)                                 |
+| **Hot**   | Redis (implemented)    | Sessions, token revocation list (TRL)                    | Session TTL, token expiry                     |
+| **Hot**   | Redis (planned)        | Consent projections, registry cache, rate limiting       | Align with domain expiry (consent, sanctions) |
 | **Warm**  | Elasticsearch          | Audit index, compliance queries, investigations          | Time-based indices (daily/weekly)             |
 | **Cold**  | S3 / Object Store      | Audit archive, GDPR exports, long-term compliance        | Lifecycle policies (90d+ retention)           |
 
@@ -1408,11 +1410,19 @@ Having the code structured by services makes these toggles easier to reason abou
 
 **What's Partially Implemented:**
 
-- ⚠️ Rate limiting Redis backend (PRD-017B - optional)
+- ⚠️ Rate limiting Redis backend (PRD-017B - planned, infrastructure ready)
 - ⚠️ Evidence and Decision handlers (501 Not Implemented)
 - ⚠️ User Data Rights handlers (501 Not Implemented)
 - ⚠️ Real VC credential ID generation
 - ⚠️ Async audit worker (worker.go exists but not wired)
+
+**Redis Integration (Implemented):**
+
+- ✅ Redis client package with connection pooling and health checks
+- ✅ Redis session store with JSON serialization and TTL-based expiry
+- ✅ Redis token revocation list (TRL) with pipeline batch operations
+- ✅ Automatic fallback to PostgreSQL when Redis is not configured
+- ✅ Configuration via `REDIS_URL` environment variable
 
 ### Production Roadmap
 
@@ -1566,3 +1576,4 @@ The codebase currently has:
 | 2.4     | 2025-12-17 | Engineering Team | Align with implemented PRDs: add Rate Limiting (PRD-017), Tenant Management (PRD-026A), Admin (PRD-001B), Device Binding modules; update package layout; add API Routes section; update middleware and implementation status |
 | 2.5     | 2025-12-17 | Engineering Team | Added Phase 7 Differentiation Pack services and package layout: Trust Score, Compliance Templates, Privacy Analytics, Trust Network, Consent-as-a-Service |
 | 2.6     | 2025-12-24 | Engineering Team | Phase 0 completion update: add PRD-026B tenant/client lifecycle management, update rate limiting to MVP complete status, add lifecycle API routes, update implementation status summary |
+| 2.7     | 2026-01-02 | Engineering Team | Add Redis integration for sessions and token revocation (PRD-016, PRD-020): Redis session store, Redis TRL, client package with health checks; update storage tiers and implementation status |
