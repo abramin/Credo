@@ -212,6 +212,24 @@ func (s *RuleEvaluationSuite) TestConsentEnforcement() {
 		s.Error(err)
 		s.Contains(err.Error(), "consent")
 	})
+
+	s.Run("does not fetch evidence when consent check fails", func() {
+		s.consent.calls = 0
+		s.registry.calls = 0
+		s.vc.calls = 0
+		s.consent.err = errors.New("consent required but not granted")
+
+		_, err := s.service.Evaluate(context.Background(), EvaluateRequest{
+			UserID:     s.testUserID,
+			Purpose:    PurposeAgeVerification,
+			NationalID: s.testNatID,
+		})
+
+		s.Error(err)
+		s.Equal(1, s.consent.calls, "consent should be checked once")
+		s.Equal(0, s.registry.calls, "registry should not be called when consent fails")
+		s.Equal(0, s.vc.calls, "vc store should not be called when consent fails")
+	})
 }
 
 func (s *RuleEvaluationSuite) TestAuditEmission() {
@@ -332,6 +350,29 @@ func (s *RuleEvaluationSuite) TestEvidenceNoPII() {
 	})
 }
 
+func (s *RuleEvaluationSuite) TestCredentialLookupSoftFail() {
+	s.Run("credential lookup error degrades to pass_with_conditions", func() {
+		s.registry.citizen = &registrycontracts.CitizenRecord{
+			Valid:       true,
+			DateOfBirth: "1990-01-15",
+		}
+		s.registry.sanctions = &registrycontracts.SanctionsRecord{Listed: false}
+		s.vc.err = errors.New("vc store unavailable")
+
+		result, err := s.service.Evaluate(context.Background(), EvaluateRequest{
+			UserID:     s.testUserID,
+			Purpose:    PurposeAgeVerification,
+			NationalID: s.testNatID,
+		})
+
+		s.NoError(err)
+		s.Equal(DecisionPassWithConditions, result.Status)
+		s.Equal(ReasonMissingCredential, result.Reason)
+		s.NotNil(result.Evidence.HasCredential)
+		s.False(*result.Evidence.HasCredential)
+	})
+}
+
 // =============================================================================
 // Mock implementations
 // =============================================================================
@@ -340,9 +381,11 @@ type mockRegistryPort struct {
 	citizen   *registrycontracts.CitizenRecord
 	sanctions *registrycontracts.SanctionsRecord
 	err       error
+	calls     int
 }
 
 func (m *mockRegistryPort) CheckCitizen(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrycontracts.CitizenRecord, error) {
+	m.calls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -350,6 +393,7 @@ func (m *mockRegistryPort) CheckCitizen(ctx context.Context, userID id.UserID, n
 }
 
 func (m *mockRegistryPort) CheckSanctions(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrycontracts.SanctionsRecord, error) {
+	m.calls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -359,9 +403,11 @@ func (m *mockRegistryPort) CheckSanctions(ctx context.Context, userID id.UserID,
 type mockVCPort struct {
 	credential *vcmodels.CredentialRecord
 	err        error
+	calls      int
 }
 
 func (m *mockVCPort) FindBySubjectAndType(ctx context.Context, userID id.UserID, credType vcmodels.CredentialType) (*vcmodels.CredentialRecord, error) {
+	m.calls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -369,18 +415,12 @@ func (m *mockVCPort) FindBySubjectAndType(ctx context.Context, userID id.UserID,
 }
 
 type mockConsentPort struct {
-	hasConsent bool
 	err        error
-}
-
-func (m *mockConsentPort) HasConsent(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) (bool, error) {
-	if m.err != nil {
-		return false, m.err
-	}
-	return m.hasConsent, nil
+	calls      int
 }
 
 func (m *mockConsentPort) RequireConsent(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) error {
+	m.calls++
 	return m.err
 }
 

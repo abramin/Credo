@@ -22,6 +22,12 @@ type evidenceFetchResult struct {
 	credentialLatency time.Duration
 }
 
+type evidenceTask struct {
+	kind       string
+	setLatency func(time.Duration)
+	fetch      func(context.Context) error
+}
+
 // gatherEvidence orchestrates parallel evidence gathering with shared context cancellation.
 // Each fetch writes to isolated variables to avoid data races, then results are assembled
 // after all goroutines complete. The evalTime parameter ensures consistent timestamps
@@ -40,59 +46,8 @@ func (s *Service) gatherEvidence(ctx context.Context, req EvaluateRequest, evalT
 	var result evidenceFetchResult
 
 	// Launch evidence fetches based on purpose
-	switch req.Purpose {
-	case PurposeAgeVerification:
-		s.launchEvidenceFetch(ctx, g, "citizen", func(latency time.Duration) {
-			result.citizenLatency = latency
-		}, func(ctx context.Context) error {
-			citizen, err := s.registry.CheckCitizen(ctx, req.UserID, req.NationalID)
-			if err != nil {
-				return err
-			}
-			result.citizen = citizen
-			return nil
-		})
-		s.launchEvidenceFetch(ctx, g, "sanctions", func(latency time.Duration) {
-			result.sanctionsLatency = latency
-		}, func(ctx context.Context) error {
-			sanctions, err := s.registry.CheckSanctions(ctx, req.UserID, req.NationalID)
-			if err != nil {
-				return err
-			}
-			result.sanctions = sanctions
-			return nil
-		})
-		// Credential lookup is soft-fail: infrastructure errors degrade to pass_with_conditions.
-		// Security note: This design prioritizes availability over completeness for advisory
-		// age verification. If credential service is unavailable, the user can still proceed
-		// but must obtain credentials later. For fail-closed behavior, see sanctions lookup.
-		s.launchEvidenceFetch(ctx, g, "credential", func(latency time.Duration) {
-			result.credentialLatency = latency
-		}, func(ctx context.Context) error {
-			cred, err := s.vc.FindBySubjectAndType(ctx, req.UserID, vcmodels.CredentialTypeAgeOver18)
-			if err != nil {
-				if s.logger != nil {
-					s.logger.WarnContext(ctx, "credential lookup failed - degrading to pass_with_conditions",
-						"user_id", req.UserID,
-						"error", err,
-					)
-				}
-				return nil
-			}
-			result.credential = cred
-			return nil
-		})
-	case PurposeSanctionsScreening:
-		s.launchEvidenceFetch(ctx, g, "sanctions", func(latency time.Duration) {
-			result.sanctionsLatency = latency
-		}, func(ctx context.Context) error {
-			sanctions, err := s.registry.CheckSanctions(ctx, req.UserID, req.NationalID)
-			if err != nil {
-				return err
-			}
-			result.sanctions = sanctions
-			return nil
-		})
+	for _, task := range s.buildEvidenceTasks(req, &result) {
+		s.launchEvidenceFetch(ctx, g, task.kind, task.setLatency, task.fetch)
 	}
 
 	// Wait for all goroutines with early cancellation on first failure
@@ -112,6 +67,84 @@ func (s *Service) gatherEvidence(ctx context.Context, req EvaluateRequest, evalT
 			Credential: result.credentialLatency,
 		},
 	}, nil
+}
+
+func (s *Service) buildEvidenceTasks(req EvaluateRequest, result *evidenceFetchResult) []evidenceTask {
+	switch req.Purpose {
+	case PurposeAgeVerification:
+		return []evidenceTask{
+			s.citizenTask(req, result),
+			s.sanctionsTask(req, result),
+			s.credentialTask(req, result),
+		}
+	case PurposeSanctionsScreening:
+		return []evidenceTask{
+			s.sanctionsTask(req, result),
+		}
+	default:
+		return nil
+	}
+}
+
+func (s *Service) citizenTask(req EvaluateRequest, result *evidenceFetchResult) evidenceTask {
+	return evidenceTask{
+		kind: "citizen",
+		setLatency: func(latency time.Duration) {
+			result.citizenLatency = latency
+		},
+		fetch: func(ctx context.Context) error {
+			citizen, err := s.registry.CheckCitizen(ctx, req.UserID, req.NationalID)
+			if err != nil {
+				return err
+			}
+			result.citizen = citizen
+			return nil
+		},
+	}
+}
+
+func (s *Service) sanctionsTask(req EvaluateRequest, result *evidenceFetchResult) evidenceTask {
+	return evidenceTask{
+		kind: "sanctions",
+		setLatency: func(latency time.Duration) {
+			result.sanctionsLatency = latency
+		},
+		fetch: func(ctx context.Context) error {
+			sanctions, err := s.registry.CheckSanctions(ctx, req.UserID, req.NationalID)
+			if err != nil {
+				return err
+			}
+			result.sanctions = sanctions
+			return nil
+		},
+	}
+}
+
+func (s *Service) credentialTask(req EvaluateRequest, result *evidenceFetchResult) evidenceTask {
+	return evidenceTask{
+		kind: "credential",
+		setLatency: func(latency time.Duration) {
+			result.credentialLatency = latency
+		},
+		fetch: func(ctx context.Context) error {
+			// Credential lookup is soft-fail: infrastructure errors degrade to pass_with_conditions.
+			// Security note: This design prioritizes availability over completeness for advisory
+			// age verification. If credential service is unavailable, the user can still proceed
+			// but must obtain credentials later. For fail-closed behavior, see sanctions lookup.
+			cred, err := s.vc.FindBySubjectAndType(ctx, req.UserID, vcmodels.CredentialTypeAgeOver18)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.WarnContext(ctx, "credential lookup failed - degrading to pass_with_conditions",
+						"user_id", req.UserID,
+						"error", err,
+					)
+				}
+				return nil
+			}
+			result.credential = cred
+			return nil
+		},
+	}
 }
 
 // launchEvidenceFetch runs a single evidence fetch in a goroutine and records latency.

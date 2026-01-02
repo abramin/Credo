@@ -83,7 +83,18 @@ func BuildResult(purpose Purpose, outcome DecisionOutcome, evidence *GatheredEvi
 }
 
 func buildAgeVerificationResult(result *EvaluateResult, outcome DecisionOutcome, evidence *GatheredEvidence, derived DerivedIdentity) *EvaluateResult {
-	// Set evidence fields
+	setAgeVerificationEvidence(result, evidence, derived)
+
+	reason, conditions := reasonForAgeVerification(outcome, evidence, derived)
+	result.Reason = reason
+	if len(conditions) > 0 {
+		result.Conditions = conditions
+	}
+
+	return result
+}
+
+func setAgeVerificationEvidence(result *EvaluateResult, evidence *GatheredEvidence, derived DerivedIdentity) {
 	if evidence.Citizen != nil {
 		valid := evidence.Citizen.Valid
 		result.Evidence.CitizenValid = &valid
@@ -92,25 +103,25 @@ func buildAgeVerificationResult(result *EvaluateResult, outcome DecisionOutcome,
 	result.Evidence.IsOver18 = &over18
 	hasCred := evidence.Credential != nil
 	result.Evidence.HasCredential = &hasCred
+}
 
-	// Set reason based on failure point
+func reasonForAgeVerification(outcome DecisionOutcome, evidence *GatheredEvidence, derived DerivedIdentity) (DecisionReason, []string) {
 	switch outcome {
 	case DecisionFail:
 		if evidence.Sanctions != nil && evidence.Sanctions.Listed {
-			result.Reason = ReasonSanctioned
+			return ReasonSanctioned, nil
 		} else if evidence.Citizen == nil || !evidence.Citizen.Valid {
-			result.Reason = ReasonInvalidCitizen
+			return ReasonInvalidCitizen, nil
 		} else if !derived.IsOver18 {
-			result.Reason = ReasonUnderage
+			return ReasonUnderage, nil
 		}
 	case DecisionPass:
-		result.Reason = ReasonAllChecksPassed
+		return ReasonAllChecksPassed, nil
 	case DecisionPassWithConditions:
-		result.Reason = ReasonMissingCredential
-		result.Conditions = []string{"obtain_age_credential"}
+		return ReasonMissingCredential, []string{"obtain_age_credential"}
 	}
 
-	return result
+	return "", nil
 }
 
 func buildSanctionsResult(result *EvaluateResult, outcome DecisionOutcome, evidence *GatheredEvidence) *EvaluateResult {
