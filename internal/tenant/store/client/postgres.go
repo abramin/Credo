@@ -10,6 +10,7 @@ import (
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
+	txcontext "credo/pkg/platform/tx"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,18 @@ type PostgresStore struct {
 // NewPostgres constructs a PostgreSQL-backed client store.
 func NewPostgres(db *sql.DB) *PostgresStore {
 	return &PostgresStore{db: db}
+}
+
+type dbExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (s *PostgresStore) execer(ctx context.Context) dbExecutor {
+	if tx, ok := txcontext.From(ctx); ok {
+		return tx
+	}
+	return s.db
 }
 
 // Create persists a new client.
@@ -50,7 +63,7 @@ func (s *PostgresStore) Create(ctx context.Context, client *models.Client) error
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = s.execer(ctx).ExecContext(ctx, query,
 		uuid.UUID(client.ID),
 		uuid.UUID(client.TenantID),
 		client.Name,
@@ -102,7 +115,7 @@ func (s *PostgresStore) Update(ctx context.Context, client *models.Client) error
 			updated_at = $9
 		WHERE id = $1
 	`
-	res, err := s.db.ExecContext(ctx, query,
+	res, err := s.execer(ctx).ExecContext(ctx, query,
 		uuid.UUID(client.ID),
 		client.Name,
 		client.OAuthClientID,
@@ -134,7 +147,7 @@ func (s *PostgresStore) FindByID(ctx context.Context, clientID id.ClientID) (*mo
 		FROM clients
 		WHERE id = $1
 	`
-	client, err := scanClient(s.db.QueryRowContext(ctx, query, uuid.UUID(clientID)))
+	client, err := scanClient(s.execer(ctx).QueryRowContext(ctx, query, uuid.UUID(clientID)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -152,7 +165,7 @@ func (s *PostgresStore) FindByTenantAndID(ctx context.Context, tenantID id.Tenan
 		FROM clients
 		WHERE id = $1 AND tenant_id = $2
 	`
-	client, err := scanClient(s.db.QueryRowContext(ctx, query, uuid.UUID(clientID), uuid.UUID(tenantID)))
+	client, err := scanClient(s.execer(ctx).QueryRowContext(ctx, query, uuid.UUID(clientID), uuid.UUID(tenantID)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -170,7 +183,7 @@ func (s *PostgresStore) FindByOAuthClientID(ctx context.Context, oauthClientID s
 		FROM clients
 		WHERE oauth_client_id = $1
 	`
-	client, err := scanClient(s.db.QueryRowContext(ctx, query, oauthClientID))
+	client, err := scanClient(s.execer(ctx).QueryRowContext(ctx, query, oauthClientID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -183,7 +196,7 @@ func (s *PostgresStore) FindByOAuthClientID(ctx context.Context, oauthClientID s
 // CountByTenant returns the number of clients registered under a tenant.
 func (s *PostgresStore) CountByTenant(ctx context.Context, tenantID id.TenantID) (int, error) {
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE tenant_id = $1`, uuid.UUID(tenantID)).Scan(&count); err != nil {
+	if err := s.execer(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE tenant_id = $1`, uuid.UUID(tenantID)).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count clients by tenant: %w", err)
 	}
 	return count, nil

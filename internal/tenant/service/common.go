@@ -131,50 +131,50 @@ func newAuditEmitter(logger *slog.Logger, publisher AuditPublisher) *auditEmitte
 	return &auditEmitter{logger: logger, publisher: publisher}
 }
 
-func (e *auditEmitter) emit(ctx context.Context, event string, attributes ...any) {
+func (e *auditEmitter) emit(ctx context.Context, event string, attributes ...any) error {
 	attributes = e.enrichAttributes(ctx, attributes)
 	e.logToText(ctx, event, attributes)
-	e.emitToAudit(ctx, event, attributes)
+	return e.emitToAudit(ctx, event, attributes)
 }
 
 // Typed event emitters provide stronger typing for domain events.
 
-func (e *auditEmitter) emitTenantCreated(ctx context.Context, evt models.TenantCreated) {
-	e.emit(ctx, string(audit.EventTenantCreated), "tenant_id", evt.TenantID)
+func (e *auditEmitter) emitTenantCreated(ctx context.Context, evt models.TenantCreated) error {
+	return e.emit(ctx, string(audit.EventTenantCreated), "tenant_id", evt.TenantID)
 }
 
-func (e *auditEmitter) emitTenantDeactivated(ctx context.Context, evt models.TenantDeactivated) {
-	e.emit(ctx, string(audit.EventTenantDeactivated), "tenant_id", evt.TenantID)
+func (e *auditEmitter) emitTenantDeactivated(ctx context.Context, evt models.TenantDeactivated) error {
+	return e.emit(ctx, string(audit.EventTenantDeactivated), "tenant_id", evt.TenantID)
 }
 
-func (e *auditEmitter) emitTenantReactivated(ctx context.Context, evt models.TenantReactivated) {
-	e.emit(ctx, string(audit.EventTenantReactivated), "tenant_id", evt.TenantID)
+func (e *auditEmitter) emitTenantReactivated(ctx context.Context, evt models.TenantReactivated) error {
+	return e.emit(ctx, string(audit.EventTenantReactivated), "tenant_id", evt.TenantID)
 }
 
-func (e *auditEmitter) emitClientCreated(ctx context.Context, evt models.ClientCreated) {
-	e.emit(ctx, string(audit.EventClientCreated),
+func (e *auditEmitter) emitClientCreated(ctx context.Context, evt models.ClientCreated) error {
+	return e.emit(ctx, string(audit.EventClientCreated),
 		"tenant_id", evt.TenantID,
 		"client_id", evt.ClientID,
 		"client_name", evt.ClientName,
 	)
 }
 
-func (e *auditEmitter) emitClientDeactivated(ctx context.Context, evt models.ClientDeactivated) {
-	e.emit(ctx, string(audit.EventClientDeactivated),
+func (e *auditEmitter) emitClientDeactivated(ctx context.Context, evt models.ClientDeactivated) error {
+	return e.emit(ctx, string(audit.EventClientDeactivated),
 		"client_id", evt.ClientID,
 		"tenant_id", evt.TenantID,
 	)
 }
 
-func (e *auditEmitter) emitClientReactivated(ctx context.Context, evt models.ClientReactivated) {
-	e.emit(ctx, string(audit.EventClientReactivated),
+func (e *auditEmitter) emitClientReactivated(ctx context.Context, evt models.ClientReactivated) error {
+	return e.emit(ctx, string(audit.EventClientReactivated),
 		"client_id", evt.ClientID,
 		"tenant_id", evt.TenantID,
 	)
 }
 
-func (e *auditEmitter) emitClientSecretRotated(ctx context.Context, evt models.ClientSecretRotated) {
-	e.emit(ctx, string(audit.EventClientSecretRotated),
+func (e *auditEmitter) emitClientSecretRotated(ctx context.Context, evt models.ClientSecretRotated) error {
+	return e.emit(ctx, string(audit.EventClientSecretRotated),
 		"tenant_id", evt.TenantID,
 		"client_id", evt.ClientID,
 	)
@@ -195,9 +195,9 @@ func (e *auditEmitter) logToText(ctx context.Context, event string, attributes [
 	e.logger.InfoContext(ctx, event, args...)
 }
 
-func (e *auditEmitter) emitToAudit(ctx context.Context, event string, attributes []any) {
+func (e *auditEmitter) emitToAudit(ctx context.Context, event string, attributes []any) error {
 	if e.publisher == nil {
-		return
+		return dErrors.New(dErrors.CodeInternal, "audit publisher is required")
 	}
 
 	// Extract admin user who performed the action
@@ -227,10 +227,14 @@ func (e *auditEmitter) emitToAudit(ctx context.Context, event string, attributes
 		Subject:   subject,
 		Action:    event,
 		RequestID: requestID,
-	}); err != nil && e.logger != nil {
-		e.logger.ErrorContext(ctx, "failed to emit audit event",
-			"event", event,
-			"error", err,
-		)
+	}); err != nil {
+		if e.logger != nil {
+			e.logger.ErrorContext(ctx, "failed to emit audit event",
+				"event", event,
+				"error", err,
+			)
+		}
+		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to emit audit event")
 	}
+	return nil
 }

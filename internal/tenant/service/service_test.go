@@ -13,6 +13,8 @@ import (
 	tenantstore "credo/internal/tenant/store/tenant"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	auditpublisher "credo/pkg/platform/audit/publisher"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 )
 
 // ServiceSuite provides shared test setup for tenant service tests.
@@ -26,7 +28,13 @@ type ServiceSuite struct {
 func (s *ServiceSuite) SetupTest() {
 	s.tenantStore = tenantstore.NewInMemory()
 	s.clientStore = clientstore.NewInMemory()
-	svc, err := New(s.tenantStore, s.clientStore, nil)
+	auditStore := auditmemory.NewInMemoryStore()
+	svc, err := New(
+		s.tenantStore,
+		s.clientStore,
+		nil,
+		WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
+	)
 	s.Require().NoError(err)
 	s.service = svc
 }

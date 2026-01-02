@@ -655,23 +655,37 @@ func buildTenantModule(infra *infraBundle) (*tenantModule, error) {
 	var tenants tenantService.TenantStore
 	var clients tenantService.ClientStore
 	var userCounter tenantService.UserCounter
+	var auditSt audit.Store
+	var opts []tenantService.Option
 
 	if infra.DBPool != nil {
 		tenants = tenantstore.NewPostgres(infra.DBPool.DB())
 		clients = clientstore.NewPostgres(infra.DBPool.DB())
 		userCounter = userStore.NewPostgres(infra.DBPool.DB())
+		auditSt = auditpostgres.New(infra.DBPool.DB())
+		opts = append(opts, tenantService.WithTx(newTenantPostgresTx(infra.DBPool.DB())))
 	} else {
 		infra.Log.Warn("no database connection, using in-memory tenant stores")
 		tenants = tenantstore.NewInMemory()
 		clients = clientstore.NewInMemory()
 		userCounter = nil // user counting not available without database
+		auditSt = auditmemory.NewInMemoryStore()
 	}
+
+	opts = append(opts,
+		tenantService.WithMetrics(infra.TenantMetrics),
+		tenantService.WithAuditPublisher(auditpublisher.NewPublisher(
+			auditSt,
+			auditpublisher.WithMetrics(infra.AuditMetrics),
+			auditpublisher.WithPublisherLogger(infra.Log),
+		)),
+	)
 
 	service, err := tenantService.New(
 		tenants,
 		clients,
 		userCounter,
-		tenantService.WithMetrics(infra.TenantMetrics),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tenant service: %w", err)

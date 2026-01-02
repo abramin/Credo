@@ -9,6 +9,7 @@ import (
 
 	id "credo/pkg/domain"
 	audit "credo/pkg/platform/audit"
+	txcontext "credo/pkg/platform/tx"
 
 	"github.com/google/uuid"
 )
@@ -23,6 +24,17 @@ type Store struct {
 // New creates a new PostgreSQL audit store that writes to the outbox.
 func New(db *sql.DB) *Store {
 	return &Store{db: db}
+}
+
+type dbExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func (s *Store) execer(ctx context.Context) dbExecutor {
+	if tx, ok := txcontext.From(ctx); ok {
+		return tx
+	}
+	return s.db
 }
 
 // outboxPayload is the JSON structure published to Kafka.
@@ -86,7 +98,7 @@ func (s *Store) Append(ctx context.Context, event audit.Event) error {
 		INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = s.execer(ctx).ExecContext(ctx, query,
 		uuid.New(), // outbox entry ID
 		aggregateType,
 		aggregateID,

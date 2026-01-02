@@ -20,6 +20,7 @@ type TenantService struct {
 	tenants      TenantStore
 	auditEmitter *auditEmitter
 	metrics      *tenantmetrics.Metrics
+	tx           StoreTx
 }
 
 func NewTenantService(tenants TenantStore, opts ...Option) *TenantService {
@@ -27,31 +28,46 @@ func NewTenantService(tenants TenantStore, opts ...Option) *TenantService {
 	for _, opt := range opts {
 		opt(cfg)
 	}
+	tx := cfg.tx
+	if tx == nil {
+		tx = newInMemoryStoreTx()
+	}
 	return &TenantService{
 		tenants:      tenants,
 		auditEmitter: newAuditEmitter(cfg.logger, cfg.auditPublisher),
 		metrics:      cfg.metrics,
+		tx:           tx,
 	}
 }
 
 func (s *TenantService) CreateTenant(ctx context.Context, name string) (*models.Tenant, error) {
 	name = strings.TrimSpace(name)
 
-	t, err := models.NewTenant(id.TenantID(uuid.New()), name, requestcontext.Now(ctx))
+	var tenant *models.Tenant
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		t, err := models.NewTenant(id.TenantID(uuid.New()), name, requestcontext.Now(txCtx))
+		if err != nil {
+			return err
+		}
+
+		if err := s.tenants.CreateIfNameAvailable(txCtx, t); err != nil {
+			if errors.Is(err, sentinel.ErrAlreadyUsed) || dErrors.HasCode(err, dErrors.CodeConflict) {
+				return dErrors.New(dErrors.CodeConflict, "tenant name must be unique")
+			}
+			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create tenant")
+		}
+		if err := s.auditEmitter.emitTenantCreated(txCtx, models.TenantCreated{TenantID: t.ID}); err != nil {
+			return err
+		}
+		tenant = t
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.tenants.CreateIfNameAvailable(ctx, t); err != nil {
-		if errors.Is(err, sentinel.ErrAlreadyUsed) || dErrors.HasCode(err, dErrors.CodeConflict) {
-			return nil, dErrors.New(dErrors.CodeConflict, "tenant name must be unique")
-		}
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to create tenant")
-	}
-	s.auditEmitter.emitTenantCreated(ctx, models.TenantCreated{TenantID: t.ID})
 	s.incrementTenantCreated()
-
-	return t, nil
+	return tenant, nil
 }
 
 func (s *TenantService) GetTenant(ctx context.Context, tenantID id.TenantID) (*models.Tenant, error) {
@@ -71,23 +87,34 @@ func (s *TenantService) DeactivateTenant(ctx context.Context, tenantID id.Tenant
 	if err := requireTenantID(tenantID); err != nil {
 		return nil, err
 	}
-	tenant, err := s.tenants.FindByID(ctx, tenantID)
-	if err != nil {
-		return nil, wrapTenantErr(err, "failed to load tenant")
-	}
-
-	if err := tenant.Deactivate(requestcontext.Now(ctx)); err != nil {
-		if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-			return nil, dErrors.New(dErrors.CodeConflict, "tenant is already inactive")
+	var tenant *models.Tenant
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		t, err := s.tenants.FindByID(txCtx, tenantID)
+		if err != nil {
+			return wrapTenantErr(err, "failed to load tenant")
 		}
+
+		if err := t.Deactivate(requestcontext.Now(txCtx)); err != nil {
+			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+				return dErrors.New(dErrors.CodeConflict, "tenant is already inactive")
+			}
+			return err
+		}
+
+		if err := s.tenants.Update(txCtx, t); err != nil {
+			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
+		}
+
+		if err := s.auditEmitter.emitTenantDeactivated(txCtx, models.TenantDeactivated{TenantID: t.ID}); err != nil {
+			return err
+		}
+
+		tenant = t
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	if err := s.tenants.Update(ctx, tenant); err != nil {
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
-	}
-
-	s.auditEmitter.emitTenantDeactivated(ctx, models.TenantDeactivated{TenantID: tenant.ID})
 
 	return tenant, nil
 }
@@ -98,23 +125,34 @@ func (s *TenantService) ReactivateTenant(ctx context.Context, tenantID id.Tenant
 	if err := requireTenantID(tenantID); err != nil {
 		return nil, err
 	}
-	tenant, err := s.tenants.FindByID(ctx, tenantID)
-	if err != nil {
-		return nil, wrapTenantErr(err, "failed to load tenant")
-	}
-
-	if err := tenant.Reactivate(requestcontext.Now(ctx)); err != nil {
-		if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-			return nil, dErrors.New(dErrors.CodeConflict, "tenant is already active")
+	var tenant *models.Tenant
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		t, err := s.tenants.FindByID(txCtx, tenantID)
+		if err != nil {
+			return wrapTenantErr(err, "failed to load tenant")
 		}
+
+		if err := t.Reactivate(requestcontext.Now(txCtx)); err != nil {
+			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+				return dErrors.New(dErrors.CodeConflict, "tenant is already active")
+			}
+			return err
+		}
+
+		if err := s.tenants.Update(txCtx, t); err != nil {
+			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
+		}
+
+		if err := s.auditEmitter.emitTenantReactivated(txCtx, models.TenantReactivated{TenantID: t.ID}); err != nil {
+			return err
+		}
+
+		tenant = t
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	if err := s.tenants.Update(ctx, tenant); err != nil {
-		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
-	}
-
-	s.auditEmitter.emitTenantReactivated(ctx, models.TenantReactivated{TenantID: tenant.ID})
 
 	return tenant, nil
 }

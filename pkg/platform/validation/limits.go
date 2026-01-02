@@ -45,6 +45,9 @@ const (
 	// MaxClientIDLength is the maximum length of a client ID.
 	MaxClientIDLength = 100
 
+	// MaxTenantIDLength is the maximum length of a tenant ID.
+	MaxTenantIDLength = 100
+
 	// MaxStateLength is the maximum length of an OAuth state parameter.
 	MaxStateLength = 500
 

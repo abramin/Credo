@@ -14,6 +14,8 @@ import (
 	"credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
+	auditpublisher "credo/pkg/platform/audit/publisher"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 	adminmw "credo/pkg/platform/middleware/admin"
 )
 
@@ -27,7 +29,13 @@ type HandlerSuite struct {
 func (s *HandlerSuite) SetupTest() {
 	tenants := tenantstore.NewInMemory()
 	clients := clientstore.NewInMemory()
-	svc, err := service.New(tenants, clients, nil)
+	auditStore := auditmemory.NewInMemoryStore()
+	svc, err := service.New(
+		tenants,
+		clients,
+		nil,
+		service.WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
+	)
 	s.Require().NoError(err)
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 

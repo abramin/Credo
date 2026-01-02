@@ -15,6 +15,8 @@ import (
 // HTTP Request DTOs - contain JSON tags for API serialization.
 // These are converted to service commands before processing.
 
+const maxNameLength = 128
+
 type CreateTenantRequest struct {
 	Name string `json:"name"`
 }
@@ -30,6 +32,9 @@ func (r *CreateTenantRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request is required")
 	}
+	if err := validation.CheckStringLength("name", r.Name, maxNameLength); err != nil {
+		return err
+	}
 	if r.Name == "" {
 		return dErrors.New(dErrors.CodeValidation, "name is required")
 	}
@@ -43,6 +48,8 @@ type CreateClientRequest struct {
 	AllowedGrants []string `json:"allowed_grants"`
 	AllowedScopes []string `json:"allowed_scopes"`
 	Public        bool     `json:"public_client"`
+
+	tenantID id.TenantID
 }
 
 // Normalize trims input and deduplicates collections for stable validation/storage.
@@ -50,6 +57,7 @@ func (r *CreateClientRequest) Normalize() {
 	if r == nil {
 		return
 	}
+	r.TenantID = strings.TrimSpace(r.TenantID)
 	r.Name = strings.TrimSpace(r.Name)
 	r.RedirectURIs = strutil.DedupeAndTrim(r.RedirectURIs)
 	r.AllowedGrants = strutil.DedupeAndTrimLower(r.AllowedGrants)
@@ -64,6 +72,12 @@ func (r *CreateClientRequest) Validate() error {
 	}
 
 	// Phase 1: Size validation (fail fast on oversized input)
+	if err := validation.CheckStringLength("tenant_id", r.TenantID, validation.MaxTenantIDLength); err != nil {
+		return err
+	}
+	if err := validation.CheckStringLength("name", r.Name, maxNameLength); err != nil {
+		return err
+	}
 	if err := validation.CheckSliceCount("redirect URIs", len(r.RedirectURIs), validation.MaxRedirectURIs); err != nil {
 		return err
 	}
@@ -81,6 +95,9 @@ func (r *CreateClientRequest) Validate() error {
 	}
 
 	// Phase 2: Required fields
+	if r.TenantID == "" {
+		return dErrors.New(dErrors.CodeValidation, "tenant_id is required")
+	}
 	if r.Name == "" {
 		return dErrors.New(dErrors.CodeValidation, "name is required")
 	}
@@ -89,6 +106,11 @@ func (r *CreateClientRequest) Validate() error {
 	}
 
 	// Phase 3: Syntax validation (format checks)
+	tenantID, err := id.ParseTenantID(r.TenantID)
+	if err != nil {
+		return dErrors.New(dErrors.CodeValidation, "invalid tenant_id")
+	}
+	r.tenantID = tenantID
 	for _, uri := range r.RedirectURIs {
 		if _, err := url.Parse(uri); err != nil {
 			return dErrors.New(dErrors.CodeValidation, "invalid redirect_uri format")
@@ -101,9 +123,13 @@ func (r *CreateClientRequest) Validate() error {
 // ToCommand converts the HTTP request to a service command.
 // Returns an error if the tenant ID is invalid.
 func (r *CreateClientRequest) ToCommand() (*service.CreateClientCommand, error) {
-	tenantID, err := id.ParseTenantID(r.TenantID)
-	if err != nil {
-		return nil, err
+	tenantID := r.tenantID
+	if tenantID.IsNil() {
+		parsed, err := id.ParseTenantID(r.TenantID)
+		if err != nil {
+			return nil, err
+		}
+		tenantID = parsed
 	}
 
 	grants := make([]models.GrantType, len(r.AllowedGrants))
@@ -147,6 +173,11 @@ func (r *UpdateClientRequest) Validate() error {
 	}
 
 	// Phase 1: Size validation (fail fast on oversized input)
+	if r.Name != nil {
+		if err := validation.CheckStringLength("name", *r.Name, maxNameLength); err != nil {
+			return err
+		}
+	}
 	if r.RedirectURIs != nil {
 		if err := validation.CheckSliceCount("redirect URIs", len(*r.RedirectURIs), validation.MaxRedirectURIs); err != nil {
 			return err
