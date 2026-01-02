@@ -15,129 +15,155 @@ import (
 
 // AGENTS.MD JUSTIFICATION: Session store invariants (not-found, revocation, monotonic timestamps)
 // are exercised here because feature tests do not cover in-memory persistence semantics.
-type InMemorySessionStoreSuite struct {
+type SessionStoreSuite struct {
 	suite.Suite
 	store *InMemorySessionStore
 }
 
-func (s *InMemorySessionStoreSuite) SetupTest() {
+func (s *SessionStoreSuite) SetupTest() {
 	s.store = New()
 }
 
-func (s *InMemorySessionStoreSuite) TestSessionStore_PersistAndLookup() {
-	session := &models.Session{
-		ID:             id.SessionID(uuid.New()),
-		UserID:         id.UserID(uuid.New()),
-		RequestedScope: []string{"openid"},
-		Status:         models.SessionStatusPendingConsent,
-		CreatedAt:      time.Now(),
-		ExpiresAt:      time.Now().Add(time.Hour),
-	}
-
-	err := s.store.Create(context.Background(), session)
-	s.Require().NoError(err)
-
-	foundByID, err := s.store.FindByID(context.Background(), session.ID)
-	s.Require().NoError(err)
-	s.Equal(session, foundByID)
-
+func TestSessionStoreSuite(t *testing.T) {
+	suite.Run(t, new(SessionStoreSuite))
 }
 
-func (s *InMemorySessionStoreSuite) TestSessionStore_NotFound() {
-	_, err := s.store.FindByID(context.Background(), id.SessionID(uuid.New()))
-	s.Require().ErrorIs(err, sentinel.ErrNotFound)
+// TestSessionLookup tests session retrieval behavior.
+func (s *SessionStoreSuite) TestSessionLookup() {
+	s.Run("returns stored session when found", func() {
+		store := New()
+		session := &models.Session{
+			ID:             id.SessionID(uuid.New()),
+			UserID:         id.UserID(uuid.New()),
+			RequestedScope: []string{"openid"},
+			Status:         models.SessionStatusPendingConsent,
+			CreatedAt:      time.Now(),
+			ExpiresAt:      time.Now().Add(time.Hour),
+		}
+
+		err := store.Create(context.Background(), session)
+		s.Require().NoError(err)
+
+		foundByID, err := store.FindByID(context.Background(), session.ID)
+		s.Require().NoError(err)
+		s.Equal(session, foundByID)
+	})
+
+	s.Run("returns ErrNotFound when session does not exist", func() {
+		_, err := s.store.FindByID(context.Background(), id.SessionID(uuid.New()))
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
+	})
 }
 
-func (s *InMemorySessionStoreSuite) TestSessionStore_UpdateStatus() {
-	session := &models.Session{
-		ID:             id.SessionID(uuid.New()),
-		UserID:         id.UserID(uuid.New()),
-		RequestedScope: []string{"openid"},
-		Status:         models.SessionStatusPendingConsent,
-		CreatedAt:      time.Now(),
-		ExpiresAt:      time.Now().Add(time.Hour),
-	}
+// TestSessionStatusTransitions tests session status update behavior.
+func (s *SessionStoreSuite) TestSessionStatusTransitions() {
+	s.Run("updates session status successfully", func() {
+		store := New()
+		session := &models.Session{
+			ID:             id.SessionID(uuid.New()),
+			UserID:         id.UserID(uuid.New()),
+			RequestedScope: []string{"openid"},
+			Status:         models.SessionStatusPendingConsent,
+			CreatedAt:      time.Now(),
+			ExpiresAt:      time.Now().Add(time.Hour),
+		}
 
-	// Create initial session
-	err := s.store.Create(context.Background(), session)
-	s.Require().NoError(err)
+		err := store.Create(context.Background(), session)
+		s.Require().NoError(err)
 
-	// Update session status
-	session.Status = models.SessionStatusActive
-	err = s.store.UpdateSession(context.Background(), session)
-	s.Require().NoError(err)
+		session.Status = models.SessionStatusActive
+		err = store.UpdateSession(context.Background(), session)
+		s.Require().NoError(err)
 
-	// Verify the update
-	found, err := s.store.FindByID(context.Background(), session.ID)
-	s.Require().NoError(err)
-	s.Equal(models.SessionStatusActive, found.Status)
+		found, err := store.FindByID(context.Background(), session.ID)
+		s.Require().NoError(err)
+		s.Equal(models.SessionStatusActive, found.Status)
+	})
+
+	s.Run("update on non-existent session returns ErrNotFound", func() {
+		session := &models.Session{
+			ID:             id.SessionID(uuid.New()),
+			UserID:         id.UserID(uuid.New()),
+			RequestedScope: []string{"openid"},
+			Status:         models.SessionStatusActive,
+			CreatedAt:      time.Now(),
+			ExpiresAt:      time.Now().Add(time.Hour),
+		}
+
+		err := s.store.UpdateSession(context.Background(), session)
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
+	})
 }
 
-func (s *InMemorySessionStoreSuite) TestSessionStore_UpdateMissing() {
-	session := &models.Session{
-		ID:             id.SessionID(uuid.New()),
-		UserID:         id.UserID(uuid.New()),
-		RequestedScope: []string{"openid"},
-		Status:         models.SessionStatusActive,
-		CreatedAt:      time.Now(),
-		ExpiresAt:      time.Now().Add(time.Hour),
-	}
+// TestSessionRevocation tests the revocation behavior and idempotency.
+func (s *SessionStoreSuite) TestSessionRevocation() {
+	s.Run("revokes active session and sets RevokedAt timestamp", func() {
+		store := New()
+		session := &models.Session{
+			ID:        id.SessionID(uuid.New()),
+			UserID:    id.UserID(uuid.New()),
+			Status:    models.SessionStatusActive,
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+		s.Require().NoError(store.Create(context.Background(), session))
 
-	err := s.store.UpdateSession(context.Background(), session)
-	s.Require().ErrorIs(err, sentinel.ErrNotFound)
+		err := store.RevokeSessionIfActive(context.Background(), session.ID, time.Now())
+		s.Require().NoError(err)
+
+		found, err := store.FindByID(context.Background(), session.ID)
+		s.Require().NoError(err)
+		s.Equal(models.SessionStatusRevoked, found.Status)
+		s.Require().NotNil(found.RevokedAt)
+	})
+
+	s.Run("revoking already-revoked session returns ErrSessionRevoked", func() {
+		store := New()
+		session := &models.Session{
+			ID:        id.SessionID(uuid.New()),
+			UserID:    id.UserID(uuid.New()),
+			Status:    models.SessionStatusActive,
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+		s.Require().NoError(store.Create(context.Background(), session))
+		s.Require().NoError(store.RevokeSessionIfActive(context.Background(), session.ID, time.Now()))
+
+		err := store.RevokeSessionIfActive(context.Background(), session.ID, time.Now())
+		s.Require().ErrorIs(err, ErrSessionRevoked)
+	})
+
+	s.Run("revoking non-existent session returns ErrNotFound", func() {
+		err := s.store.RevokeSessionIfActive(context.Background(), id.SessionID(uuid.New()), time.Now())
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
+	})
 }
 
-func (s *InMemorySessionStoreSuite) TestSessionStore_DeleteByUser() {
-	userID := id.UserID(uuid.New())
-	otherUserID := id.UserID(uuid.New())
-	matching := &models.Session{ID: id.SessionID(uuid.New()), UserID: userID}
-	other := &models.Session{ID: id.SessionID(uuid.New()), UserID: otherUserID}
+// TestSessionDeletionByUser tests bulk deletion for user cleanup (GDPR delete).
+func (s *SessionStoreSuite) TestSessionDeletionByUser() {
+	s.Run("deletes all sessions for user and leaves others intact", func() {
+		store := New()
+		userID := id.UserID(uuid.New())
+		otherUserID := id.UserID(uuid.New())
+		matching := &models.Session{ID: id.SessionID(uuid.New()), UserID: userID}
+		other := &models.Session{ID: id.SessionID(uuid.New()), UserID: otherUserID}
 
-	s.Require().NoError(s.store.Create(context.Background(), matching))
-	s.Require().NoError(s.store.Create(context.Background(), other))
+		s.Require().NoError(store.Create(context.Background(), matching))
+		s.Require().NoError(store.Create(context.Background(), other))
 
-	err := s.store.DeleteSessionsByUser(context.Background(), userID)
-	s.Require().NoError(err)
+		err := store.DeleteSessionsByUser(context.Background(), userID)
+		s.Require().NoError(err)
 
-	_, err = s.store.FindByID(context.Background(), matching.ID)
-	s.Require().ErrorIs(err, sentinel.ErrNotFound)
+		_, err = store.FindByID(context.Background(), matching.ID)
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
 
-	fetchedOther, err := s.store.FindByID(context.Background(), other.ID)
-	s.Require().NoError(err)
-	s.Equal(other, fetchedOther)
+		fetchedOther, err := store.FindByID(context.Background(), other.ID)
+		s.Require().NoError(err)
+		s.Equal(other, fetchedOther)
+	})
 
-	err = s.store.DeleteSessionsByUser(context.Background(), userID)
-	s.Require().ErrorIs(err, sentinel.ErrNotFound)
-}
-
-func (s *InMemorySessionStoreSuite) TestSessionStore_RevocationMarksStatus() {
-	session := &models.Session{
-		ID:        id.SessionID(uuid.New()),
-		UserID:    id.UserID(uuid.New()),
-		Status:    models.SessionStatusActive,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(time.Hour),
-	}
-
-	s.Require().NoError(s.store.Create(context.Background(), session))
-
-	err := s.store.RevokeSessionIfActive(context.Background(), session.ID, time.Now())
-	s.Require().NoError(err)
-
-	found, err := s.store.FindByID(context.Background(), session.ID)
-	s.Require().NoError(err)
-	s.Equal(models.SessionStatusRevoked, found.Status)
-	s.Require().NotNil(found.RevokedAt)
-
-	err = s.store.RevokeSessionIfActive(context.Background(), session.ID, time.Now())
-	s.Require().ErrorIs(err, ErrSessionRevoked)
-}
-
-func (s *InMemorySessionStoreSuite) TestSessionStore_RevocationMissing() {
-	err := s.store.RevokeSessionIfActive(context.Background(), id.SessionID(uuid.New()), time.Now())
-	s.Require().ErrorIs(err, sentinel.ErrNotFound)
-}
-
-func TestInMemorySessionStoreSuite(t *testing.T) {
-	suite.Run(t, new(InMemorySessionStoreSuite))
+	s.Run("deleting sessions for user with no sessions returns ErrNotFound", func() {
+		err := s.store.DeleteSessionsByUser(context.Background(), id.UserID(uuid.New()))
+		s.Require().ErrorIs(err, sentinel.ErrNotFound)
+	})
 }

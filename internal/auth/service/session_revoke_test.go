@@ -132,4 +132,40 @@ func (s *ServiceSuite) TestSessionRevocation_LogoutAll() {
 		s.Require().Error(err)
 		s.True(dErrors.HasCode(err, dErrors.CodeInternal))
 	})
+
+	s.Run("Given partial revocation failure When logout_all Then continues revoking and returns partial count", func() {
+		// Current session (excluded), session 1 will fail to revoke, session 2 will succeed
+		currentSession := &models.Session{
+			ID:     currentSessionID,
+			UserID: userID,
+			Status: models.SessionStatusActive,
+		}
+		failingSession := &models.Session{
+			ID:     id.SessionID(uuid.New()),
+			UserID: userID,
+			Status: models.SessionStatusActive,
+		}
+		succeedingSession := &models.Session{
+			ID:     id.SessionID(uuid.New()),
+			UserID: userID,
+			Status: models.SessionStatusActive,
+		}
+		allSessions := []*models.Session{currentSession, failingSession, succeedingSession}
+
+		s.mockSessionStore.EXPECT().ListByUser(gomock.Any(), userID).Return(allSessions, nil)
+		// First session fails to revoke
+		s.mockSessionStore.EXPECT().RevokeSessionIfActive(gomock.Any(), failingSession.ID, gomock.Any()).
+			Return(assert.AnError)
+		// Second session succeeds
+		s.mockSessionStore.EXPECT().RevokeSessionIfActive(gomock.Any(), succeedingSession.ID, gomock.Any()).
+			Return(nil)
+		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), succeedingSession.ID).Return(nil)
+		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+		result, err := s.service.LogoutAll(ctx, userID, currentSessionID, true)
+
+		// Should succeed with partial count (only 1 revoked, not 2)
+		s.Require().NoError(err)
+		s.Equal(1, result.RevokedCount)
+	})
 }
