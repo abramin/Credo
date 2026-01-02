@@ -227,8 +227,16 @@ func (s *HandlerIntegrationSuite) TestIdempotentInsert() {
 
 	consumer.Start()
 
-	// Wait for both messages to be processed
-	time.Sleep(3 * time.Second)
+	// Wait for at least one event to be processed
+	s.Eventually(func() bool {
+		events, _ := s.auditStore.ListRecent(ctx, 10)
+		for _, e := range events {
+			if e.Action == "idempotent_test" {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 100*time.Millisecond)
 
 	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
