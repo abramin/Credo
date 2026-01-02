@@ -25,10 +25,14 @@ type inMemoryConsentTx struct {
 	timeout time.Duration
 }
 
+// newInMemoryConsentTx constructs a mutex-backed transaction wrapper for in-memory stores.
+// It is intended for tests or demo mode and does not provide cross-process isolation.
 func newInMemoryConsentTx(store Store) *inMemoryConsentTx {
 	return &inMemoryConsentTx{store: store}
 }
 
+// RunInTx executes fn under a mutex and applies a timeout if none is set.
+// Side effects: blocks concurrent callers until fn completes.
 func (t *inMemoryConsentTx) RunInTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {

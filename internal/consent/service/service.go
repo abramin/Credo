@@ -137,6 +137,8 @@ func WithReGrantCooldown(cooldown time.Duration) Option {
 	}
 }
 
+// validatePurposes enforces that each purpose is a known enum value.
+// It maps invalid inputs to a domain bad-request error for handlers.
 func validatePurposes(purposes []models.Purpose) error {
 	for _, purpose := range purposes {
 		if !purpose.IsValid() {
@@ -146,6 +148,8 @@ func validatePurposes(purposes []models.Purpose) error {
 	return nil
 }
 
+// scopeForPurpose constructs a validated ConsentScope and maps invariant failures
+// to a domain bad-request error.
 func scopeForPurpose(userID id.UserID, purpose models.Purpose) (models.ConsentScope, error) {
 	scope, err := models.NewConsentScope(userID, purpose)
 	if err != nil {
@@ -154,11 +158,16 @@ func scopeForPurpose(userID id.UserID, purpose models.Purpose) (models.ConsentSc
 	return scope, nil
 }
 
+// withUserTx runs fn inside a consent transaction and tags the context with the
+// user ID for shard locking.
+// Side effects: acquires a lock or DB transaction and may apply a timeout.
 func (s *Service) withUserTx(ctx context.Context, userID id.UserID, fn func(ctx context.Context, store Store) error) error {
 	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
 	return s.tx.RunInTx(txCtx, fn)
 }
 
+// forEachScope applies fn to each purpose within a single transaction.
+// It stops on the first error to preserve atomicity.
 func (s *Service) forEachScope(
 	ctx context.Context,
 	userID id.UserID,
@@ -237,6 +246,8 @@ type grantUpdate struct {
 	wasActive bool
 }
 
+// evaluateGrant applies idempotency and re-grant cooldown rules to an existing record.
+// It returns a change descriptor without mutating storage.
 func (s *Service) evaluateGrant(existing *models.Record, now time.Time) (grantUpdate, error) {
 	update := grantUpdate{wasActive: existing.IsActive(now)}
 	if update.wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
@@ -257,6 +268,8 @@ func (s *Service) evaluateGrant(existing *models.Record, now time.Time) (grantUp
 	return update, nil
 }
 
+// tryRevokeScopeTx revokes consent for a single scope inside the store Execute lock.
+// It returns (nil, false, nil) when the record is missing or not revocable.
 func (s *Service) tryRevokeScopeTx(ctx context.Context, txStore Store, scope models.ConsentScope, now time.Time) (*models.Record, bool, error) {
 	var (
 		changed bool
@@ -298,6 +311,8 @@ func (s *Service) tryRevokeScopeTx(ctx context.Context, txStore Store, scope mod
 	return record, changed, nil
 }
 
+// upsertGrantTx applies grant rules to a single scope and persists changes atomically.
+// It retries on conflict to handle concurrent grant/create races.
 func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, scope models.ConsentScope) (*models.Record, *grantEffect, error) {
 	now := requestcontext.Now(ctx)
 	for attempt := 0; attempt < 2; attempt++ {
@@ -345,7 +360,8 @@ func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, scope models
 	return nil, nil, pkgerrors.New(pkgerrors.CodeConflict, "consent grant conflict")
 }
 
-// createGrantTx creates a new consent record.
+// createGrantTx creates and persists a new consent record for the scope.
+// Side effects: writes to the consent store and may return a conflict on races.
 func (s *Service) createGrantTx(ctx context.Context, txStore Store, scope models.ConsentScope, now time.Time) (*models.Record, error) {
 	expiry := now.Add(s.consentTTL)
 	record, err := models.NewRecord(
@@ -574,6 +590,8 @@ func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.
 	return nil
 }
 
+// emitAudit publishes an audit event and logs any persistence failures.
+// Side effects: write to audit store, logging on failure, and request ID enrichment.
 func (s *Service) emitAudit(ctx context.Context, event audit.Event) {
 	if s.auditor == nil {
 		return
@@ -643,6 +661,7 @@ func (s *Service) observeRecordsPerUser(count float64) {
 	}
 }
 
+// logConsentCheck writes a structured log entry for consent checks when logging is enabled.
 func (s *Service) logConsentCheck(ctx context.Context, level slog.Level, msg string, userID id.UserID, purpose models.Purpose, state string) {
 	if s.logger == nil {
 		return
