@@ -3,10 +3,10 @@ package adapters
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 
 	"credo/internal/tenant/models"
+	"credo/pkg/platform/circuit"
 )
 
 // ClientResolver resolves client metadata and tenant ownership.
@@ -19,32 +19,38 @@ type ClientResolver interface {
 // client data if available, preventing cascade failures.
 type ResilientClientResolver struct {
 	delegate ClientResolver
-	cb       *circuitBreaker
+	cb       *circuit.Breaker
 	cache    *clientCache
 	logger   *slog.Logger
 }
 
 // ResilientClientResolverOption configures the resilient resolver.
-type ResilientClientResolverOption func(*ResilientClientResolver)
+type ResilientClientResolverOption func(*resolverConfig)
+
+type resolverConfig struct {
+	failureThreshold int
+	successThreshold int
+	cacheTTL         time.Duration
+}
 
 // WithFailureThreshold sets the number of consecutive failures to open the circuit.
 func WithFailureThreshold(n int) ResilientClientResolverOption {
-	return func(r *ResilientClientResolver) {
-		r.cb.failureThreshold = n
+	return func(c *resolverConfig) {
+		c.failureThreshold = n
 	}
 }
 
 // WithSuccessThreshold sets the number of consecutive successes to close the circuit.
 func WithSuccessThreshold(n int) ResilientClientResolverOption {
-	return func(r *ResilientClientResolver) {
-		r.cb.successThreshold = n
+	return func(c *resolverConfig) {
+		c.successThreshold = n
 	}
 }
 
 // WithCacheTTL sets the cache TTL for client data.
 func WithCacheTTL(ttl time.Duration) ResilientClientResolverOption {
-	return func(r *ResilientClientResolver) {
-		r.cache = newClientCache(ttl)
+	return func(c *resolverConfig) {
+		c.cacheTTL = ttl
 	}
 }
 
@@ -54,18 +60,29 @@ func NewResilientClientResolver(
 	logger *slog.Logger,
 	opts ...ResilientClientResolverOption,
 ) *ResilientClientResolver {
-	r := &ResilientClientResolver{
+	cfg := &resolverConfig{
+		failureThreshold: 5,
+		successThreshold: 3,
+		cacheTTL:         5 * time.Minute,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	var cbOpts []circuit.Option
+	if cfg.failureThreshold > 0 {
+		cbOpts = append(cbOpts, circuit.WithFailureThreshold(cfg.failureThreshold))
+	}
+	if cfg.successThreshold > 0 {
+		cbOpts = append(cbOpts, circuit.WithSuccessThreshold(cfg.successThreshold))
+	}
+
+	return &ResilientClientResolver{
 		delegate: delegate,
-		cb:       newCircuitBreaker("client_resolver"),
-		cache:    newClientCache(5 * time.Minute), // default 5 min TTL
+		cb:       circuit.New("client_resolver", cbOpts...),
+		cache:    newClientCache(cfg.cacheTTL),
 		logger:   logger,
 	}
-
-	for _, opt := range opts {
-		opt(r)
-	}
-
-	return r
 }
 
 // ResolveClient resolves a client with circuit breaker protection.
@@ -119,81 +136,6 @@ func (r *ResilientClientResolver) ResolveClient(ctx context.Context, clientID st
 
 	r.cache.Set(clientID, client, tenant)
 	return client, tenant, nil
-}
-
-// circuitBreaker tracks consecutive failures for fail-safe client resolution.
-type circuitBreaker struct {
-	mu               sync.Mutex
-	name             string
-	state            circuitState
-	failureCount     int
-	successCount     int
-	failureThreshold int
-	successThreshold int
-}
-
-type circuitState int
-
-const (
-	circuitClosed circuitState = iota
-	circuitOpen
-)
-
-// stateChange represents a circuit breaker state transition.
-type stateChange struct {
-	Opened bool
-	Closed bool
-}
-
-func newCircuitBreaker(name string) *circuitBreaker {
-	return &circuitBreaker{
-		name:             name,
-		state:            circuitClosed,
-		failureThreshold: 5,
-		successThreshold: 3,
-	}
-}
-
-func (c *circuitBreaker) IsOpen() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.state == circuitOpen
-}
-
-func (c *circuitBreaker) RecordFailure() (useFallback bool, change stateChange) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.failureCount++
-	c.successCount = 0
-	if c.state == circuitOpen {
-		return true, stateChange{}
-	}
-	if c.failureCount >= c.failureThreshold {
-		c.state = circuitOpen
-		return true, stateChange{Opened: true}
-	}
-	return false, stateChange{}
-}
-
-func (c *circuitBreaker) RecordSuccess() (usePrimary bool, change stateChange) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.state == circuitOpen {
-		c.successCount++
-		if c.successCount >= c.successThreshold {
-			c.state = circuitClosed
-			c.failureCount = 0
-			c.successCount = 0
-			return true, stateChange{Closed: true}
-		}
-		return false, stateChange{}
-	}
-	c.failureCount = 0
-	return true, stateChange{}
-}
-
-func (c *circuitBreaker) Name() string {
-	return c.name
 }
 
 // Ensure ResilientClientResolver implements the interface expected by auth service.
