@@ -72,6 +72,20 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: credo
+          POSTGRES_PASSWORD: credo_dev_password
+          POSTGRES_DB: credo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U credo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,6 +120,11 @@ jobs:
           timeout 10 bash -c 'until curl -f http://localhost:8082/health 2>/dev/null; do sleep 1; done' || true
           timeout 10 bash -c 'until curl -f http://localhost:8083/health 2>/dev/null; do sleep 1; done' || true
 
+      - name: Run database migrations
+        run: |
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          migrate -path migrations -database "postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable" up
+
       - name: Start backend server
         run: |
           ./bin/credo &
@@ -113,6 +132,7 @@ jobs:
         env:
           CREDO_ENV: demo
           PORT: 8080
+          DATABASE_URL: postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable
           REGULATED_MODE: "true"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns
@@ -182,6 +202,20 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: credo
+          POSTGRES_PASSWORD: credo_dev_password
+          POSTGRES_DB: credo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U credo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -216,6 +250,11 @@ jobs:
           timeout 10 bash -c 'until curl -f http://localhost:8082/health 2>/dev/null; do sleep 1; done' || true
           timeout 10 bash -c 'until curl -f http://localhost:8083/health 2>/dev/null; do sleep 1; done' || true
 
+      - name: Run database migrations
+        run: |
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          migrate -path migrations -database "postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable" up
+
       - name: Start backend server (unregulated mode)
         run: |
           ./bin/credo &
@@ -223,6 +262,7 @@ jobs:
         env:
           CREDO_ENV: demo
           PORT: 8080
+          DATABASE_URL: postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable
           REGULATED_MODE: "false"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns

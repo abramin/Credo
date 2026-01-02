@@ -605,12 +605,21 @@ func buildConsentModule(infra *infraBundle) (*consentModule, error) {
 }
 
 func buildTenantModule(infra *infraBundle) (*tenantModule, error) {
-	if infra.DBPool == nil {
-		return nil, fmt.Errorf("database connection required for tenant module")
+	var tenants tenantService.TenantStore
+	var clients tenantService.ClientStore
+	var userCounter tenantService.UserCounter
+
+	if infra.DBPool != nil {
+		tenants = tenantstore.NewPostgres(infra.DBPool.DB())
+		clients = clientstore.NewPostgres(infra.DBPool.DB())
+		userCounter = userStore.NewPostgres(infra.DBPool.DB())
+	} else {
+		infra.Log.Warn("no database connection, using in-memory tenant stores")
+		tenants = tenantstore.NewInMemory()
+		clients = clientstore.NewInMemory()
+		userCounter = nil // user counting not available without database
 	}
-	tenants := tenantstore.NewPostgres(infra.DBPool.DB())
-	clients := clientstore.NewPostgres(infra.DBPool.DB())
-	userCounter := userStore.NewPostgres(infra.DBPool.DB())
+
 	service, err := tenantService.New(
 		tenants,
 		clients,
