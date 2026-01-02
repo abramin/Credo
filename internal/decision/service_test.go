@@ -10,9 +10,14 @@ import (
 	vcmodels "credo/internal/evidence/vc/models"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/audit"
+	"credo/pkg/requestcontext"
 
 	"github.com/stretchr/testify/suite"
 )
+
+// referenceTime is a fixed time used for deterministic testing.
+// All age calculations are relative to this time.
+var referenceTime = time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 
 // RuleEvaluationSuite tests the decision rule evaluation logic.
 // These are integration tests that verify the rule chain produces correct outcomes.
@@ -91,8 +96,8 @@ func (s *RuleEvaluationSuite) TestAgeVerificationRuleChain() {
 	})
 
 	s.Run("underage fails after citizen check (Rule 3)", func() {
-		// Born 10 years ago = underage
-		dob := time.Now().AddDate(-10, 0, 0).Format("2006-01-02")
+		// Born 10 years before referenceTime = underage (deterministic)
+		dob := referenceTime.AddDate(-10, 0, 0).Format("2006-01-02")
 		s.registry.citizen = &registrycontracts.CitizenRecord{
 			Valid:       true,
 			DateOfBirth: dob,
@@ -100,7 +105,9 @@ func (s *RuleEvaluationSuite) TestAgeVerificationRuleChain() {
 		s.registry.sanctions = &registrycontracts.SanctionsRecord{Listed: false}
 		s.vc.credential = nil
 
-		result, err := s.service.Evaluate(context.Background(), EvaluateRequest{
+		// Inject fixed time for deterministic evaluation
+		ctx := requestcontext.WithTime(context.Background(), referenceTime)
+		result, err := s.service.Evaluate(ctx, EvaluateRequest{
 			UserID:     s.testUserID,
 			Purpose:    PurposeAgeVerification,
 			NationalID: s.testNatID,

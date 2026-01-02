@@ -129,11 +129,11 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateR
 	// Build decision input
 	input := s.buildInput(evidence, derived)
 
-	// Evaluate rules
-	outcome := s.evaluateRules(req.Purpose, input)
+	// Evaluate rules (pure domain logic)
+	outcome := EvaluateDecision(req.Purpose, input)
 
-	// Build result
-	result := s.buildResult(req.Purpose, outcome, evidence, derived, evalTime)
+	// Build result (pure domain logic)
+	result := BuildResult(req.Purpose, outcome, evidence, derived, evalTime)
 
 	// Emit audit event (fail-open for non-sanctions, fail-closed for sanctions)
 	if err := s.emitAudit(ctx, req, result, evalTime); err != nil {
@@ -150,112 +150,6 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateR
 
 func (s *Service) requireConsent(ctx context.Context, userID interface{ String() string }) error {
 	return s.consent.RequireConsent(ctx, userID.String(), consentPurpose)
-}
-
-// evaluateRules applies purpose-specific rules to produce an outcome.
-// This is the pure rule evaluation logic - no I/O, no side effects.
-func (s *Service) evaluateRules(purpose Purpose, input DecisionInput) DecisionOutcome {
-	switch purpose {
-	case PurposeAgeVerification:
-		return s.evaluateAgeVerification(input)
-	case PurposeSanctionsScreening:
-		return s.evaluateSanctionsScreening(input)
-	default:
-		return DecisionFail
-	}
-}
-
-func (s *Service) evaluateAgeVerification(input DecisionInput) DecisionOutcome {
-	// Rule 1: Sanctions check (hard fail) - compliance-critical
-	if input.IsSanctioned() {
-		return DecisionFail
-	}
-
-	// Rule 2: Citizen validity - identity baseline
-	if !input.IsCitizenValid() {
-		return DecisionFail
-	}
-
-	// Rule 3: Age requirement - purpose-specific
-	if !input.IsOfLegalAge() {
-		return DecisionFail
-	}
-
-	// Rule 4: Credential check (soft requirement for full pass)
-	if len(input.Credential) > 0 {
-		return DecisionPass
-	}
-
-	return DecisionPassWithConditions
-}
-
-func (s *Service) evaluateSanctionsScreening(input DecisionInput) DecisionOutcome {
-	if input.IsSanctioned() {
-		return DecisionFail
-	}
-	return DecisionPass
-}
-
-func (s *Service) buildResult(purpose Purpose, outcome DecisionOutcome, evidence *GatheredEvidence, derived DerivedIdentity, evalTime time.Time) *EvaluateResult {
-	result := &EvaluateResult{
-		Status:      outcome,
-		EvaluatedAt: evalTime,
-		Conditions:  []string{},
-		Evidence: EvidenceSummary{
-			SanctionsListed: evidence.Sanctions != nil && evidence.Sanctions.Listed,
-		},
-	}
-
-	// Set reason and conditions based on outcome and purpose
-	switch purpose {
-	case PurposeAgeVerification:
-		result = s.buildAgeVerificationResult(result, outcome, evidence, derived)
-	case PurposeSanctionsScreening:
-		result = s.buildSanctionsResult(result, outcome, evidence)
-	}
-
-	return result
-}
-
-func (s *Service) buildAgeVerificationResult(result *EvaluateResult, outcome DecisionOutcome, evidence *GatheredEvidence, derived DerivedIdentity) *EvaluateResult {
-	// Set evidence fields
-	if evidence.Citizen != nil {
-		valid := evidence.Citizen.Valid
-		result.Evidence.CitizenValid = &valid
-	}
-	over18 := derived.IsOver18
-	result.Evidence.IsOver18 = &over18
-	hasCred := evidence.Credential != nil
-	result.Evidence.HasCredential = &hasCred
-
-	// Set reason based on failure point
-	switch outcome {
-	case DecisionFail:
-		if evidence.Sanctions != nil && evidence.Sanctions.Listed {
-			result.Reason = ReasonSanctioned
-		} else if evidence.Citizen == nil || !evidence.Citizen.Valid {
-			result.Reason = ReasonInvalidCitizen
-		} else if !derived.IsOver18 {
-			result.Reason = ReasonUnderage
-		}
-	case DecisionPass:
-		result.Reason = ReasonAllChecksPassed
-	case DecisionPassWithConditions:
-		result.Reason = ReasonMissingCredential
-		result.Conditions = []string{"obtain_age_credential"}
-	}
-
-	return result
-}
-
-func (s *Service) buildSanctionsResult(result *EvaluateResult, outcome DecisionOutcome, evidence *GatheredEvidence) *EvaluateResult {
-	switch outcome {
-	case DecisionFail:
-		result.Reason = ReasonSanctioned
-	case DecisionPass:
-		result.Reason = ReasonNotSanctioned
-	}
-	return result
 }
 
 func (s *Service) deriveIdentity(userID interface{ String() string }, evidence *GatheredEvidence, evalTime time.Time) DerivedIdentity {
@@ -320,10 +214,6 @@ func (s *Service) emitAudit(ctx context.Context, req EvaluateRequest, result *Ev
 func hashSubjectID(subjectID string) string {
 	h := sha256.Sum256([]byte(subjectID))
 	return hex.EncodeToString(h[:])
-}
-
-func isSanctionsDecision(req EvaluateRequest, result *EvaluateResult) bool {
-	return result.Reason == ReasonSanctioned || req.Purpose == PurposeSanctionsScreening
 }
 
 func (s *Service) emitAuditFailClosed(ctx context.Context, event audit.Event, req EvaluateRequest) error {
