@@ -139,15 +139,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 			"ip", privacy.AnonymizeIP(ip),
 			"locked_until", record.LockedUntil,
 		)
-		return &models.AuthRateLimitResult{
-			RateLimitResult: models.RateLimitResult{
-				Allowed:    false,
-				ResetAt:    *record.LockedUntil,
-				RetryAfter: retryAfter,
-			},
-			RequiresCaptcha: record.RequiresCaptcha,
-			FailureCount:    record.FailureCount,
-		}, nil
+		return s.buildAuthResult(false, 0, 0, retryAfter, *record.LockedUntil, record), nil
 	}
 
 	// Check failure count against sliding window (FR-2b: "5 attempts/15 min")
@@ -155,15 +147,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 		// Block - too many attempts in window
 		resetAt := s.config.BackoffPolicy().ResetTime(record.LastFailureAt)
 		retryAfter := max(int(resetAt.Sub(now).Seconds()), 0)
-		return &models.AuthRateLimitResult{
-			RateLimitResult: models.RateLimitResult{
-				Allowed:    false,
-				ResetAt:    resetAt,
-				RetryAfter: retryAfter,
-			},
-			RequiresCaptcha: record.RequiresCaptcha,
-			FailureCount:    record.FailureCount,
-		}, nil
+		return s.buildAuthResult(false, 0, 0, retryAfter, resetAt, record), nil
 	}
 
 	// Apply progressive backoff (FR-2b: "250ms → 500ms → 1s")
@@ -171,17 +155,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	delay := s.GetProgressiveBackoff(record.FailureCount)
 	remaining := min(record.RemainingAttempts(s.config.AttemptsPerWindow), s.config.AttemptsPerWindow)
 
-	return &models.AuthRateLimitResult{
-		RateLimitResult: models.RateLimitResult{
-			Allowed:    true,
-			Limit:      s.config.AttemptsPerWindow,
-			Remaining:  remaining,
-			ResetAt:    now.Add(s.config.WindowDuration),
-			RetryAfter: int(delay.Milliseconds()),
-		},
-		RequiresCaptcha: record.RequiresCaptcha,
-		FailureCount:    record.FailureCount,
-	}, nil
+	return s.buildAuthResult(true, s.config.AttemptsPerWindow, remaining, int(delay.Milliseconds()), now.Add(s.config.WindowDuration), record), nil
 }
 
 // RecordFailure increments failure counters after a failed authentication attempt.
@@ -311,4 +285,19 @@ func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 // Implements exponential backoff: 250ms → 500ms → 1s (PRD-017 FR-2b).
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
 	return s.config.CalculateBackoff(failureCount)
+}
+
+// buildAuthResult constructs an AuthRateLimitResult with common fields from the lockout record.
+func (s *Service) buildAuthResult(allowed bool, limit, remaining, retryAfter int, resetAt time.Time, record *models.AuthLockout) *models.AuthRateLimitResult {
+	return &models.AuthRateLimitResult{
+		RateLimitResult: models.RateLimitResult{
+			Allowed:    allowed,
+			Limit:      limit,
+			Remaining:  remaining,
+			ResetAt:    resetAt,
+			RetryAfter: retryAfter,
+		},
+		RequiresCaptcha: record.RequiresCaptcha,
+		FailureCount:    record.FailureCount,
+	}
 }

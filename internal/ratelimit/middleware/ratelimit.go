@@ -303,28 +303,18 @@ func extractClientID(r *http.Request) (string, error) {
 
 	formClientID := r.PostFormValue("client_id")
 
-	// Both empty: no client_id
-	if queryClientID == "" && formClientID == "" {
+	switch {
+	case queryClientID == "" && formClientID == "":
 		return "", nil
-	}
-
-	// Only query has value
-	if formClientID == "" {
+	case formClientID == "":
+		return queryClientID, nil
+	case queryClientID == "":
+		return formClientID, nil
+	case queryClientID != formClientID:
+		return "", errConflictingClientID
+	default:
 		return queryClientID, nil
 	}
-
-	// Only form has value
-	if queryClientID == "" {
-		return formClientID, nil
-	}
-
-	// Both have values: must match
-	if queryClientID != formClientID {
-		return "", errConflictingClientID
-	}
-
-	// Both match: use query value (arbitrary choice, they're the same)
-	return queryClientID, nil
 }
 
 // ClientMiddleware provides per-OAuth-client rate limiting (PRD-017 FR-2c).
