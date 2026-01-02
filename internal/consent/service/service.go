@@ -32,8 +32,9 @@ type Store interface {
 	FindByScope(ctx context.Context, scope models.ConsentScope) (*models.Record, error)
 	ListByUser(ctx context.Context, userID id.UserID, filter *models.RecordFilter) ([]*models.Record, error)
 	Update(ctx context.Context, consent *models.Record) error
+	RevokeAllByUser(ctx context.Context, userID id.UserID, now time.Time) (int, error)
 	DeleteByUser(ctx context.Context, userID id.UserID) error
-	Execute(ctx context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record)) (*models.Record, error)
+	Execute(ctx context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record) bool) (*models.Record, error)
 }
 
 // Option configures Service during initialization.
@@ -161,13 +162,13 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 	// Wrap multi-purpose grant in transaction to ensure atomicity per AGENTS.md
 	// Add user ID to context for sharded locking
 	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
-	txErr := s.tx.RunInTx(txCtx, func(txStore Store) error {
+	txErr := s.tx.RunInTx(txCtx, func(txCtx context.Context, txStore Store) error {
 		for _, purpose := range purposes {
 			scope, err := models.NewConsentScope(userID, purpose)
 			if err != nil {
 				return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid consent scope")
 			}
-			record, effect, err := s.upsertGrantTx(ctx, txStore, scope)
+			record, effect, err := s.upsertGrantTx(txCtx, txStore, scope)
 			if err != nil {
 				return err
 			}
@@ -231,11 +232,12 @@ func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, scope models
 				changed = true
 				return nil
 			},
-			func(existing *models.Record) {
+			func(existing *models.Record) bool {
 				if !changed {
-					return
+					return false
 				}
 				*existing = updated
+				return true
 			},
 		)
 		if err == nil {
@@ -321,7 +323,7 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	// Wrap multi-purpose revoke in transaction to ensure atomicity
 	// Add user ID to context for sharded locking
 	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
-	txErr := s.tx.RunInTx(txCtx, func(txStore Store) error {
+	txErr := s.tx.RunInTx(txCtx, func(txCtx context.Context, txStore Store) error {
 		for _, purpose := range purposes {
 			scope, err := models.NewConsentScope(userID, purpose)
 			if err != nil {
@@ -331,7 +333,7 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 				changed bool
 				updated models.Record
 			)
-			record, err := txStore.Execute(ctx, scope,
+			record, err := txStore.Execute(txCtx, scope,
 				func(existing *models.Record) error {
 					// Guard: skip if not eligible for revocation (already revoked or expired)
 					if !existing.CanRevoke(now) {
@@ -347,11 +349,12 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 					changed = true
 					return nil
 				},
-				func(existing *models.Record) {
+				func(existing *models.Record) bool {
 					if !changed {
-						return
+						return false
 					}
 					*existing = updated
+					return true
 				},
 			)
 			if errors.Is(err, sentinel.ErrNotFound) {
@@ -407,58 +410,12 @@ func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) 
 	// Wrap bulk revoke in transaction to ensure atomicity
 	// Add user ID to context for sharded locking
 	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
-	txErr := s.tx.RunInTx(txCtx, func(txStore Store) error {
-		records, err := txStore.ListByUser(ctx, userID, nil)
+	txErr := s.tx.RunInTx(txCtx, func(txCtx context.Context, txStore Store) error {
+		count, err := txStore.RevokeAllByUser(txCtx, userID, now)
 		if err != nil {
-			return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to list consents for revocation")
+			return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consents")
 		}
-
-		for _, record := range records {
-			scope, err := models.NewConsentScope(userID, record.Purpose)
-			if err != nil {
-				return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid consent scope")
-			}
-			var (
-				changed bool
-				updated models.Record
-			)
-			_, err = txStore.Execute(ctx, scope,
-				func(existing *models.Record) error {
-					if !existing.CanRevoke(now) {
-						changed = false
-						return nil
-					}
-
-					var err error
-					updated, err = existing.RevokeAt(now)
-					if err != nil {
-						return err
-					}
-					changed = true
-					return nil
-				},
-				func(existing *models.Record) {
-					if !changed {
-						return
-					}
-					*existing = updated
-				},
-			)
-			if errors.Is(err, sentinel.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				var domainErr *pkgerrors.Error
-				if errors.As(err, &domainErr) {
-					return err
-				}
-				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consent")
-			}
-			if changed {
-				revokedCount++
-			}
-		}
-
+		revokedCount = count
 		return nil
 	})
 	if txErr != nil {

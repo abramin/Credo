@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"credo/internal/consent/models"
 	id "credo/pkg/domain"
@@ -126,8 +127,27 @@ func (s *PostgresStore) Update(ctx context.Context, consent *models.Record) erro
 	return updateConsent(ctx, s.execer(), consent)
 }
 
+func (s *PostgresStore) RevokeAllByUser(ctx context.Context, userID id.UserID, now time.Time) (int, error) {
+	query := `
+		UPDATE consents
+		SET revoked_at = $2
+		WHERE user_id = $1
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at >= $2)
+	`
+	res, err := s.execer().ExecContext(ctx, query, uuid.UUID(userID), now)
+	if err != nil {
+		return 0, fmt.Errorf("revoke all consents: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("revoke all consents rows: %w", err)
+	}
+	return int(rows), nil
+}
+
 // Execute atomically validates and mutates a consent record under lock.
-func (s *PostgresStore) Execute(ctx context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record)) (*models.Record, error) {
+func (s *PostgresStore) Execute(ctx context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record) bool) (*models.Record, error) {
 	if s.tx != nil {
 		return s.executeWithTx(ctx, s.tx, scope, validate, mutate)
 	}
@@ -151,7 +171,7 @@ func (s *PostgresStore) Execute(ctx context.Context, scope models.ConsentScope, 
 	return record, nil
 }
 
-func (s *PostgresStore) executeWithTx(ctx context.Context, tx *sql.Tx, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record)) (*models.Record, error) {
+func (s *PostgresStore) executeWithTx(ctx context.Context, tx *sql.Tx, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record) bool) (*models.Record, error) {
 	query := `
 		SELECT id, user_id, purpose, granted_at, expires_at, revoked_at
 		FROM consents
@@ -170,7 +190,10 @@ func (s *PostgresStore) executeWithTx(ctx context.Context, tx *sql.Tx, scope mod
 		return nil, err
 	}
 
-	mutate(record)
+	changed := mutate(record)
+	if !changed {
+		return record, nil
+	}
 	if err := updateConsent(ctx, tx, record); err != nil {
 		return nil, err
 	}

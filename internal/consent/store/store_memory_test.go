@@ -147,7 +147,10 @@ func (s *InMemoryStoreSuite) TestExecute() {
 		s.Require().NoError(err)
 		res, err := s.store.Execute(s.ctx, scope,
 			func(_ *models.Record) error { return nil },
-			func(existing *models.Record) { existing.RevokedAt = &revokeTime },
+			func(existing *models.Record) bool {
+				existing.RevokedAt = &revokeTime
+				return true
+			},
 		)
 		s.Require().NoError(err)
 		s.Assert().Equal(record.ID, res.ID)

@@ -21,7 +21,7 @@ func newConsentPostgresTx(db *sql.DB) *consentPostgresTx {
 	return &consentPostgresTx{db: db}
 }
 
-func (t *consentPostgresTx) RunInTx(ctx context.Context, fn func(store consentservice.Store) error) error {
+func (t *consentPostgresTx) RunInTx(ctx context.Context, fn func(ctx context.Context, store consentservice.Store) error) error {
 	if err := ctx.Err(); err != nil {
 		return dErrors.Wrap(err, dErrors.CodeTimeout, "transaction aborted: context cancelled")
 	}
@@ -44,7 +44,7 @@ func (t *consentPostgresTx) RunInTx(ctx context.Context, fn func(store consentse
 		_ = tx.Rollback()
 	}()
 
-	if err := fn(consentstore.NewPostgresTx(tx)); err != nil {
+	if err := fn(ctx, consentstore.NewPostgresTx(tx)); err != nil {
 		return err
 	}
 

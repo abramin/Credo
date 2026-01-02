@@ -27,7 +27,7 @@ var (
 // ConsentStoreTx provides a transactional boundary for consent store mutations.
 // Implementations may wrap a database transaction or, in-memory, a coarse lock.
 type ConsentStoreTx interface {
-	RunInTx(ctx context.Context, fn func(store Store) error) error
+	RunInTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error
 }
 
 // defaultConsentTxTimeout is the maximum duration for a consent transaction.
@@ -39,7 +39,7 @@ type shardedConsentTx struct {
 	timeout time.Duration
 }
 
-func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(store Store) error) error {
+func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(ctx context.Context, store Store) error) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return pkgerrors.Wrap(err, pkgerrors.CodeTimeout, "transaction aborted: context cancelled")
@@ -70,7 +70,7 @@ func (t *shardedConsentTx) RunInTx(ctx context.Context, fn func(store Store) err
 		return pkgerrors.Wrap(err, pkgerrors.CodeTimeout, "transaction aborted: context cancelled")
 	}
 
-	return fn(t.store)
+	return fn(ctx, t.store)
 }
 
 // shardKey picks a shard based on user ID from context, or defaults to shard 0.

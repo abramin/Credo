@@ -13,6 +13,7 @@ import (
 	context "context"
 	models "credo/internal/consent/models"
 	domain "credo/pkg/domain"
+	time "time"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -57,7 +58,7 @@ func (mr *MockStoreMockRecorder) DeleteByUser(ctx, userID any) *gomock.Call {
 }
 
 // Execute mocks base method.
-func (m *MockStore) Execute(ctx context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record)) (*models.Record, error) {
+func (m *MockStore) Execute(ctx context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record) bool) (*models.Record, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Execute", ctx, scope, validate, mutate)
 	ret0, _ := ret[0].(*models.Record)
@@ -101,6 +102,21 @@ func (mr *MockStoreMockRecorder) ListByUser(ctx, userID, filter any) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByUser", reflect.TypeOf((*MockStore)(nil).ListByUser), ctx, userID, filter)
 }
 
+
+// RevokeAllByUser mocks base method.
+func (m *MockStore) RevokeAllByUser(ctx context.Context, userID domain.UserID, now time.Time) (int, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RevokeAllByUser", ctx, userID, now)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RevokeAllByUser indicates an expected call of RevokeAllByUser.
+func (mr *MockStoreMockRecorder) RevokeAllByUser(ctx, userID, now any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RevokeAllByUser", reflect.TypeOf((*MockStore)(nil).RevokeAllByUser), ctx, userID, now)
+}
 // Save mocks base method.
 func (m *MockStore) Save(ctx context.Context, consent *models.Record) error {
 	m.ctrl.T.Helper()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"credo/internal/consent/models"
 	id "credo/pkg/domain"
@@ -98,6 +99,27 @@ func (s *InMemoryStore) Update(_ context.Context, consent *models.Record) error 
 	return nil
 }
 
+func (s *InMemoryStore) RevokeAllByUser(_ context.Context, userID id.UserID, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	records := s.consents[userID]
+	if records == nil {
+		return 0, nil
+	}
+	revokedCount := 0
+	for purpose, record := range records {
+		if !record.CanRevoke(now) {
+			continue
+		}
+		updated := *record
+		updated.RevokedAt = &now
+		records[purpose] = &updated
+		revokedCount++
+	}
+	s.consents[userID] = records
+	return revokedCount, nil
+}
+
 func (s *InMemoryStore) DeleteByUser(_ context.Context, userID id.UserID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -106,7 +128,7 @@ func (s *InMemoryStore) DeleteByUser(_ context.Context, userID id.UserID) error 
 }
 
 // Execute atomically validates and mutates a consent record under lock.
-func (s *InMemoryStore) Execute(_ context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record)) (*models.Record, error) {
+func (s *InMemoryStore) Execute(_ context.Context, scope models.ConsentScope, validate func(*models.Record) error, mutate func(*models.Record) bool) (*models.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records := s.consents[scope.UserID]
@@ -120,8 +142,10 @@ func (s *InMemoryStore) Execute(_ context.Context, scope models.ConsentScope, va
 		return nil, err
 	}
 
-	mutate(&copyRecord)
-	records[scope.Purpose] = &copyRecord
-	s.consents[scope.UserID] = records
+	changed := mutate(&copyRecord)
+	if changed {
+		records[scope.Purpose] = &copyRecord
+		s.consents[scope.UserID] = records
+	}
 	return &copyRecord, nil
 }
