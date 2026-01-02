@@ -86,7 +86,7 @@ type stubConsentPort struct {
 	err error
 }
 
-func (c *stubConsentPort) RequireConsent(_ context.Context, _, _ string) error {
+func (c *stubConsentPort) RequireConsent(_ context.Context, _ id.UserID, _ id.ConsentPurpose) error {
 	return c.err
 }
 

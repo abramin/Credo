@@ -201,7 +201,7 @@ func (s *Service) requireConsent(ctx context.Context, userID id.UserID) error {
 	if s.consentPort == nil {
 		return nil
 	}
-	return s.consentPort.RequireConsent(ctx, userID.String(), "registry_check")
+	return s.consentPort.RequireConsent(ctx, userID, id.ConsentPurposeRegistryCheck)
 }
 
 // checkCache retrieves cached citizen and sanctions records.

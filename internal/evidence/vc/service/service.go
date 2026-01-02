@@ -185,7 +185,7 @@ func (s *Service) Verify(ctx context.Context, credentialID models.CredentialID) 
 	return result, nil
 }
 
-const vcIssuancePurpose = "vc_issuance"
+const vcIssuancePurpose id.ConsentPurpose = id.ConsentPurposeVCIssuance
 
 func (s *Service) requireVCIssuanceConsent(ctx context.Context, userID id.UserID) error {
 	if s.consentPort == nil {

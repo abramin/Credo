@@ -372,14 +372,14 @@ type mockConsentPort struct {
 	err        error
 }
 
-func (m *mockConsentPort) HasConsent(ctx context.Context, userID string, purpose string) (bool, error) {
+func (m *mockConsentPort) HasConsent(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) (bool, error) {
 	if m.err != nil {
 		return false, m.err
 	}
 	return m.hasConsent, nil
 }
 
-func (m *mockConsentPort) RequireConsent(ctx context.Context, userID string, purpose string) error {
+func (m *mockConsentPort) RequireConsent(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) error {
 	return m.err
 }
 

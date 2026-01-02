@@ -10,6 +10,7 @@ import (
 	registrycontracts "credo/contracts/registry"
 	"credo/internal/decision/metrics"
 	"credo/internal/decision/ports"
+	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	"credo/pkg/requestcontext"
@@ -20,7 +21,7 @@ const (
 	evidenceTimeout = 5 * time.Second
 
 	// consentPurpose is the consent purpose required for decision evaluation.
-	consentPurpose = "decision_evaluation"
+	consentPurpose id.ConsentPurpose = id.ConsentPurposeDecision
 )
 
 type AuditPublisher interface {
@@ -148,11 +149,11 @@ func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateR
 	return result, nil
 }
 
-func (s *Service) requireConsent(ctx context.Context, userID interface{ String() string }) error {
-	return s.consent.RequireConsent(ctx, userID.String(), consentPurpose)
+func (s *Service) requireConsent(ctx context.Context, userID id.UserID) error {
+	return s.consent.RequireConsent(ctx, userID, consentPurpose)
 }
 
-func (s *Service) deriveIdentity(userID interface{ String() string }, evidence *GatheredEvidence, evalTime time.Time) DerivedIdentity {
+func (s *Service) deriveIdentity(userID id.UserID, evidence *GatheredEvidence, evalTime time.Time) DerivedIdentity {
 	derived := DerivedIdentity{}
 
 	if evidence.Citizen != nil {
@@ -191,13 +192,13 @@ func (s *Service) buildInput(evidence *GatheredEvidence, derived DerivedIdentity
 func (s *Service) emitAudit(ctx context.Context, req EvaluateRequest, result *EvaluateResult, evalTime time.Time) error {
 	event := audit.Event{
 		Category:      audit.EventDecisionMade.Category(),
-		Timestamp:    evalTime,
-		UserID:       req.UserID,
-		Action:       string(audit.EventDecisionMade),
-		Purpose:      string(req.Purpose),
-		Decision:     string(result.Status),
-		Reason:       string(result.Reason),
-		RequestID:    requestcontext.RequestID(ctx),
+		Timestamp:     evalTime,
+		UserID:        req.UserID,
+		Action:        string(audit.EventDecisionMade),
+		Purpose:       string(req.Purpose),
+		Decision:      string(result.Status),
+		Reason:        string(result.Reason),
+		RequestID:     requestcontext.RequestID(ctx),
 		SubjectIDHash: hashSubjectID(req.NationalID.String()),
 	}
 
