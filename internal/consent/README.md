@@ -342,7 +342,7 @@ CREATE INDEX idx_consents_purpose ON consents (purpose);
 | `Require()` | `WHERE user_id = $1 AND purpose = $2` | `idx_consents_user_purpose` |
 | `FindByUserAndPurpose()` | `WHERE user_id = $1 AND purpose = $2` | `idx_consents_user_purpose` |
 | `ListByUser()` | `WHERE user_id = $1` | `idx_consents_user_id` |
-| `RevokeAllByUser()` | `WHERE user_id = $1 AND revoked_at IS NULL` | `idx_consents_user_purpose` |
+| `Execute()` | `WHERE user_id = $1 AND purpose = $2 FOR UPDATE` | `idx_consents_user_purpose` |
 
 ### Performance Considerations
 

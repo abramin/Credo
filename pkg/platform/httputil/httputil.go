@@ -31,7 +31,7 @@ func WriteError(w http.ResponseWriter, err error) {
 		response := map[string]string{
 			"error": code,
 		}
-		if domainErr.Message != "" {
+		if domainErr.Message != "" && domainErr.Code != dErrors.CodeInternal {
 			response["error_description"] = domainErr.Message
 		}
 		WriteJSON(w, status, response)

@@ -24,15 +24,16 @@ import (
 // Store defines the persistence interface for consent records.
 // Error Contract:
 // - FindByUserAndPurpose returns store.ErrNotFound when no record exists
+// - Save returns store.ErrConflict when a record already exists
+// - Execute returns store.ErrNotFound when no record exists
 // - Other methods return nil on success or wrapped errors on failure
 type Store interface {
 	Save(ctx context.Context, consent *models.Record) error
 	FindByUserAndPurpose(ctx context.Context, userID id.UserID, purpose models.Purpose) (*models.Record, error)
 	ListByUser(ctx context.Context, userID id.UserID, filter *models.RecordFilter) ([]*models.Record, error)
 	Update(ctx context.Context, consent *models.Record) error
-	RevokeByUserAndPurpose(ctx context.Context, userID id.UserID, purpose models.Purpose, revokedAt time.Time) (*models.Record, error)
-	RevokeAllByUser(ctx context.Context, userID id.UserID, revokedAt time.Time) (int, error)
 	DeleteByUser(ctx context.Context, userID id.UserID) error
+	Execute(ctx context.Context, userID id.UserID, purpose models.Purpose, validate func(*models.Record) error, mutate func(*models.Record)) (*models.Record, error)
 }
 
 // Option configures Service during initialization.
@@ -149,7 +150,7 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 	}
 	for _, purpose := range purposes {
 		if !purpose.IsValid() {
-			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, fmt.Sprintf("invalid purpose: %s", purpose))
+			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
 		}
 	}
 
@@ -176,49 +177,74 @@ func (s *Service) Grant(ctx context.Context, userID id.UserID, purposes []models
 
 func (s *Service) upsertGrantTx(ctx context.Context, txStore Store, userID id.UserID, purpose models.Purpose) (*models.Record, error) {
 	now := requestcontext.Now(ctx)
-	existing, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
-	if err != nil && !errors.Is(err, sentinel.ErrNotFound) {
-		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to read consent")
+	for attempt := 0; attempt < 2; attempt++ {
+		var (
+			wasActive bool
+			changed   bool
+			updated   models.Record
+		)
+
+		record, err := txStore.Execute(ctx, userID, purpose,
+			func(existing *models.Record) error {
+				wasActive = existing.IsActive(now)
+				if wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
+					changed = false
+					return nil
+				}
+
+				// Security: prevent rapid revoke→grant cycles
+				// If consent was recently revoked, enforce cooldown before allowing re-grant
+				if !existing.CanReGrant(now, s.reGrantCooldown) {
+					return pkgerrors.New(pkgerrors.CodeBadRequest,
+						fmt.Sprintf("consent was recently revoked; please wait before re-granting (cooldown: %v)", s.reGrantCooldown))
+				}
+
+				var err error
+				updated, err = existing.RenewAt(now, s.consentTTL)
+				if err != nil {
+					return err
+				}
+				changed = true
+				return nil
+			},
+			func(existing *models.Record) {
+				if !changed {
+					return
+				}
+				*existing = updated
+			},
+		)
+		if err == nil {
+			if !changed {
+				return record, nil
+			}
+			s.emitGrantAudit(ctx, userID, record.Purpose, now)
+			s.incrementConsentsGranted(record.Purpose)
+			if !wasActive {
+				s.incrementActiveConsents(1)
+			}
+			return record, nil
+		}
+
+		if errors.Is(err, sentinel.ErrNotFound) {
+			record, err = s.createGrantTx(ctx, txStore, userID, purpose, now)
+			if err == nil {
+				return record, nil
+			}
+			if errors.Is(err, sentinel.ErrConflict) {
+				continue
+			}
+			return nil, err
+		}
+
+		var domainErr *pkgerrors.Error
+		if errors.As(err, &domainErr) {
+			return nil, err
+		}
+		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to update consent")
 	}
 
-	if existing != nil {
-		return s.renewGrantTx(ctx, txStore, userID, existing, now)
-	}
-	return s.createGrantTx(ctx, txStore, userID, purpose, now)
-}
-
-// renewGrantTx updates an existing consent record and emits audit/metrics.
-func (s *Service) renewGrantTx(ctx context.Context, txStore Store, userID id.UserID, existing *models.Record, now time.Time) (*models.Record, error) {
-	wasActive := existing.IsActive(now)
-
-	// Idempotent within configured window: skip update if recently granted
-	if wasActive && now.Sub(existing.GrantedAt) < s.grantIdempotencyWindow {
-		return existing, nil
-	}
-
-	// Security: prevent rapid revoke→grant cycles
-	// If consent was recently revoked, enforce cooldown before allowing re-grant
-	if !existing.CanReGrant(now, s.reGrantCooldown) {
-		return nil, pkgerrors.New(pkgerrors.CodeBadRequest,
-			fmt.Sprintf("consent was recently revoked; please wait before re-granting (cooldown: %v)", s.reGrantCooldown))
-	}
-
-	expiry := now.Add(s.consentTTL)
-	updated := *existing
-	updated.GrantedAt = now
-	updated.ExpiresAt = &expiry
-	updated.RevokedAt = nil
-
-	if err := txStore.Update(ctx, &updated); err != nil {
-		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to renew consent")
-	}
-
-	s.emitGrantAudit(ctx, userID, existing.Purpose, now)
-	s.incrementConsentsGranted(existing.Purpose)
-	if !wasActive {
-		s.incrementActiveConsents(1)
-	}
-	return &updated, nil
+	return nil, pkgerrors.New(pkgerrors.CodeConflict, "consent grant conflict")
 }
 
 // createGrantTx creates a new consent record and emits audit/metrics.
@@ -236,6 +262,9 @@ func (s *Service) createGrantTx(ctx context.Context, txStore Store, userID id.Us
 	}
 
 	if err := txStore.Save(ctx, record); err != nil {
+		if errors.Is(err, sentinel.ErrConflict) {
+			return nil, err
+		}
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to save consent")
 	}
 
@@ -266,7 +295,7 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	}
 	for _, purpose := range purposes {
 		if !purpose.IsValid() {
-			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, fmt.Sprintf("invalid purpose: %s", purpose))
+			return nil, pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
 		}
 	}
 
@@ -278,24 +307,49 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
 	txErr := s.tx.RunInTx(txCtx, func(txStore Store) error {
 		for _, purpose := range purposes {
-			record, err := txStore.FindByUserAndPurpose(ctx, userID, purpose)
+			var (
+				changed bool
+				updated models.Record
+			)
+			record, err := txStore.Execute(ctx, userID, purpose,
+				func(existing *models.Record) error {
+					// Guard: skip if not eligible for revocation (already revoked or expired)
+					if !existing.CanRevoke(now) {
+						changed = false
+						return nil
+					}
+
+					var err error
+					updated, err = existing.RevokeAt(now)
+					if err != nil {
+						return err
+					}
+					changed = true
+					return nil
+				},
+				func(existing *models.Record) {
+					if !changed {
+						return
+					}
+					*existing = updated
+				},
+			)
 			if errors.Is(err, sentinel.ErrNotFound) {
 				// Can't revoke what doesn't exist - skip silently
 				continue
 			}
 			if err != nil {
-				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to read consent")
+				var domainErr *pkgerrors.Error
+				if errors.As(err, &domainErr) {
+					return err
+				}
+				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consent")
 			}
 
-			// Guard: skip if not eligible for revocation (already revoked or expired)
-			if !record.CanRevoke(now) {
+			if !changed {
 				continue
 			}
 
-			revokedRecord, err := txStore.RevokeByUserAndPurpose(ctx, userID, record.Purpose, now)
-			if err != nil {
-				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consent")
-			}
 			s.emitAudit(ctx, audit.Event{
 				UserID:    userID,
 				Purpose:   string(record.Purpose),
@@ -306,7 +360,7 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 			})
 			s.incrementConsentsRevoked(record.Purpose)
 			s.decrementActiveConsents(1)
-			revoked = append(revoked, revokedRecord)
+			revoked = append(revoked, record)
 		}
 		return nil
 	})
@@ -326,12 +380,66 @@ func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) 
 		return 0, pkgerrors.New(pkgerrors.CodeBadRequest, "user ID required")
 	}
 	now := requestcontext.Now(ctx)
-	count, err := s.store.RevokeAllByUser(ctx, userID, now)
-	if err != nil {
-		return 0, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke all consents")
+	revokedCount := 0
+
+	// Wrap bulk revoke in transaction to ensure atomicity
+	// Add user ID to context for sharded locking
+	txCtx := context.WithValue(ctx, txUserKeyCtx, userID.String())
+	txErr := s.tx.RunInTx(txCtx, func(txStore Store) error {
+		records, err := txStore.ListByUser(ctx, userID, nil)
+		if err != nil {
+			return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to list consents for revocation")
+		}
+
+		for _, record := range records {
+			var (
+				changed bool
+				updated models.Record
+			)
+			_, err := txStore.Execute(ctx, userID, record.Purpose,
+				func(existing *models.Record) error {
+					if !existing.CanRevoke(now) {
+						changed = false
+						return nil
+					}
+
+					var err error
+					updated, err = existing.RevokeAt(now)
+					if err != nil {
+						return err
+					}
+					changed = true
+					return nil
+				},
+				func(existing *models.Record) {
+					if !changed {
+						return
+					}
+					*existing = updated
+				},
+			)
+			if errors.Is(err, sentinel.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				var domainErr *pkgerrors.Error
+				if errors.As(err, &domainErr) {
+					return err
+				}
+				return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to revoke consent")
+			}
+			if changed {
+				revokedCount++
+			}
+		}
+
+		return nil
+	})
+	if txErr != nil {
+		return 0, txErr
 	}
 
-	if count > 0 {
+	if revokedCount > 0 {
 		// Include admin actor ID for audit attribution if present
 		actorID := admin.GetAdminActorID(ctx)
 		s.emitAudit(ctx, audit.Event{
@@ -342,10 +450,10 @@ func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) 
 			Timestamp: now,
 			ActorID:   actorID,
 		})
-		s.decrementActiveConsents(float64(count))
+		s.decrementActiveConsents(float64(revokedCount))
 	}
 
-	return count, nil
+	return revokedCount, nil
 }
 
 // DeleteAll removes all consent records for a user.
@@ -379,15 +487,41 @@ func (s *Service) List(ctx context.Context, userID id.UserID, filter *models.Rec
 	if userID.IsNil() {
 		return nil, pkgerrors.New(pkgerrors.CodeUnauthorized, "user ID required")
 	}
-	records, err := s.store.ListByUser(ctx, userID, filter)
+	storeFilter := filter
+	if filter != nil && filter.Status != nil {
+		storeFilter = &models.RecordFilter{Purpose: filter.Purpose}
+	}
+	records, err := s.store.ListByUser(ctx, userID, storeFilter)
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to list consents")
+	}
+
+	if filter != nil && (filter.Purpose != nil || filter.Status != nil) {
+		records = filterRecords(records, filter, requestcontext.Now(ctx))
 	}
 
 	// Record distribution of records per user for performance monitoring
 	s.observeRecordsPerUser(float64(len(records)))
 
 	return records, nil
+}
+
+func filterRecords(records []*models.Record, filter *models.RecordFilter, now time.Time) []*models.Record {
+	if filter == nil {
+		return records
+	}
+
+	filtered := make([]*models.Record, 0, len(records))
+	for _, record := range records {
+		if filter.Purpose != nil && record.Purpose != *filter.Purpose {
+			continue
+		}
+		if filter.Status != nil && record.ComputeStatus(now) != *filter.Status {
+			continue
+		}
+		filtered = append(filtered, record)
+	}
+	return filtered
 }
 
 // Require enforces that a user has active consent for the given purpose.
@@ -397,7 +531,7 @@ func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.
 		return pkgerrors.New(pkgerrors.CodeUnauthorized, "user ID required")
 	}
 	if !purpose.IsValid() {
-		return pkgerrors.New(pkgerrors.CodeBadRequest, fmt.Sprintf("invalid purpose: %s", purpose))
+		return pkgerrors.New(pkgerrors.CodeBadRequest, "invalid purpose")
 	}
 
 	record, err := s.store.FindByUserAndPurpose(ctx, userID, purpose)
@@ -410,11 +544,11 @@ func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.
 	}
 
 	now := requestcontext.Now(ctx)
-	if record.RevokedAt != nil {
+	switch record.ComputeStatus(now) {
+	case models.StatusRevoked:
 		s.recordConsentCheckOutcome(ctx, userID, purpose, outcomeRevoked)
 		return pkgerrors.New(pkgerrors.CodeInvalidConsent, "consent revoked")
-	}
-	if record.ExpiresAt != nil && record.ExpiresAt.Before(now) {
+	case models.StatusExpired:
 		s.recordConsentCheckOutcome(ctx, userID, purpose, outcomeExpired)
 		return pkgerrors.New(pkgerrors.CodeInvalidConsent, "consent expired")
 	}

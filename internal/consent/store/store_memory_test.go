@@ -69,6 +69,22 @@ func (s *InMemoryStoreSuite) TestSaveAndFind() {
 		s.Require().ErrorIs(err, sentinel.ErrNotFound)
 		s.Assert().Nil(fetched)
 	})
+
+	s.Run("returns ErrConflict when saving duplicate purpose", func() {
+		now := time.Now()
+		expiry := now.Add(time.Hour)
+		userID := id.UserID(uuid.New())
+		record := &models.Record{
+			ID:        id.ConsentID(uuid.New()),
+			UserID:    userID,
+			Purpose:   models.PurposeLogin,
+			GrantedAt: now,
+			ExpiresAt: &expiry,
+		}
+
+		s.Require().NoError(s.store.Save(s.ctx, record))
+		s.Require().ErrorIs(s.store.Save(s.ctx, record), sentinel.ErrConflict)
+	})
 }
 
 // =============================================================================
@@ -102,12 +118,12 @@ func (s *InMemoryStoreSuite) TestUpdate() {
 }
 
 // =============================================================================
-// Revoke - State Transitions
+// Execute - Atomic Mutation
 // =============================================================================
 
-// TestRevoke verifies revocation sets RevokedAt timestamp.
-// Invariant: Revoked records must have RevokedAt set to the provided time.
-func (s *InMemoryStoreSuite) TestRevoke() {
+// TestExecute verifies Execute applies validated mutations under lock.
+// Invariant: Mutations should be persisted atomically.
+func (s *InMemoryStoreSuite) TestExecute() {
 	s.Run("sets RevokedAt on record", func() {
 		now := time.Now()
 		expiry := now.Add(time.Hour)
@@ -121,7 +137,10 @@ func (s *InMemoryStoreSuite) TestRevoke() {
 		s.Require().NoError(s.store.Save(s.ctx, record))
 
 		revokeTime := now.Add(30 * time.Minute)
-		res, err := s.store.RevokeByUserAndPurpose(s.ctx, record.UserID, models.PurposeLogin, revokeTime)
+		res, err := s.store.Execute(s.ctx, record.UserID, models.PurposeLogin,
+			func(_ *models.Record) error { return nil },
+			func(existing *models.Record) { existing.RevokedAt = &revokeTime },
+		)
 		s.Require().NoError(err)
 		s.Assert().Equal(record.ID, res.ID)
 		s.Require().NotNil(res.RevokedAt)

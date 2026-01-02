@@ -18,7 +18,6 @@ import (
 	"credo/internal/auth/models"
 	authPorts "credo/internal/auth/ports"
 	authService "credo/internal/auth/service"
-	id "credo/pkg/domain"
 	authCodeStore "credo/internal/auth/store/authorization-code"
 	refreshTokenStore "credo/internal/auth/store/refresh-token"
 	revocationStore "credo/internal/auth/store/revocation"
@@ -51,11 +50,11 @@ import (
 	"credo/internal/platform/database"
 	"credo/internal/platform/health"
 	"credo/internal/platform/httpserver"
-	platformredis "credo/internal/platform/redis"
 	"credo/internal/platform/kafka"
 	kafkaconsumer "credo/internal/platform/kafka/consumer"
 	kafkaproducer "credo/internal/platform/kafka/producer"
 	"credo/internal/platform/logger"
+	platformredis "credo/internal/platform/redis"
 	rateLimitConfig "credo/internal/ratelimit/config"
 	rateLimitMW "credo/internal/ratelimit/middleware"
 	rateLimitModels "credo/internal/ratelimit/models"
@@ -72,6 +71,7 @@ import (
 	tenantService "credo/internal/tenant/service"
 	clientstore "credo/internal/tenant/store/client"
 	tenantstore "credo/internal/tenant/store/tenant"
+	id "credo/pkg/domain"
 	audit "credo/pkg/platform/audit"
 	auditconsumer "credo/pkg/platform/audit/consumer"
 	auditmetrics "credo/pkg/platform/audit/metrics"
@@ -257,15 +257,27 @@ type rateLimitBundle struct {
 func buildRateLimitServices(logger *slog.Logger, dbPool *database.Pool) (*rateLimitBundle, error) {
 	cfg := rateLimitConfig.DefaultConfig()
 
-	if dbPool == nil {
-		return nil, fmt.Errorf("database connection required for rate limit stores")
+	// Create stores - use Postgres if available, otherwise fall back to in-memory
+	var bucketStore requestlimit.BucketStore
+	var allowlistStore interface {
+		requestlimit.AllowlistStore
+		StartCleanup(ctx context.Context, interval time.Duration) error
 	}
+	var authLockoutSt authlockout.Store
+	var globalThrottleSt globalthrottle.Store
 
-	// Create stores
-	bucketStore := rwbucketStore.NewPostgres(dbPool.DB())
-	allowlistStore := rwallowlistStore.NewPostgres(dbPool.DB())
-	authLockoutSt := authlockoutStore.NewPostgres(dbPool.DB(), &cfg.AuthLockout)
-	globalThrottleSt := globalthrottleStore.NewPostgres(dbPool.DB(), &cfg.Global)
+	if dbPool != nil {
+		bucketStore = rwbucketStore.NewPostgres(dbPool.DB())
+		allowlistStore = rwallowlistStore.NewPostgres(dbPool.DB())
+		authLockoutSt = authlockoutStore.NewPostgres(dbPool.DB(), &cfg.AuthLockout)
+		globalThrottleSt = globalthrottleStore.NewPostgres(dbPool.DB(), &cfg.Global)
+	} else {
+		logger.Warn("no database connection, using in-memory rate limit stores")
+		bucketStore = rwbucketStore.New()
+		allowlistStore = rwallowlistStore.New()
+		authLockoutSt = authlockoutStore.New()
+		globalThrottleSt = globalthrottleStore.New()
+	}
 
 	// Create focused services
 	requestSvc, err := requestlimit.New(bucketStore, allowlistStore,
@@ -309,11 +321,16 @@ func buildClientRateLimitMiddleware(logger *slog.Logger, tenantSvc *tenantServic
 	if cfg == nil {
 		return nil, fmt.Errorf("rate limit config is required")
 	}
-	if dbPool == nil {
-		return nil, fmt.Errorf("database connection required for client rate limits")
-	}
 	clientLookup := &tenantClientLookup{tenantSvc: tenantSvc}
-	clientBucketStore := rwbucketStore.NewPostgres(dbPool.DB())
+
+	// Use Postgres if available, otherwise fall back to in-memory
+	var clientBucketStore rateLimitClientLimit.BucketStore
+	if dbPool != nil {
+		clientBucketStore = rwbucketStore.NewPostgres(dbPool.DB())
+	} else {
+		logger.Warn("no database connection, using in-memory client rate limit store")
+		clientBucketStore = rwbucketStore.New()
+	}
 	clientLimiter, err := rateLimitClientLimit.New(
 		clientBucketStore,
 		clientLookup,
@@ -574,6 +591,7 @@ func buildConsentModule(infra *infraBundle) (*consentModule, error) {
 			auditpublisher.WithPublisherLogger(infra.Log),
 		),
 		infra.Log,
+		consentService.WithTx(newConsentPostgresTx(infra.DBPool.DB())),
 		consentService.WithConsentTTL(infra.Cfg.Consent.ConsentTTL),
 		consentService.WithGrantWindow(infra.Cfg.Consent.ConsentGrantWindow),
 		consentService.WithReGrantCooldown(infra.Cfg.Consent.ReGrantCooldown),

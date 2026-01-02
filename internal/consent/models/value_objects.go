@@ -1,10 +1,6 @@
 package models
 
-import (
-	"fmt"
-
-	dErrors "credo/pkg/domain-errors"
-)
+import dErrors "credo/pkg/domain-errors"
 
 // Purpose labels why data is processed. Purpose binding allows selective
 // revocation without affecting other flows.
@@ -35,7 +31,7 @@ func ParsePurpose(s string) (Purpose, error) {
 	}
 	p := Purpose(s)
 	if !p.IsValid() {
-		return "", dErrors.New(dErrors.CodeInvalidInput, fmt.Sprintf("invalid purpose: %s", s))
+		return "", dErrors.New(dErrors.CodeInvalidInput, "invalid purpose")
 	}
 	return p, nil
 }
@@ -67,7 +63,7 @@ func ParseStatus(s string) (Status, error) {
 	}
 	status := Status(s)
 	if !status.IsValid() {
-		return "", dErrors.New(dErrors.CodeInvalidInput, fmt.Sprintf("invalid status: %s", s))
+		return "", dErrors.New(dErrors.CodeInvalidInput, "invalid status")
 	}
 	return status, nil
 }

@@ -90,21 +90,21 @@ func (s *ServiceSuite) TestGrant_ValidationErrors() {
 // Invariant: Store failures must surface as CodeInternal errors without leaking implementation details.
 // Reason not a feature test: Tests internal error wrapping boundary; feature tests cannot induce store failures.
 func (s *ServiceSuite) TestGrant_StoreErrorPropagation() {
-	s.Run("store error on find propagates as CodeInternal", func() {
+	s.Run("store error on execute propagates as CodeInternal", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
+			Execute(gomock.Any(), userID, models.PurposeLogin, gomock.Any(), gomock.Any()).
 			Return(nil, assert.AnError)
 
 		_, err := s.service.Grant(context.Background(), userID, []models.Purpose{models.PurposeLogin})
 		s.Require().Error(err)
-		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store find error")
+		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store execute error")
 	})
 
 	s.Run("store error on save propagates as CodeInternal", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
+			Execute(gomock.Any(), userID, models.PurposeLogin, gomock.Any(), gomock.Any()).
 			Return(nil, sentinel.ErrNotFound)
 
 		s.mockStore.EXPECT().
@@ -136,35 +136,15 @@ func (s *ServiceSuite) TestRevoke_ValidationErrors() {
 // Invariant: Store failures must surface as CodeInternal errors.
 // Reason not a feature test: Tests internal error wrapping boundary; feature tests cannot induce store failures.
 func (s *ServiceSuite) TestRevoke_StoreErrorPropagation() {
-	s.Run("store error on find propagates as CodeInternal", func() {
+	s.Run("store error on execute propagates as CodeInternal", func() {
 		userID := id.UserID(uuid.New())
 		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
+			Execute(gomock.Any(), userID, models.PurposeLogin, gomock.Any(), gomock.Any()).
 			Return(nil, assert.AnError)
 
 		_, err := s.service.Revoke(context.Background(), userID, []models.Purpose{models.PurposeLogin})
 		s.Require().Error(err)
-		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store find error")
-	})
-
-	s.Run("store error on revoke propagates as CodeInternal", func() {
-		userID := id.UserID(uuid.New())
-		existing := &models.Record{
-			ID:      id.ConsentID(uuid.New()),
-			Purpose: models.PurposeLogin,
-		}
-
-		s.mockStore.EXPECT().
-			FindByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin).
-			Return(existing, nil)
-
-		s.mockStore.EXPECT().
-			RevokeByUserAndPurpose(gomock.Any(), userID, models.PurposeLogin, gomock.Any()).
-			Return(nil, assert.AnError)
-
-		_, err := s.service.Revoke(context.Background(), userID, []models.Purpose{models.PurposeLogin})
-		s.Require().Error(err)
-		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store revoke error")
+		s.Assert().True(dErrors.HasCode(err, dErrors.CodeInternal), "expected CodeInternal for store execute error")
 	})
 }
 
