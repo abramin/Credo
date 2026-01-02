@@ -99,7 +99,7 @@ jobs:
           cache: true
 
       - name: Build Go application
-        run: go build -o bin/credo ./cmd/server/main.go
+        run: go build -o bin/credo ./cmd/server
 
       - name: Build and start mock citizen-registry
         run: |
@@ -229,7 +229,7 @@ jobs:
           cache: true
 
       - name: Build Go application
-        run: go build -o bin/credo ./cmd/server/main.go
+        run: go build -o bin/credo ./cmd/server
 
       - name: Build and start mock citizen-registry
         run: |
