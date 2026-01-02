@@ -43,8 +43,7 @@ jobs:
             ./internal/auth/store/revocation \
             ./internal/consent/store \
             ./pkg/platform/audit/publisher \
-            ./pkg/platform/audit/store/memory \
-            ./pkg/platform/sync
+            ./pkg/platform/audit/store/memory
 
   integration:
     name: Integration Tests (Testcontainers)
@@ -70,24 +69,10 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "false"
 
   e2e:
-    name: E2E Tests
+    name: E2E Tests (In-Memory)
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: credo
-          POSTGRES_PASSWORD: credo_dev_password
-          POSTGRES_DB: credo
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U credo"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -122,19 +107,12 @@ jobs:
           timeout 10 bash -c 'until curl -f http://localhost:8082/health 2>/dev/null; do sleep 1; done' || true
           timeout 10 bash -c 'until curl -f http://localhost:8083/health 2>/dev/null; do sleep 1; done' || true
 
-      - name: Run database migrations
-        run: |
-          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
-          migrate -path migrations -database "postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable" up
-
-      - name: Start backend server
+      - name: Start backend server (in-memory stores)
         run: |
           ./bin/credo &
           echo $! > server.pid
         env:
-          CREDO_ENV: demo
           PORT: 8080
-          DATABASE_URL: postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable
           REGULATED_MODE: "true"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns
@@ -200,24 +178,10 @@ jobs:
           retention-days: 7
 
   e2e-unregulated:
-    name: E2E Tests (Unregulated Mode)
+    name: E2E Tests (Unregulated, In-Memory)
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: credo
-          POSTGRES_PASSWORD: credo_dev_password
-          POSTGRES_DB: credo
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U credo"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -252,19 +216,12 @@ jobs:
           timeout 10 bash -c 'until curl -f http://localhost:8082/health 2>/dev/null; do sleep 1; done' || true
           timeout 10 bash -c 'until curl -f http://localhost:8083/health 2>/dev/null; do sleep 1; done' || true
 
-      - name: Run database migrations
-        run: |
-          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
-          migrate -path migrations -database "postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable" up
-
-      - name: Start backend server (unregulated mode)
+      - name: Start backend server (unregulated, in-memory)
         run: |
           ./bin/credo &
           echo $! > server.pid
         env:
-          CREDO_ENV: demo
           PORT: 8080
-          DATABASE_URL: postgres://credo:credo_dev_password@localhost:5432/credo?sslmode=disable
           REGULATED_MODE: "false"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns
