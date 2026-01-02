@@ -22,6 +22,7 @@ import (
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
 	"credo/pkg/requestcontext"
+
 	"golang.org/x/sync/errgroup"
 )
 
@@ -312,7 +313,7 @@ func (s *Service) convertEvidence(result *orchestrator.LookupResult) (*models.Ci
 	return citizenRecord, sanctionRecord, nil
 }
 
-func (s *Service) citizenRecordFromEvidence(ev providers.Evidence) (*models.CitizenRecord, error) {
+func (s *Service) citizenRecordFromEvidence(ev *providers.Evidence) (*models.CitizenRecord, error) {
 	verification, err := EvidenceToCitizenVerification(ev)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to convert citizen evidence")
@@ -323,7 +324,7 @@ func (s *Service) citizenRecordFromEvidence(ev providers.Evidence) (*models.Citi
 	return CitizenVerificationToRecord(verification), nil
 }
 
-func (s *Service) sanctionsRecordFromEvidence(ev providers.Evidence) (*models.SanctionsRecord, error) {
+func (s *Service) sanctionsRecordFromEvidence(ev *providers.Evidence) (*models.SanctionsRecord, error) {
 	check, err := EvidenceToSanctionsCheck(ev)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to convert sanctions evidence")
@@ -524,13 +525,11 @@ func (s *Service) Sanctions(ctx context.Context, userID id.UserID, nationalID id
 	}
 
 	// Check cache
-	cacheHit := false
 	if s.cache != nil {
 		if cached, cacheErr := s.cache.FindSanction(ctx, nationalID); cacheErr == nil {
-			cacheHit = true
 			span.SetAttributes(attribute.Bool("cache.hit", true))
 			// Audit cached result before returning
-			if err := s.auditSanctionsCheck(ctx, userID, cached.Listed); err != nil {
+			if err = s.auditSanctionsCheck(ctx, userID, cached.Listed); err != nil {
 				return nil, err
 			}
 			return cached, nil
@@ -538,9 +537,7 @@ func (s *Service) Sanctions(ctx context.Context, userID id.UserID, nationalID id
 			return nil, cacheErr
 		}
 	}
-	if !cacheHit {
-		span.SetAttributes(attribute.Bool("cache.hit", false))
-	}
+	span.SetAttributes(attribute.Bool("cache.hit", false))
 
 	result, err := s.orchestrator.Lookup(ctx, orchestrator.LookupRequest{
 		Types: []providers.ProviderType{providers.ProviderTypeSanctions},
