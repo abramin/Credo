@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -24,6 +25,9 @@ type Handler struct {
 
 // NewHandler creates a new audit event consumer handler.
 func NewHandler(store *auditpostgres.Store, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	return &Handler{
 		store:  store,
 		logger: logger,
