@@ -75,8 +75,8 @@ var storeErrorMappings = []storeErrorMapping{
 	{sentinel.ErrInvalidState, dErrors.CodeConflict, "invalid client state", "invalid tenant state"},
 }
 
-// wrapClientErr translates store errors into client-specific domain errors.
-func wrapClientErr(err error, action string) error {
+// wrapStoreErr translates store errors into domain errors using the provided message selector.
+func wrapStoreErr(err error, action string, msgSelector func(storeErrorMapping) string) error {
 	if err == nil {
 		return nil
 	}
@@ -90,7 +90,7 @@ func wrapClientErr(err error, action string) error {
 	// Check mappings in order
 	for _, m := range storeErrorMappings {
 		if errors.Is(err, m.sentinel) {
-			return dErrors.Wrap(err, m.code, m.clientMsg)
+			return dErrors.Wrap(err, m.code, msgSelector(m))
 		}
 	}
 
@@ -98,27 +98,14 @@ func wrapClientErr(err error, action string) error {
 	return dErrors.Wrap(err, dErrors.CodeInternal, action)
 }
 
+// wrapClientErr translates store errors into client-specific domain errors.
+func wrapClientErr(err error, action string) error {
+	return wrapStoreErr(err, action, func(m storeErrorMapping) string { return m.clientMsg })
+}
+
 // wrapTenantErr translates store errors into tenant-specific domain errors.
 func wrapTenantErr(err error, action string) error {
-	if err == nil {
-		return nil
-	}
-
-	// Pass through existing domain errors
-	var de *dErrors.Error
-	if errors.As(err, &de) {
-		return err
-	}
-
-	// Check mappings in order
-	for _, m := range storeErrorMappings {
-		if errors.Is(err, m.sentinel) {
-			return dErrors.Wrap(err, m.code, m.tenantMsg)
-		}
-	}
-
-	// Default: internal error
-	return dErrors.Wrap(err, dErrors.CodeInternal, action)
+	return wrapStoreErr(err, action, func(m storeErrorMapping) string { return m.tenantMsg })
 }
 
 // auditEmitter handles audit logging and event emission.

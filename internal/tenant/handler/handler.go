@@ -26,7 +26,7 @@ import (
 // - When tenant admin auth is added, handlers must extract tenant context and use scoped methods
 type Service interface {
 	CreateTenant(ctx context.Context, name string) (*models.Tenant, error)
-	GetTenant(ctx context.Context, id id.TenantID) (*readmodels.TenantDetails, error)
+	GetTenantDetails(ctx context.Context, id id.TenantID) (*readmodels.TenantDetails, error)
 	GetTenantByName(ctx context.Context, name string) (*models.Tenant, error)
 	DeactivateTenant(ctx context.Context, id id.TenantID) (*models.Tenant, error)
 	ReactivateTenant(ctx context.Context, id id.TenantID) (*models.Tenant, error)
@@ -106,7 +106,7 @@ func (h *Handler) HandleGetTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.service.GetTenant(ctx, tenantID)
+	res, err := h.service.GetTenantDetails(ctx, tenantID)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "get tenant failed", "error", err, "request_id", requestID, "tenant_id", tenantID)
 		httputil.WriteError(w, err)

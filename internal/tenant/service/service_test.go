@@ -95,7 +95,7 @@ func (s *ServiceSuite) TestTenantDetails() {
 		tenantRecord := s.createTestTenant("Acme")
 		s.createTestClient(tenantRecord.ID)
 
-		details, err := s.service.GetTenant(context.Background(), tenantRecord.ID)
+		details, err := s.service.GetTenantDetails(context.Background(), tenantRecord.ID)
 		s.Require().NoError(err)
 		s.Equal(1, details.ClientCount)
 		s.Equal(tenantRecord.ID, details.ID)
