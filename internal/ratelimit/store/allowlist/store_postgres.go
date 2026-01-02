@@ -32,9 +32,7 @@ func (s *PostgresStore) Add(ctx context.Context, entry *models.AllowlistEntry) e
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (entry_type, identifier) DO UPDATE SET
 			reason = EXCLUDED.reason,
-			expires_at = EXCLUDED.expires_at,
-			created_at = EXCLUDED.created_at,
-			created_by = EXCLUDED.created_by
+			expires_at = EXCLUDED.expires_at
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		entry.ID,

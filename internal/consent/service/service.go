@@ -474,7 +474,7 @@ func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) 
 			UserID:    userID,
 			Action:    models.AuditActionConsentRevoked,
 			Decision:  models.AuditDecisionRevoked,
-			Reason:    "bulk_revocation",
+			Reason:    auditReasonForRevokeAll(ctx),
 			Timestamp: now,
 			ActorID:   actorID,
 		})
@@ -491,8 +491,16 @@ func (s *Service) DeleteAll(ctx context.Context, userID id.UserID) error {
 	if userID.IsNil() {
 		return pkgerrors.New(pkgerrors.CodeBadRequest, "user ID required")
 	}
-	if err := s.store.DeleteByUser(ctx, userID); err != nil {
-		return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to delete all consents")
+	now := requestcontext.Now(ctx)
+
+	txErr := s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
+		if err := txStore.DeleteByUser(txCtx, userID); err != nil {
+			return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to delete all consents")
+		}
+		return nil
+	})
+	if txErr != nil {
+		return txErr
 	}
 
 	// Include admin actor ID for audit attribution if present
@@ -501,8 +509,8 @@ func (s *Service) DeleteAll(ctx context.Context, userID id.UserID) error {
 		UserID:    userID,
 		Action:    models.AuditActionConsentDeleted,
 		Decision:  models.AuditDecisionDeleted,
-		Reason:    "bulk_deletion",
-		Timestamp: requestcontext.Now(ctx),
+		Reason:    auditReasonForDeleteAll(ctx),
+		Timestamp: now,
 		ActorID:   actorID,
 	})
 
@@ -550,6 +558,20 @@ func filterRecords(records []*models.Record, filter *models.RecordFilter, now ti
 		filtered = append(filtered, record)
 	}
 	return filtered
+}
+
+func auditReasonForRevokeAll(ctx context.Context) string {
+	if admin.IsAdminRequest(ctx) {
+		return models.AuditReasonSecurityConcern
+	}
+	return models.AuditReasonUserBulkRevocation
+}
+
+func auditReasonForDeleteAll(ctx context.Context) string {
+	if admin.IsAdminRequest(ctx) {
+		return models.AuditReasonGdprErasureRequest
+	}
+	return models.AuditReasonGdprSelfService
 }
 
 // Require enforces that a user has active consent for the given purpose.

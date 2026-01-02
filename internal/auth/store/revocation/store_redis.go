@@ -49,6 +49,9 @@ func NewRedisTRL(client *redis.Client, opts ...RedisTRLOption) *RedisTRL {
 // RevokeToken adds a token to the revocation list with TTL.
 // Uses Redis SETEX for atomic set-with-expiry.
 func (t *RedisTRL) RevokeToken(ctx context.Context, jti string, ttl time.Duration) error {
+	if err := validateTTL(ttl); err != nil {
+		return err
+	}
 	if jti == "" {
 		return nil
 	}
@@ -84,6 +87,9 @@ func (t *RedisTRL) IsRevoked(ctx context.Context, jti string) (bool, error) {
 func (t *RedisTRL) RevokeSessionTokens(ctx context.Context, sessionID string, jtis []string, ttl time.Duration) error {
 	if len(jtis) == 0 {
 		return nil
+	}
+	if err := validateTTL(ttl); err != nil {
+		return err
 	}
 
 	// Use pipeline for batch operations

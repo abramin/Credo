@@ -82,6 +82,9 @@ func (t *InMemoryTRL) Close() {
 // RevokeToken adds a token to the revocation list with TTL.
 // If maxSize is exceeded, oldest entries are evicted (FIFO).
 func (t *InMemoryTRL) RevokeToken(ctx context.Context, jti string, ttl time.Duration) error {
+	if err := validateTTL(ttl); err != nil {
+		return err
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -135,6 +138,9 @@ func (t *InMemoryTRL) IsRevoked(ctx context.Context, jti string) (bool, error) {
 // RevokeSessionTokens revokes multiple tokens associated with a session.
 // If maxSize is exceeded, oldest entries are evicted (FIFO).
 func (t *InMemoryTRL) RevokeSessionTokens(ctx context.Context, sessionID string, jtis []string, ttl time.Duration) error {
+	if err := validateTTL(ttl); err != nil {
+		return err
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

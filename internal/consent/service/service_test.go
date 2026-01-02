@@ -166,7 +166,7 @@ func (s *ServiceSuite) TestRevokeAll_Audit() {
 		s.Require().NoError(err)
 		s.Require().Len(events, 1)
 		s.Assert().Equal(models.AuditActionConsentRevoked, events[0].Action)
-		s.Assert().Equal("bulk_revocation", events[0].Reason)
+		s.Assert().Equal(models.AuditReasonUserBulkRevocation, events[0].Reason)
 	})
 
 	s.Run("bulk revoke emits no audit event when count == 0", func() {

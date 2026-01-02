@@ -26,7 +26,11 @@ const (
 
 // Audit event reasons
 const (
-	AuditReasonUserInitiated = "user_initiated"
+	AuditReasonUserInitiated      = "user_initiated"
+	AuditReasonUserBulkRevocation = "user_bulk_revocation"
+	AuditReasonSecurityConcern    = "security_concern"
+	AuditReasonGdprSelfService    = "gdpr_self_service"
+	AuditReasonGdprErasureRequest = "gdpr_erasure_request"
 )
 
 // Record captures a user's decision for a specific purpose.
