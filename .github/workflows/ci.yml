@@ -114,6 +114,7 @@ jobs:
         env:
           PORT: 8080
           REGULATED_MODE: "true"
+          DISABLE_RATE_LIMITING: "true"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns
           CITIZEN_REGISTRY_URL: http://localhost:8082
@@ -223,6 +224,7 @@ jobs:
         env:
           PORT: 8080
           REGULATED_MODE: "false"
+          DISABLE_RATE_LIMITING: "true"
           CONSENT_GRANT_WINDOW: 1s
           CONSENT_REGRANT_COOLDOWN: 1ns
           CITIZEN_REGISTRY_URL: http://localhost:8082
