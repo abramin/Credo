@@ -45,6 +45,15 @@ type Store interface {
 	Update(ctx context.Context, record *models.AuthLockout) error
 }
 
+// AtomicStore extends Store with atomic operations that prevent TOCTOU races.
+// Production PostgreSQL stores implement this interface.
+type AtomicStore interface {
+	Store
+	RecordFailureAtomic(ctx context.Context, identifier string, now time.Time) (*models.AuthLockout, error)
+	ApplyHardLockAtomic(ctx context.Context, identifier string, lockedUntil time.Time, dailyThreshold int) (applied bool, err error)
+	SetRequiresCaptchaAtomic(ctx context.Context, identifier string, lockoutThreshold int) (applied bool, err error)
+}
+
 // Service tracks authentication failures and enforces lockout policies.
 // Thread-safe for concurrent use by auth handlers.
 type Service struct {
@@ -178,7 +187,8 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 // RecordFailure increments failure counters after a failed authentication attempt.
 // Call this AFTER credential validation fails.
 //
-// This method follows the sandwich pattern: read → compute (domain) → write
+// This method uses atomic operations when available (PostgreSQL) to prevent TOCTOU races.
+// Falls back to the sandwich pattern (read → compute → write) for non-atomic stores.
 //
 // Side effects:
 //   - Increments window and daily failure counts via domain method
@@ -189,6 +199,57 @@ func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*mo
 	now := requestcontext.Now(ctx)
 	key := models.NewAuthLockoutKey(identifier, ip).String()
 
+	// Try atomic path if store supports it (prevents TOCTOU races)
+	if atomicStore, ok := s.store.(AtomicStore); ok {
+		return s.recordFailureAtomic(ctx, atomicStore, key, identifier, ip, now)
+	}
+
+	// Fallback: sandwich pattern for non-atomic stores (e.g., in-memory test stores)
+	return s.recordFailureNonAtomic(ctx, key, identifier, ip, now)
+}
+
+// recordFailureAtomic uses atomic database operations to prevent TOCTOU races.
+func (s *Service) recordFailureAtomic(ctx context.Context, store AtomicStore, key, identifier, ip string, now time.Time) (*models.AuthLockout, error) {
+	// Step 1: Atomically increment counters
+	current, err := store.RecordFailureAtomic(ctx, key, now)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to record auth failure")
+	}
+
+	// Step 2: Atomically apply hard lock if threshold reached
+	shouldHardLock := current.ShouldHardLock(s.config.HardLockThreshold)
+	if shouldHardLock {
+		lockedUntil := now.Add(s.config.HardLockDuration)
+		applied, err := store.ApplyHardLockAtomic(ctx, key, lockedUntil, s.config.HardLockThreshold)
+		if err != nil {
+			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to apply hard lock")
+		}
+		if applied {
+			current.LockedUntil = &lockedUntil
+			observability.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_triggered",
+				"identifier", identifier,
+				"ip", privacy.AnonymizeIP(ip),
+				"locked_until", current.LockedUntil,
+			)
+		}
+	}
+
+	// Step 3: Atomically set CAPTCHA requirement if threshold reached
+	if current.ShouldRequireCaptcha(s.config.CaptchaAfterLockouts) && !current.RequiresCaptcha {
+		applied, err := store.SetRequiresCaptchaAtomic(ctx, key, s.config.CaptchaAfterLockouts*s.config.HardLockThreshold)
+		if err != nil {
+			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to set captcha requirement")
+		}
+		if applied {
+			current.RequiresCaptcha = true
+		}
+	}
+
+	return current, nil
+}
+
+// recordFailureNonAtomic uses the sandwich pattern for non-atomic stores (tests).
+func (s *Service) recordFailureNonAtomic(ctx context.Context, key, identifier, ip string, now time.Time) (*models.AuthLockout, error) {
 	// === READ: Get or create the lockout record (pure I/O) ===
 	current, err := s.store.GetOrCreate(ctx, key, now)
 	if err != nil {

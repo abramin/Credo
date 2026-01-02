@@ -34,6 +34,12 @@ type Metrics struct {
 	RateLimitCleanupRunsTotal               *prometheus.CounterVec
 	RateLimitCleanupDurationSeconds         prometheus.Histogram
 	CleanupEntriesRemovedTotal              *prometheus.CounterVec // (type)
+
+	// Performance metrics (bottleneck detection)
+	GlobalThrottleLockWaitSeconds prometheus.Histogram // Time waiting for global throttle row locks
+	BucketLockWaitSeconds         *prometheus.HistogramVec // Time waiting for bucket advisory locks (by key_prefix)
+	BucketEventsCleanedTotal      prometheus.Counter       // Events cleaned during rate limit checks
+	AuthLockoutConcurrentUpdates  prometheus.Counter       // Detected concurrent update attempts (TOCTOU near-misses)
 }
 
 // New creates a new Metrics instance with all metrics registered.
@@ -130,6 +136,29 @@ func New() *Metrics {
 			Name: "credo_ratelimit_cleanup_entries_removed_total",
 			Help: "Total number of entries removed during cleanup by type",
 		}, []string{"type"}),
+
+		// Performance metrics (bottleneck detection)
+		GlobalThrottleLockWaitSeconds: promauto.NewHistogram(prometheus.HistogramOpts{
+			Name:    "credo_ratelimit_global_throttle_lock_wait_seconds",
+			Help:    "Time spent waiting for global throttle row locks in PostgreSQL",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0},
+		}),
+
+		BucketLockWaitSeconds: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "credo_ratelimit_bucket_lock_wait_seconds",
+			Help:    "Time spent waiting for bucket advisory locks by key prefix",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0},
+		}, []string{"key_prefix"}),
+
+		BucketEventsCleanedTotal: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "credo_ratelimit_bucket_events_cleaned_total",
+			Help: "Total number of expired events cleaned during rate limit checks",
+		}),
+
+		AuthLockoutConcurrentUpdates: promauto.NewCounter(prometheus.CounterOpts{
+			Name: "credo_ratelimit_auth_lockout_concurrent_updates_total",
+			Help: "Detected concurrent update attempts on auth lockout records (TOCTOU near-misses)",
+		}),
 	}
 }
 
@@ -218,4 +247,26 @@ func (m *Metrics) ObserveCleanupDuration(durationSeconds float64) {
 // RecordCleanupEntriesRemoved records entries removed during cleanup.
 func (m *Metrics) RecordCleanupEntriesRemoved(entryType string, count int) {
 	m.CleanupEntriesRemovedTotal.WithLabelValues(entryType).Add(float64(count))
+}
+
+// Performance metrics helpers
+
+// ObserveGlobalThrottleLockWait records time spent waiting for global throttle row locks.
+func (m *Metrics) ObserveGlobalThrottleLockWait(durationSeconds float64) {
+	m.GlobalThrottleLockWaitSeconds.Observe(durationSeconds)
+}
+
+// ObserveBucketLockWait records time spent waiting for bucket advisory locks.
+func (m *Metrics) ObserveBucketLockWait(keyPrefix string, durationSeconds float64) {
+	m.BucketLockWaitSeconds.WithLabelValues(keyPrefix).Observe(durationSeconds)
+}
+
+// IncrementBucketEventsCleaned records events cleaned during rate limit checks.
+func (m *Metrics) IncrementBucketEventsCleaned(count int) {
+	m.BucketEventsCleanedTotal.Add(float64(count))
+}
+
+// IncrementAuthLockoutConcurrentUpdates records detected concurrent update attempts.
+func (m *Metrics) IncrementAuthLockoutConcurrentUpdates() {
+	m.AuthLockoutConcurrentUpdates.Inc()
 }

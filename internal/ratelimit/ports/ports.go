@@ -66,6 +66,24 @@ type AuthLockoutStore interface {
 	ResetDailyFailures(ctx context.Context, cutoff time.Time) (failuresReset int, err error)
 }
 
+// AtomicAuthLockoutStore extends AuthLockoutStore with atomic operations that prevent TOCTOU races.
+// Production PostgreSQL stores implement this; in-memory test stores may use the basic interface.
+type AtomicAuthLockoutStore interface {
+	AuthLockoutStore
+
+	// RecordFailureAtomic atomically increments failure counts and returns the updated record.
+	// This prevents TOCTOU races where concurrent requests could bypass hard lock thresholds.
+	RecordFailureAtomic(ctx context.Context, identifier string, now time.Time) (*models.AuthLockout, error)
+
+	// ApplyHardLockAtomic atomically sets the hard lock if thresholds are met.
+	// Returns true if the lock was applied (i.e., threshold was exceeded and not already locked).
+	ApplyHardLockAtomic(ctx context.Context, identifier string, lockedUntil time.Time, dailyThreshold int) (applied bool, err error)
+
+	// SetRequiresCaptchaAtomic atomically sets the CAPTCHA requirement if thresholds are met.
+	// Returns true if CAPTCHA was newly required.
+	SetRequiresCaptchaAtomic(ctx context.Context, identifier string, lockoutThreshold int) (applied bool, err error)
+}
+
 // QuotaStore manages API key usage quotas.
 type QuotaStore interface {
 	// GetQuota retrieves quota information for an API key.

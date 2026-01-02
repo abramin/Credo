@@ -31,6 +31,9 @@
 //   tenant_dashboard_load    - 100 concurrent GetTenant (tenants with 500+ clients)
 //   rate_limit_sustained     - Rate limiting under sustained high request rate
 //   rate_limit_cardinality   - Memory behavior under many unique IPs
+//   global_throttle_spike    - [PERF] Spike test: 1000→10000 RPS to stress global throttle row locks
+//   hot_key_contention       - [PERF] Hot key test: 80% traffic to 10 IPs for advisory lock contention
+//   auth_lockout_race        - [PERF] Concurrent auth failures to expose TOCTOU races in lockout
 //   all                      - Run all scenarios (default)
 
 import http from 'k6/http';
@@ -56,6 +59,38 @@ const createClientErrors = new Counter('create_client_errors');
 const getTenantErrors = new Counter('get_tenant_errors');
 const rateLimited = new Counter('rate_limited_count');
 const errorRate = new Rate('error_rate');
+
+// Performance test metrics
+const globalThrottleLatency = new Trend('global_throttle_latency', true);
+const hotKeyLatency = new Trend('hot_key_latency', true);
+const authLockoutLatency = new Trend('auth_lockout_latency', true);
+const authLockoutRaceDetected = new Counter('auth_lockout_race_detected');
+
+// Decision module metrics
+const decisionEvaluateLatency = new Trend('decision_evaluate_latency', true);
+const decisionAgeVerifyLatency = new Trend('decision_age_verify_latency', true);
+const decisionSanctionsLatency = new Trend('decision_sanctions_latency', true);
+const decisionErrors = new Counter('decision_errors');
+
+// Evidence module metrics
+const evidenceCitizenLatency = new Trend('evidence_citizen_latency', true);
+const evidenceSanctionsLatency = new Trend('evidence_sanctions_latency', true);
+const evidenceVCIssueLatency = new Trend('evidence_vc_issue_latency', true);
+const evidenceCheckLatency = new Trend('evidence_check_latency', true);
+const evidenceErrors = new Counter('evidence_errors');
+const evidenceCacheHits = new Counter('evidence_cache_hits');
+const evidenceCacheMisses = new Counter('evidence_cache_misses');
+
+// Auth additional metrics
+const authCodeReplayLatency = new Trend('auth_code_replay_latency', true);
+const authCodeReplayErrors = new Counter('auth_code_replay_errors');
+const trlWriteLatency = new Trend('trl_write_latency', true);
+const userinfoLatency = new Trend('userinfo_latency', true);
+
+// Consent additional metrics
+const consentRevokeLatency = new Trend('consent_revoke_latency', true);
+const consentDeleteLatency = new Trend('consent_delete_latency', true);
+const consentAdminRevokeLatency = new Trend('consent_admin_revoke_latency', true);
 
 // Configuration
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
@@ -221,6 +256,305 @@ export const options = {
       startTime: '0s',
       tags: { scenario: 'consent_list_load' },
     },
+
+    // ========== PERFORMANCE BOTTLENECK TESTS ==========
+    // These scenarios target specific performance bottlenecks identified in review.
+
+    // Scenario 12: Global Throttle Spike Test
+    // Purpose: Stress the global throttle PostgreSQL row locks with rapid RPS increase.
+    // Expected: p99 latency degradation as lock queue grows; validates FOR UPDATE contention.
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=global_throttle_spike
+    global_throttle_spike: {
+      executor: 'ramping-arrival-rate',
+      startRate: 1000,
+      timeUnit: '1s',
+      preAllocatedVUs: 200,
+      maxVUs: 2000,
+      stages: [
+        { duration: '10s', target: 10000 },  // Spike: 1000 → 10000 RPS
+        { duration: '30s', target: 10000 },  // Sustain peak
+        { duration: '10s', target: 1000 },   // Ramp down
+      ],
+      exec: 'globalThrottleSpikeScenario',
+      startTime: '0s',
+      tags: { scenario: 'global_throttle_spike' },
+    },
+
+    // Scenario 13: Hot Key Advisory Lock Contention
+    // Purpose: 80% traffic to 10 hot IPs to stress advisory lock wait times.
+    // Expected: Lock wait times increase; validates sharded lock distribution.
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=hot_key_contention
+    hot_key_contention: {
+      executor: 'constant-arrival-rate',
+      rate: 500,
+      timeUnit: '1s',
+      duration: '2m',
+      preAllocatedVUs: 100,
+      maxVUs: 500,
+      exec: 'hotKeyContentionScenario',
+      startTime: '0s',
+      tags: { scenario: 'hot_key_contention' },
+    },
+
+    // Scenario 14: Auth Lockout TOCTOU Race Detection
+    // Purpose: 100 concurrent login failures for same user to expose TOCTOU races.
+    // Expected: All failures should increment correctly; hard lock triggers at threshold.
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=auth_lockout_race
+    auth_lockout_race: {
+      executor: 'per-vu-iterations',
+      vus: 100,
+      iterations: 15,  // Each VU does 15 failures (100 * 15 = 1500 total for one user)
+      exec: 'authLockoutRaceScenario',
+      startTime: '0s',
+      tags: { scenario: 'auth_lockout_race' },
+    },
+
+    // ========== DECISION MODULE SCENARIOS ==========
+
+    // Scenario 15: Decision Age Verification Throughput
+    // Purpose: Baseline throughput for age verification decisions
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_age_verify
+    decision_age_verify: {
+      executor: 'ramping-arrival-rate',
+      startRate: 100,
+      timeUnit: '1s',
+      preAllocatedVUs: 50,
+      maxVUs: 500,
+      stages: [
+        { duration: '1m', target: 500 },   // Ramp to 500 req/s
+        { duration: '3m', target: 500 },   // Sustain
+        { duration: '1m', target: 100 },   // Ramp down
+      ],
+      exec: 'decisionAgeVerifyScenario',
+      startTime: '0s',
+      tags: { scenario: 'decision_age_verify' },
+    },
+
+    // Scenario 16: Decision Sanctions Screening Throughput
+    // Purpose: Baseline throughput for sanctions screening (fail-closed audit)
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_sanctions
+    decision_sanctions: {
+      executor: 'ramping-arrival-rate',
+      startRate: 100,
+      timeUnit: '1s',
+      preAllocatedVUs: 50,
+      maxVUs: 500,
+      stages: [
+        { duration: '1m', target: 800 },   // Ramp to 800 req/s
+        { duration: '3m', target: 800 },   // Sustain
+        { duration: '1m', target: 100 },   // Ramp down
+      ],
+      exec: 'decisionSanctionsScenario',
+      startTime: '0s',
+      tags: { scenario: 'decision_sanctions' },
+    },
+
+    // Scenario 17: Decision Concurrent Same User
+    // Purpose: Test audit contention with many decisions for same user
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_same_user
+    decision_same_user: {
+      executor: 'constant-vus',
+      vus: 50,
+      duration: '2m',
+      exec: 'decisionSameUserScenario',
+      startTime: '0s',
+      tags: { scenario: 'decision_same_user' },
+    },
+
+    // Scenario 18: Decision Cache Hit Test
+    // Purpose: Measure cache effectiveness with repeated national IDs
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_cache_hit
+    decision_cache_hit: {
+      executor: 'constant-arrival-rate',
+      rate: 200,
+      timeUnit: '1s',
+      duration: '2m',
+      preAllocatedVUs: 50,
+      maxVUs: 200,
+      exec: 'decisionCacheHitScenario',
+      startTime: '0s',
+      tags: { scenario: 'decision_cache_hit' },
+    },
+
+    // Scenario 19: Decision All Rule Paths
+    // Purpose: Coverage of all decision outcomes (pass, fail, pass_with_conditions)
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_rule_paths
+    decision_rule_paths: {
+      executor: 'constant-vus',
+      vus: 100,
+      duration: '3m',
+      exec: 'decisionRulePathsScenario',
+      startTime: '0s',
+      tags: { scenario: 'decision_rule_paths' },
+    },
+
+    // Scenario 20: Decision Consent Denial Fast-Fail
+    // Purpose: Verify denied consent fails fast without evidence fetch
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=decision_consent_denial
+    decision_consent_denial: {
+      executor: 'constant-arrival-rate',
+      rate: 200,
+      timeUnit: '1s',
+      duration: '2m',
+      preAllocatedVUs: 50,
+      maxVUs: 200,
+      exec: 'decisionConsentDenialScenario',
+      startTime: '0s',
+      tags: { scenario: 'decision_consent_denial' },
+    },
+
+    // ========== EVIDENCE MODULE SCENARIOS ==========
+
+    // Scenario 21: Evidence Citizen Lookup Throughput
+    // Purpose: Baseline throughput for citizen registry lookups
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_citizen
+    evidence_citizen: {
+      executor: 'ramping-arrival-rate',
+      startRate: 100,
+      timeUnit: '1s',
+      preAllocatedVUs: 50,
+      maxVUs: 500,
+      stages: [
+        { duration: '1m', target: 500 },
+        { duration: '2m', target: 500 },
+        { duration: '1m', target: 100 },
+      ],
+      exec: 'evidenceCitizenScenario',
+      startTime: '0s',
+      tags: { scenario: 'evidence_citizen' },
+    },
+
+    // Scenario 22: Evidence Sanctions Lookup Throughput
+    // Purpose: Baseline throughput for sanctions registry lookups
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_sanctions
+    evidence_sanctions: {
+      executor: 'ramping-arrival-rate',
+      startRate: 100,
+      timeUnit: '1s',
+      preAllocatedVUs: 50,
+      maxVUs: 500,
+      stages: [
+        { duration: '1m', target: 500 },
+        { duration: '2m', target: 500 },
+        { duration: '1m', target: 100 },
+      ],
+      exec: 'evidenceSanctionsScenario',
+      startTime: '0s',
+      tags: { scenario: 'evidence_sanctions' },
+    },
+
+    // Scenario 23: Evidence VC Issuance Pipeline
+    // Purpose: Full VC issuance flow under load
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_vc_issue
+    evidence_vc_issue: {
+      executor: 'constant-arrival-rate',
+      rate: 100,
+      timeUnit: '1s',
+      duration: '2m',
+      preAllocatedVUs: 50,
+      maxVUs: 200,
+      exec: 'evidenceVCIssueScenario',
+      startTime: '0s',
+      tags: { scenario: 'evidence_vc_issue' },
+    },
+
+    // Scenario 24: Evidence Cache Stampede
+    // Purpose: 1000 concurrent requests on expiring cache entry
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_cache_stampede
+    evidence_cache_stampede: {
+      executor: 'shared-iterations',
+      vus: 100,
+      iterations: 1000,
+      maxDuration: '30s',
+      exec: 'evidenceCacheStampedeScenario',
+      startTime: '0s',
+      tags: { scenario: 'evidence_cache_stampede' },
+    },
+
+    // Scenario 25: Evidence Check (Combined) Throughput
+    // Purpose: Combined citizen + sanctions check throughput
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=evidence_check
+    evidence_check: {
+      executor: 'constant-arrival-rate',
+      rate: 200,
+      timeUnit: '1s',
+      duration: '3m',
+      preAllocatedVUs: 50,
+      maxVUs: 300,
+      exec: 'evidenceCheckScenario',
+      startTime: '0s',
+      tags: { scenario: 'evidence_check' },
+    },
+
+    // ========== ADDITIONAL AUTH SCENARIOS ==========
+
+    // Scenario 26: Auth Code Replay Attack
+    // Purpose: Verify replay protection under concurrent reuse attempts
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=auth_code_replay
+    auth_code_replay: {
+      executor: 'per-vu-iterations',
+      vus: 50,
+      iterations: 3,  // Each VU tries to reuse same code 3 times
+      exec: 'authCodeReplayScenario',
+      startTime: '0s',
+      tags: { scenario: 'auth_code_replay' },
+    },
+
+    // Scenario 27: Token Revocation List (TRL) Write Saturation
+    // Purpose: Measure TRL write throughput ceiling
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=trl_write_saturation
+    trl_write_saturation: {
+      executor: 'constant-arrival-rate',
+      rate: 500,
+      timeUnit: '1s',
+      duration: '1m',
+      preAllocatedVUs: 100,
+      maxVUs: 500,
+      exec: 'trlWriteSaturationScenario',
+      startTime: '0s',
+      tags: { scenario: 'trl_write_saturation' },
+    },
+
+    // Scenario 28: Userinfo Endpoint Throughput
+    // Purpose: Baseline for read-only userinfo endpoint
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=userinfo_throughput
+    userinfo_throughput: {
+      executor: 'constant-arrival-rate',
+      rate: 2000,
+      timeUnit: '1s',
+      duration: '30s',
+      preAllocatedVUs: 100,
+      maxVUs: 500,
+      exec: 'userinfoThroughputScenario',
+      startTime: '0s',
+      tags: { scenario: 'userinfo_throughput' },
+    },
+
+    // ========== ADDITIONAL CONSENT SCENARIOS ==========
+
+    // Scenario 29: Consent Revoke/Grant Race
+    // Purpose: Test re-grant cooldown under rapid cycling
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=consent_revoke_grant_race
+    consent_revoke_grant_race: {
+      executor: 'constant-vus',
+      vus: 50,
+      duration: '1m',
+      exec: 'consentRevokeGrantRaceScenario',
+      startTime: '0s',
+      tags: { scenario: 'consent_revoke_grant_race' },
+    },
+
+    // Scenario 30: Consent GDPR Delete
+    // Purpose: Verify DeleteAll consistency
+    // Run: k6 run loadtest/k6-credo.js -e SCENARIO=consent_gdpr_delete
+    consent_gdpr_delete: {
+      executor: 'per-vu-iterations',
+      vus: 50,
+      iterations: 5,
+      exec: 'consentGDPRDeleteScenario',
+      startTime: '0s',
+      tags: { scenario: 'consent_gdpr_delete' },
+    },
   },
 
   thresholds: {
@@ -256,6 +590,16 @@ export const options = {
 
     // Consent list: validate O(n) list performance
     'consent_list_latency{scenario:consent_list_load}': ['p(95)<100'],
+
+    // Performance bottleneck tests
+    // Global throttle spike: expect degradation, track p99 for analysis
+    'global_throttle_latency{scenario:global_throttle_spike}': ['p(99)<1000'],
+
+    // Hot key contention: p95 should stay reasonable even under skewed load
+    'hot_key_latency{scenario:hot_key_contention}': ['p(95)<500'],
+
+    // Auth lockout race: no races should be detected (counter should stay at 0)
+    'auth_lockout_race_detected{scenario:auth_lockout_race}': ['count<1'],
   },
 };
 
@@ -1041,6 +1385,126 @@ export function consentListScenario(data) {
   }
 
   sleep(0.05); // 50ms between requests
+}
+
+// ========== PERFORMANCE BOTTLENECK TEST SCENARIOS ==========
+
+// Scenario 12: Global Throttle Spike Test
+// Purpose: Stress global throttle PostgreSQL row locks with rapid RPS spike.
+// Validates FOR UPDATE contention on 2 shared rows (second + hour buckets).
+export function globalThrottleSpikeScenario() {
+  const startTime = Date.now();
+  const res = http.get(`${BASE_URL}/health`, {
+    tags: { name: 'global_throttle_spike' },
+  });
+  const duration = Date.now() - startTime;
+
+  globalThrottleLatency.add(duration);
+
+  // Track 429s but don't count them as errors (expected behavior under load)
+  if (res.status === 429) {
+    rateLimited.add(1);
+  }
+
+  check(res, {
+    'global throttle response is 200 or 429 or 503': (r) =>
+      r.status === 200 || r.status === 429 || r.status === 503,
+  });
+}
+
+// Scenario 13: Hot Key Advisory Lock Contention
+// Purpose: 80% traffic to 10 hot IPs to stress advisory lock wait times.
+// Validates that sharded locks don't create excessive lock queues.
+export function hotKeyContentionScenario() {
+  // 80% of traffic goes to 10 hot IPs
+  const hotIPs = [
+    '192.168.1.1', '192.168.1.2', '192.168.1.3', '192.168.1.4', '192.168.1.5',
+    '192.168.1.6', '192.168.1.7', '192.168.1.8', '192.168.1.9', '192.168.1.10',
+  ];
+
+  let ip;
+  if (Math.random() < 0.8) {
+    // 80% to hot IPs
+    ip = hotIPs[Math.floor(Math.random() * hotIPs.length)];
+  } else {
+    // 20% to random IPs (cold keys)
+    const ipNum = Math.floor(Math.random() * 1000000);
+    ip = `10.${(ipNum >> 16) & 255}.${(ipNum >> 8) & 255}.${ipNum & 255}`;
+  }
+
+  const startTime = Date.now();
+  const res = http.get(`${BASE_URL}/health`, {
+    headers: {
+      'X-Forwarded-For': ip,
+    },
+    tags: { name: 'hot_key_contention' },
+  });
+  const duration = Date.now() - startTime;
+
+  hotKeyLatency.add(duration);
+
+  if (res.status === 429) {
+    rateLimited.add(1);
+  }
+
+  check(res, {
+    'hot key response is 200 or 429': (r) => r.status === 200 || r.status === 429,
+  });
+}
+
+// Scenario 14: Auth Lockout TOCTOU Race Detection
+// Purpose: 100 concurrent login failures for same user to expose TOCTOU races.
+// All VUs attack the same username:IP to maximize contention.
+// Expected: failure_count should equal total attempts; hard lock at threshold 10.
+export function authLockoutRaceScenario(data) {
+  const clientID = data.clientID || CLIENT_ID;
+  // All VUs use the same credentials to maximize contention
+  const targetEmail = `toctou-race-test@example.com`;
+  const targetIP = '203.0.113.42'; // Fixed IP for composite key
+
+  const startTime = Date.now();
+  // Attempt authorize which will trigger auth lockout check
+  const res = http.post(
+    `${BASE_URL}/auth/authorize`,
+    JSON.stringify({
+      email: targetEmail,
+      client_id: clientID,
+      redirect_uri: REDIRECT_URI,
+      scopes: DEFAULT_SCOPES,
+      // Include the fixed IP in request for composite key
+    }),
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': targetIP,
+      },
+      tags: { name: 'auth_lockout_race' },
+    }
+  );
+  const duration = Date.now() - startTime;
+
+  authLockoutLatency.add(duration);
+
+  // After 10 daily failures, user should be hard locked (429 expected)
+  // After 5 window failures, user should be soft locked (429 expected)
+  // Success (200) after 10+ failures indicates a TOCTOU race
+  const isExpectedLockout = res.status === 429;
+  const isSuccess = res.status === 200;
+  const totalAttempts = __VU * __ITER;
+
+  // If we're past the hard lock threshold (10 daily failures) and still getting 200s,
+  // that's a potential race condition
+  if (isSuccess && totalAttempts > 10) {
+    // This could indicate a race - the failure count wasn't incremented atomically
+    // Log for manual inspection; the threshold check will catch if too many races occur
+    console.log(`Potential TOCTOU race: VU=${__VU} ITER=${__ITER} status=200 after ${totalAttempts} total attempts`);
+    authLockoutRaceDetected.add(1);
+  }
+
+  check(res, {
+    'auth lockout response is valid': (r) =>
+      r.status === 200 || r.status === 400 || r.status === 429,
+  });
 }
 
 // Teardown: Cleanup test data
