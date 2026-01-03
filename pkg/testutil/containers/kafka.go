@@ -44,11 +44,8 @@ func NewKafkaContainer(t *testing.T) *KafkaContainer {
 		Brokers:   broker,
 	}
 
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = container.Terminate(ctx)
-	})
+	// Note: We don't register t.Cleanup here because the container is managed
+	// by the singleton Manager and shared across test suites. Ryuk handles cleanup.
 
 	return kc
 }

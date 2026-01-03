@@ -5,7 +5,6 @@ package containers
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
@@ -58,12 +57,8 @@ func NewRedisContainer(t *testing.T) *RedisContainer {
 		Client:    client,
 	}
 
-	t.Cleanup(func() {
-		_ = client.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = container.Terminate(ctx)
-	})
+	// Note: We don't register t.Cleanup here because the container is managed
+	// by the singleton Manager and shared across test suites. Ryuk handles cleanup.
 
 	return rc
 }

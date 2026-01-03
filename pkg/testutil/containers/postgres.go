@@ -72,12 +72,9 @@ func NewPostgresContainer(t *testing.T) *PostgresContainer {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 
-	t.Cleanup(func() {
-		_ = db.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = container.Terminate(ctx)
-	})
+	// Note: We don't register t.Cleanup here because the container is managed
+	// by the singleton Manager and shared across test suites. Ryuk (testcontainers'
+	// cleanup sidecar) handles container cleanup when the test process exits.
 
 	return pc
 }
