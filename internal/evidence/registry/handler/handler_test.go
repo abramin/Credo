@@ -27,7 +27,8 @@ import (
 	"credo/internal/evidence/registry/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/ops"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 	"credo/pkg/requestcontext"
 )
 
@@ -67,13 +68,10 @@ func (s *stubRegistryService) Check(ctx context.Context, userID id.UserID, natio
 	return nil, nil
 }
 
-type stubAuditPublisher struct {
-	events []audit.Event
-}
-
-func (s *stubAuditPublisher) Emit(ctx context.Context, event audit.Event) error {
-	s.events = append(s.events, event)
-	return nil
+// newTestOpsPublisher creates an ops publisher with in-memory store for testing.
+func newTestOpsPublisher() (*ops.Publisher, *auditmemory.InMemoryStore) {
+	store := auditmemory.NewInMemoryStore()
+	return ops.New(store, ops.WithSampleRate(1.0)), store
 }
 
 // =============================================================================
@@ -241,8 +239,8 @@ func TestHandleSanctionsLookup_ResponseFormat(t *testing.T) {
 			}, nil
 		},
 	}
-	auditPort := &stubAuditPublisher{}
-	handler := newTestRegistryHandler(service, auditPort)
+	opsPublisher, _ := newTestOpsPublisher()
+	handler := newTestRegistryHandler(service, opsPublisher)
 
 	req := newSanctionsRequest(t, "FORMAT1234", validUserID())
 	w := httptest.NewRecorder()
@@ -263,12 +261,12 @@ func TestHandleSanctionsLookup_ResponseFormat(t *testing.T) {
 // Test Helpers
 // =============================================================================
 
-func newTestRegistryHandler(service RegistryService, auditPort *stubAuditPublisher) *Handler {
+func newTestRegistryHandler(service RegistryService, opsPublisher *ops.Publisher) *Handler {
 	if service == nil {
 		service = &stubRegistryService{}
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(service, auditPort, logger)
+	return New(service, opsPublisher, logger)
 }
 
 func validUserID() id.UserID {

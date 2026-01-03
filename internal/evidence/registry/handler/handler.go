@@ -11,11 +11,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	evidenceports "credo/internal/evidence/ports"
 	"credo/internal/evidence/registry/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/ops"
 	"credo/pkg/platform/httputil"
 	"credo/pkg/requestcontext"
 )
@@ -33,17 +33,17 @@ type RegistryService interface {
 
 // Handler handles HTTP requests for registry operations.
 type Handler struct {
-	service   RegistryService
-	auditPort evidenceports.AuditPublisher
-	logger    *slog.Logger
+	service    RegistryService
+	opsTracker *ops.Publisher
+	logger     *slog.Logger
 }
 
 // New creates a new registry handler.
-func New(service RegistryService, auditPort evidenceports.AuditPublisher, logger *slog.Logger) *Handler {
+func New(service RegistryService, opsTracker *ops.Publisher, logger *slog.Logger) *Handler {
 	return &Handler{
-		service:   service,
-		auditPort: auditPort,
-		logger:    logger,
+		service:    service,
+		opsTracker: opsTracker,
+		logger:     logger,
 	}
 }
 
@@ -157,13 +157,10 @@ func (h *Handler) HandleCitizenLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Emit audit event
-	h.emitAudit(ctx, audit.Event{
+	// Emit operational audit event (fire-and-forget with sampling)
+	h.emitAudit(ctx, audit.OpsEvent{
 		Action:    "registry_citizen_checked",
-		Purpose:   "registry_check",
-		UserID:    userID,
-		Decision:  "checked",
-		Reason:    "user_initiated",
+		Subject:   userID.String(),
 		RequestID: requestID,
 	})
 
@@ -227,20 +224,13 @@ func (h *Handler) HandleSanctionsLookup(w http.ResponseWriter, r *http.Request) 
 	httputil.WriteJSON(w, http.StatusOK, response)
 }
 
-// emitAudit publishes an audit event. Failures are logged but don't fail the operation.
-// When a tracer is configured, emits an audit.emitted span event after successful publishing.
-func (h *Handler) emitAudit(ctx context.Context, event audit.Event) {
-	if h.auditPort == nil {
+// emitAudit publishes an operational audit event using fire-and-forget semantics.
+// When a tracer is configured, emits an audit.emitted span event after tracking.
+func (h *Handler) emitAudit(ctx context.Context, event audit.OpsEvent) {
+	if h.opsTracker == nil {
 		return
 	}
-	if err := h.auditPort.Emit(ctx, event); err != nil {
-		h.logger.ErrorContext(ctx, "failed to emit audit event",
-			"error", err,
-			"action", event.Action,
-			"user_id", event.UserID,
-		)
-		return
-	}
+	h.opsTracker.Track(ctx, event)
 	// Emit span event for audit trail correlation
 	h.emitAuditSpanEvent(ctx, event.Action)
 }

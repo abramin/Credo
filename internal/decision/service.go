@@ -14,6 +14,7 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/compliance"
 	"credo/pkg/requestcontext"
 )
 
@@ -25,19 +26,13 @@ const (
 	consentPurpose id.ConsentPurpose = id.ConsentPurposeDecision
 )
 
-// AuditPublisher publishes decision audit events to an external sink.
-// Implementations may perform I/O and return errors on write failures.
-type AuditPublisher interface {
-	Emit(ctx context.Context, event audit.Event) error
-}
-
 // Service evaluates identity, registry outputs, and VC claims to produce a
 // final decision. The goal is to keep the rules centralized and testable.
 type Service struct {
 	registry ports.RegistryPort
 	vc       ports.VCPort
 	consent  ports.ConsentPort
-	auditor  AuditPublisher
+	auditor  *compliance.Publisher
 	metrics  *metrics.Metrics
 	logger   *slog.Logger
 }
@@ -67,7 +62,7 @@ func New(
 	registry ports.RegistryPort,
 	vc ports.VCPort,
 	consent ports.ConsentPort,
-	auditor AuditPublisher,
+	auditor *compliance.Publisher,
 	opts ...Option,
 ) (*Service, error) {
 	if registry == nil {
@@ -105,7 +100,7 @@ func New(
 // emits audit events, logs audit failures, and records metrics.
 //
 // Errors: propagates consent/evidence errors; audit failures are fail-closed for
-// sanctions decisions and fail-open for age verification.
+// all decision types (compliance requirement).
 func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (*EvaluateResult, error) {
 	// Single authoritative timestamp for the entire evaluation.
 	// Extracted from context (set by middleware) for deterministic testing and consistent audit trails.
@@ -195,49 +190,27 @@ func (s *Service) buildInput(evidence *GatheredEvidence, derived DerivedIdentity
 	return input
 }
 
-// emitAudit publishes a decision audit event.
+// emitAudit publishes a decision audit event with fail-closed semantics.
 //
 // Side effects: writes audit records and logs on failure.
 //
-// Audit semantics vary by decision type:
-//   - Sanctions decisions: fail-closed (audit failure blocks response).
-//     Regulatory compliance requires audit trail guarantees for high-consequence decisions.
-//   - Age verification decisions: fail-open (audit failure is best-effort).
-//     Advisory decisions can proceed without guaranteed audit persistence.
+// All decision events are fail-closed: audit failure blocks the response.
+// Both sanctions and age verification involve consent gating and regulated
+// identity verification, making guaranteed audit persistence a compliance requirement.
 func (s *Service) emitAudit(ctx context.Context, req EvaluateRequest, result *EvaluateResult, evalTime time.Time) error {
-	event := audit.Event{
-		Category:      audit.EventDecisionMade.Category(),
+	event := audit.ComplianceEvent{
 		Timestamp:     evalTime,
 		UserID:        req.UserID,
 		Action:        string(audit.EventDecisionMade),
 		Purpose:       string(req.Purpose),
 		Decision:      string(result.Status),
-		Reason:        string(result.Reason),
-		RequestID:     requestcontext.RequestID(ctx),
 		SubjectIDHash: hashSubjectID(req.NationalID.String()),
+		RequestID:     requestcontext.RequestID(ctx),
 	}
 
-	if isSanctionsDecision(req, result) {
-		return s.emitAuditFailClosed(ctx, event, req)
-	}
-
-	s.emitAuditBestEffort(ctx, event, req)
-	return nil
-}
-
-// hashSubjectID produces a SHA-256 hash of the subject identifier for audit traceability.
-// This allows compliance teams to correlate decisions without storing raw PII in audit logs.
-func hashSubjectID(subjectID string) string {
-	h := sha256.Sum256([]byte(subjectID))
-	return hex.EncodeToString(h[:])
-}
-
-// emitAuditFailClosed publishes audit events for sanctions decisions and fails closed
-// when the audit sink is unavailable.
-func (s *Service) emitAuditFailClosed(ctx context.Context, event audit.Event, req EvaluateRequest) error {
 	if err := s.auditor.Emit(ctx, event); err != nil {
 		if s.logger != nil {
-			s.logger.ErrorContext(ctx, "CRITICAL: audit failed for sanctions decision - blocking response",
+			s.logger.ErrorContext(ctx, "CRITICAL: audit failed for decision - blocking response",
 				"user_id", req.UserID,
 				"purpose", req.Purpose,
 				"error", err,
@@ -248,13 +221,9 @@ func (s *Service) emitAuditFailClosed(ctx context.Context, event audit.Event, re
 	return nil
 }
 
-// emitAuditBestEffort publishes audit events for non-sanctions decisions.
-// Audit failures are logged but do not block the response.
-func (s *Service) emitAuditBestEffort(ctx context.Context, event audit.Event, req EvaluateRequest) {
-	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
-		s.logger.WarnContext(ctx, "failed to emit decision audit event",
-			"error", err,
-			"user_id", req.UserID,
-		)
-	}
+// hashSubjectID produces a SHA-256 hash of the subject identifier for audit traceability.
+// This allows compliance teams to correlate decisions without storing raw PII in audit logs.
+func hashSubjectID(subjectID string) string {
+	h := sha256.Sum256([]byte(subjectID))
+	return hex.EncodeToString(h[:])
 }

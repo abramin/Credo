@@ -1,6 +1,6 @@
 package admin
 
-//go:generate mockgen -source=admin.go -destination=mocks/mocks.go -package=mocks AllowlistStore,BucketStore,AuditPublisher
+//go:generate mockgen -source=admin.go -destination=mocks/mocks.go -package=mocks AllowlistStore,BucketStore
 
 import (
 	"context"
@@ -13,6 +13,9 @@ import (
 
 	"credo/internal/ratelimit/admin/mocks"
 	"credo/internal/ratelimit/models"
+	"credo/internal/ratelimit/observability"
+	"credo/pkg/platform/audit/publishers/security"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 )
 
 // =============================================================================
@@ -24,11 +27,11 @@ import (
 
 type AdminServiceSuite struct {
 	suite.Suite
-	ctrl               *gomock.Controller
-	mockAllowlist      *mocks.MockAllowlistStore
-	mockBuckets        *mocks.MockBucketStore
-	mockAuditPublisher *mocks.MockAuditPublisher
-	service            *Service
+	ctrl           *gomock.Controller
+	mockAllowlist  *mocks.MockAllowlistStore
+	mockBuckets    *mocks.MockBucketStore
+	auditPublisher observability.AuditPublisher
+	service        *Service
 }
 
 func TestAdminServiceSuite(t *testing.T) {
@@ -39,13 +42,13 @@ func (s *AdminServiceSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.mockAllowlist = mocks.NewMockAllowlistStore(s.ctrl)
 	s.mockBuckets = mocks.NewMockBucketStore(s.ctrl)
-	s.mockAuditPublisher = mocks.NewMockAuditPublisher(s.ctrl)
+	s.auditPublisher = security.New(auditmemory.NewInMemoryStore())
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s.service, _ = New(
 		s.mockAllowlist,
 		s.mockBuckets,
 		WithLogger(logger),
-		WithAuditPublisher(s.mockAuditPublisher),
+		WithAuditPublisher(s.auditPublisher),
 	)
 }
 
@@ -84,11 +87,11 @@ func (s *AdminServiceSuite) TestNew() {
 			s.mockAllowlist,
 			s.mockBuckets,
 			WithLogger(logger),
-			WithAuditPublisher(s.mockAuditPublisher),
+			WithAuditPublisher(s.auditPublisher),
 		)
 		s.NoError(err)
 		s.Equal(logger, svc.logger)
-		s.Equal(s.mockAuditPublisher, svc.auditPublisher)
+		s.Equal(s.auditPublisher, svc.auditPublisher)
 	})
 }
 
@@ -113,9 +116,6 @@ func (s *AdminServiceSuite) TestResetRateLimitNormalization() {
 		s.mockBuckets.EXPECT().
 			Reset(ctx, "ip:192.168.1.100:auth").
 			Return(nil)
-		s.mockAuditPublisher.EXPECT().
-			Emit(ctx, gomock.Any()).
-			Return(nil)
 
 		err := s.service.ResetRateLimit(ctx, req)
 		s.NoError(err)
@@ -138,9 +138,6 @@ func (s *AdminServiceSuite) TestResetRateLimitNormalization() {
 			Return(nil)
 		s.mockBuckets.EXPECT().
 			Reset(ctx, "user:user-123:write").
-			Return(nil)
-		s.mockAuditPublisher.EXPECT().
-			Emit(ctx, gomock.Any()).
 			Return(nil)
 
 		err := s.service.ResetRateLimit(ctx, req)

@@ -115,7 +115,6 @@ func (s *ServiceSuite) TestTokenExchangeFlow_ValidationAndErrorMapping() {
 	s.Run("code store lookup error", func() {
 		req := baseReq
 		s.mockCodeStore.EXPECT().FindByCode(gomock.Any(), req.Code).Return(nil, errors.New("db error"))
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.Token(context.Background(), &req)
 		s.Require().Error(err)

@@ -54,12 +54,6 @@ func evaluateSanctionsScreening(input DecisionInput) DecisionOutcome {
 	return DecisionPass
 }
 
-// isSanctionsDecision returns true if the decision involves sanctions
-// (either by purpose or by result reason).
-func isSanctionsDecision(req EvaluateRequest, result *EvaluateResult) bool {
-	return result.Reason == ReasonSanctioned || req.Purpose == PurposeSanctionsScreening
-}
-
 // BuildResult constructs an EvaluateResult from the evaluation outcome.
 // This is pure domain logic - no I/O, no side effects.
 func BuildResult(purpose Purpose, outcome DecisionOutcome, evidence *GatheredEvidence, derived DerivedIdentity, evalTime time.Time) *EvaluateResult {

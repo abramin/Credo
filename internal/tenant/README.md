@@ -149,9 +149,9 @@ type UserCounter interface {
     CountByTenant(ctx, tenantID) (int, error)
 }
 
-type AuditPublisher interface {
-    Emit(ctx, audit.Event) error
-}
+// AuditPublisher is a type alias to the security publisher.
+// Tenant events (create, deactivate, reactivate) are security-relevant.
+type AuditPublisher = *security.Publisher
 ```
 
 ### Adapters

@@ -33,10 +33,10 @@ This module follows **hexagonal architecture** (ports-and-adapters):
                            │
             ┌──────────────┴──────────────┐
             ▼                             ▼
-┌──────────────────────────┐   ┌──────────────────────┐
-│ Store (ports.Store)      │   │ Audit Publisher       │
-│ - PostgreSQL adapter     │   │ - audit events        │
-└──────────────────────────┘   └──────────────────────┘
+┌──────────────────────────┐   ┌──────────────────────────┐
+│ Store (ports.Store)      │   │ Compliance Publisher     │
+│ - PostgreSQL adapter     │   │ - fail-closed semantics  │
+└──────────────────────────┘   └──────────────────────────┘
 ```
 
 Other modules integrate via **in-process adapters** (e.g., `internal/registry/adapters/consent_adapter.go`).
@@ -138,7 +138,7 @@ Events are emitted after the transaction commits to keep I/O out of the critical
 
 **Interfaces:**
 - `Store` - consent persistence
-- `audit.Publisher` - audit event emission
+- `*compliance.Publisher` - audit event emission (fail-closed semantics for GDPR compliance)
 
 ### 3. Adapters (Infrastructure)
 

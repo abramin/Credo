@@ -20,7 +20,7 @@ import (
 	tenantstore "credo/internal/tenant/store/tenant"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	auditpublisher "credo/pkg/platform/audit/publisher"
+	"credo/pkg/platform/audit/publishers/security"
 	auditmemory "credo/pkg/platform/audit/store/memory"
 	adminmw "credo/pkg/platform/middleware/admin"
 )
@@ -40,7 +40,7 @@ func (s *HandlerSuite) SetupTest() {
 		tenants,
 		clients,
 		nil,
-		service.WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
+		service.WithAuditPublisher(security.New(auditStore)),
 	)
 	s.Require().NoError(err)
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))

@@ -10,6 +10,8 @@ import (
 	vcmodels "credo/internal/evidence/vc/models"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/compliance"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 	"credo/pkg/requestcontext"
 
 	"github.com/stretchr/testify/suite"
@@ -27,7 +29,8 @@ type RuleEvaluationSuite struct {
 	registry   *mockRegistryPort
 	vc         *mockVCPort
 	consent    *mockConsentPort
-	auditor    *mockAuditPublisher
+	auditStore *auditmemory.InMemoryStore
+	auditor    *compliance.Publisher
 	testUserID id.UserID
 	testNatID  id.NationalID
 }
@@ -40,7 +43,8 @@ func (s *RuleEvaluationSuite) SetupTest() {
 	s.registry = &mockRegistryPort{}
 	s.vc = &mockVCPort{}
 	s.consent = &mockConsentPort{}
-	s.auditor = &mockAuditPublisher{}
+	s.auditStore = auditmemory.NewInMemoryStore()
+	s.auditor = compliance.New(s.auditStore)
 
 	var err error
 	s.service, err = New(s.registry, s.vc, s.consent, s.auditor)
@@ -239,7 +243,7 @@ func (s *RuleEvaluationSuite) TestAuditEmission() {
 			DateOfBirth: "1990-01-15",
 		}
 		s.registry.sanctions = &registrycontracts.SanctionsRecord{Listed: false}
-		s.auditor.events = nil // reset
+		s.auditStore.Clear() // reset
 
 		_, err := s.service.Evaluate(context.Background(), EvaluateRequest{
 			UserID:     s.testUserID,
@@ -248,9 +252,11 @@ func (s *RuleEvaluationSuite) TestAuditEmission() {
 		})
 
 		s.Require().NoError(err)
-		s.Len(s.auditor.events, 1)
-		s.Equal("decision_made", s.auditor.events[0].Action)
-		s.Equal(audit.CategoryCompliance, s.auditor.events[0].Category)
+		events, err := s.auditStore.ListAll(context.Background())
+		s.Require().NoError(err)
+		s.Len(events, 1)
+		s.Equal("decision_made", events[0].Action)
+		s.Equal(audit.CategoryCompliance, events[0].Category)
 	})
 
 	s.Run("includes subject ID hash in audit event", func() {
@@ -259,7 +265,7 @@ func (s *RuleEvaluationSuite) TestAuditEmission() {
 			DateOfBirth: "1990-01-15",
 		}
 		s.registry.sanctions = &registrycontracts.SanctionsRecord{Listed: false}
-		s.auditor.events = nil // reset
+		s.auditStore.Clear() // reset
 
 		_, err := s.service.Evaluate(context.Background(), EvaluateRequest{
 			UserID:     s.testUserID,
@@ -268,17 +274,28 @@ func (s *RuleEvaluationSuite) TestAuditEmission() {
 		})
 
 		s.Require().NoError(err)
-		s.Len(s.auditor.events, 1)
-		s.NotEmpty(s.auditor.events[0].SubjectIDHash, "audit event should include hashed subject ID for traceability")
+		events, err := s.auditStore.ListAll(context.Background())
+		s.Require().NoError(err)
+		s.Len(events, 1)
+		s.NotEmpty(events[0].SubjectIDHash, "audit event should include hashed subject ID for traceability")
 	})
 }
 
 func (s *RuleEvaluationSuite) TestAuditFailureSemantics() {
+	// Helper to create a service with a failing audit store
+	createServiceWithFailingAudit := func() *Service {
+		failingStore := &failingAuditStore{err: errors.New("audit service unavailable")}
+		failingAuditor := compliance.New(failingStore)
+		svc, err := New(s.registry, s.vc, s.consent, failingAuditor)
+		s.Require().NoError(err)
+		return svc
+	}
+
 	s.Run("audit failure blocks sanctions screening response (fail-closed)", func() {
 		s.registry.sanctions = &registrycontracts.SanctionsRecord{Listed: true}
-		s.auditor.err = errors.New("audit service unavailable")
+		svc := createServiceWithFailingAudit()
 
-		_, err := s.service.Evaluate(context.Background(), EvaluateRequest{
+		_, err := svc.Evaluate(context.Background(), EvaluateRequest{
 			UserID:     s.testUserID,
 			Purpose:    PurposeSanctionsScreening,
 			NationalID: s.testNatID,
@@ -294,9 +311,9 @@ func (s *RuleEvaluationSuite) TestAuditFailureSemantics() {
 			DateOfBirth: "1990-01-15",
 		}
 		s.registry.sanctions = &registrycontracts.SanctionsRecord{Listed: true}
-		s.auditor.err = errors.New("audit service unavailable")
+		svc := createServiceWithFailingAudit()
 
-		_, err := s.service.Evaluate(context.Background(), EvaluateRequest{
+		_, err := svc.Evaluate(context.Background(), EvaluateRequest{
 			UserID:     s.testUserID,
 			Purpose:    PurposeAgeVerification,
 			NationalID: s.testNatID,
@@ -306,22 +323,22 @@ func (s *RuleEvaluationSuite) TestAuditFailureSemantics() {
 		s.Contains(err.Error(), "audit unavailable")
 	})
 
-	s.Run("audit failure allows non-sanctions age verification response (fail-open)", func() {
+	s.Run("audit failure blocks all age verification responses (fail-closed)", func() {
 		s.registry.citizen = &registrycontracts.CitizenRecord{
 			Valid:       true,
 			DateOfBirth: "1990-01-15",
 		}
 		s.registry.sanctions = &registrycontracts.SanctionsRecord{Listed: false}
-		s.auditor.err = errors.New("audit service unavailable")
+		svc := createServiceWithFailingAudit()
 
-		result, err := s.service.Evaluate(context.Background(), EvaluateRequest{
+		_, err := svc.Evaluate(context.Background(), EvaluateRequest{
 			UserID:     s.testUserID,
 			Purpose:    PurposeAgeVerification,
 			NationalID: s.testNatID,
 		})
 
-		s.NoError(err, "non-sanctions age verification should proceed despite audit failure")
-		s.Equal(DecisionPassWithConditions, result.Status)
+		s.Error(err, "all decision types are fail-closed for compliance")
+		s.Contains(err.Error(), "audit unavailable")
 	})
 }
 
@@ -424,15 +441,24 @@ func (m *mockConsentPort) RequireConsent(ctx context.Context, userID id.UserID, 
 	return m.err
 }
 
-type mockAuditPublisher struct {
-	events []audit.Event
-	err    error
+// failingAuditStore is a test double that always returns an error.
+// Used to test fail-closed audit semantics.
+type failingAuditStore struct {
+	err error
 }
 
-func (m *mockAuditPublisher) Emit(ctx context.Context, event audit.Event) error {
-	if m.err != nil {
-		return m.err
-	}
-	m.events = append(m.events, event)
-	return nil
+func (f *failingAuditStore) Append(_ context.Context, _ audit.Event) error {
+	return f.err
+}
+
+func (f *failingAuditStore) ListByUser(_ context.Context, _ id.UserID) ([]audit.Event, error) {
+	return nil, f.err
+}
+
+func (f *failingAuditStore) ListAll(_ context.Context) ([]audit.Event, error) {
+	return nil, f.err
+}
+
+func (f *failingAuditStore) ListRecent(_ context.Context, _ int) ([]audit.Event, error) {
+	return nil, f.err
 }

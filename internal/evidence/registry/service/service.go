@@ -12,7 +12,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	evidenceports "credo/internal/evidence/ports"
 	"credo/internal/evidence/registry/models"
 	"credo/internal/evidence/registry/orchestrator"
 	"credo/internal/evidence/registry/ports"
@@ -21,6 +20,7 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/compliance"
 	"credo/pkg/requestcontext"
 
 	"golang.org/x/sync/errgroup"
@@ -50,7 +50,7 @@ type Service struct {
 	orchestrator *orchestrator.Orchestrator
 	cache        CacheStore
 	consentPort  ports.ConsentPort
-	auditor      evidenceports.AuditPublisher
+	auditor      *compliance.Publisher
 	regulated    bool
 	logger       *slog.Logger
 }
@@ -82,10 +82,10 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithAuditor sets the audit port for the service.
+// WithAuditor sets the compliance auditor for the service.
 // When set, sanctions lookups will emit audit events with fail-closed semantics
-// for listed sanctions (audit must succeed before result is returned).
-func WithAuditor(auditor evidenceports.AuditPublisher) Option {
+// (audit must succeed before result is returned for all sanctions checks).
+func WithAuditor(auditor *compliance.Publisher) Option {
 	return func(s *Service) {
 		s.auditor = auditor
 	}
@@ -597,12 +597,11 @@ func (s *Service) auditSanctionsCheck(ctx context.Context, userID id.UserID, lis
 		decision = "listed"
 	}
 
-	event := audit.Event{
+	event := audit.ComplianceEvent{
 		Action:    "registry_sanctions_checked",
 		Purpose:   "registry_check",
 		UserID:    userID,
 		Decision:  decision,
-		Reason:    "user_initiated",
 		RequestID: requestcontext.RequestID(ctx),
 	}
 

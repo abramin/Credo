@@ -19,7 +19,7 @@ import (
 	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/security"
 	"credo/pkg/requestcontext"
 )
 
@@ -109,10 +109,9 @@ type TokenGenerator interface {
 	ParseTokenSkipClaimsValidation(token string) (*jwttoken.AccessTokenClaims, error)
 }
 
-// AuditPublisher emits auth-related audit events.
-type AuditPublisher interface {
-	Emit(ctx context.Context, base audit.Event) error
-}
+// AuditPublisher is now the security publisher for auth events.
+// Auth events (auth failures, session revocations) are security-relevant.
+type AuditPublisher = *security.Publisher
 
 // ClientResolver resolves client metadata and tenant ownership for a client ID.
 type ClientResolver interface {

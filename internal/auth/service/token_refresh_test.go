@@ -84,7 +84,6 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 		s.mockRefreshStore.EXPECT().Find(gomock.Any(), refreshTokenString).Return(&refreshRec, nil)
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(&sess, nil)
 		s.mockClientResolver.EXPECT().ResolveClient(gomock.Any(), req.ClientID).Return(&otherClient, mockTenant, nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.Token(context.Background(), &req)
 		s.Require().Error(err)
@@ -181,7 +180,6 @@ func (s *ServiceSuite) TestTokenRefreshFlow() {
 				return &sess, nil
 			})
 		s.mockRefreshStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.Token(ctx, &req)
 		s.Require().NoError(err)

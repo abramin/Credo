@@ -57,7 +57,6 @@ func (s *ServiceSuite) TestTokenRevocation_PartialFailureHandling() {
 		s.mockSessionStore.EXPECT().RevokeSessionIfActive(gomock.Any(), sessionID, gomock.Any()).Return(nil)
 		s.mockTRL.EXPECT().RevokeToken(gomock.Any(), tokenJTI, s.service.TokenTTL).Return(nil)
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessionID).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.RevokeToken(ctx, accessToken, "") // No hint
 		s.Require().NoError(err)
@@ -84,7 +83,6 @@ func (s *ServiceSuite) TestTokenRevocation_PartialFailureHandling() {
 		s.mockTRL.EXPECT().RevokeToken(gomock.Any(), tokenJTI, s.service.TokenTTL).
 			Return(errors.New("redis error"))
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessionID).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.RevokeToken(ctx, accessToken, TokenHintAccessToken)
 		s.Require().NoError(err) // Should succeed even if TRL fails
@@ -111,7 +109,6 @@ func (s *ServiceSuite) TestTokenRevocation_PartialFailureHandling() {
 		s.mockTRL.EXPECT().RevokeToken(gomock.Any(), tokenJTI, s.service.TokenTTL).Return(nil)
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessionID).
 			Return(errors.New("db error"))
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.RevokeToken(ctx, accessToken, TokenHintAccessToken)
 		s.Require().NoError(err) // Should succeed even if refresh deletion fails

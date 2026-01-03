@@ -10,6 +10,7 @@ import (
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/attrs"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/security"
 	"credo/pkg/platform/sentinel"
 	"credo/pkg/requestcontext"
 )
@@ -37,9 +38,9 @@ type UserCounter interface {
 	CountByTenant(ctx context.Context, tenantID id.TenantID) (int, error)
 }
 
-type AuditPublisher interface {
-	Emit(ctx context.Context, base audit.Event) error
-}
+// AuditPublisher is now the security publisher for tenant events.
+// Tenant lifecycle events (create, deactivate, secret rotation) are security-relevant.
+type AuditPublisher = *security.Publisher
 
 // ID validation helpers reduce repetition in service methods.
 
@@ -187,41 +188,17 @@ func (e *auditEmitter) emitToAudit(ctx context.Context, event string, attributes
 		return dErrors.New(dErrors.CodeInternal, "audit publisher is required")
 	}
 
-	userIDStr := attrs.ExtractString(attributes, "user_id")
-	userID := e.parseUserID(ctx, userIDStr, event)
-	subject := resolveAuditSubject(attributes, userIDStr)
+	subject := resolveAuditSubject(attributes, attrs.ExtractString(attributes, "user_id"))
 
-	if err := e.publisher.Emit(ctx, audit.Event{
-		UserID:    userID,
+	// Security publisher is fire-and-forget with internal buffering and retry
+	e.publisher.Emit(ctx, audit.SecurityEvent{
 		Subject:   subject,
 		Action:    event,
 		RequestID: requestcontext.RequestID(ctx),
-	}); err != nil {
-		if e.logger != nil {
-			e.logger.ErrorContext(ctx, "failed to emit audit event",
-				"event", event,
-				"error", err,
-			)
-		}
-		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to emit audit event")
-	}
-	return nil
-}
+		Severity:  audit.SeverityInfo,
+	})
 
-// parseUserID attempts to parse the user ID, logging a warning on failure.
-func (e *auditEmitter) parseUserID(ctx context.Context, userIDStr, event string) id.UserID {
-	if userIDStr == "" {
-		return id.UserID{}
-	}
-	userID, err := id.ParseUserID(userIDStr)
-	if err != nil && e.logger != nil {
-		e.logger.WarnContext(ctx, "failed to parse user_id for audit event",
-			"user_id", userIDStr,
-			"event", event,
-			"error", err,
-		)
-	}
-	return userID
+	return nil
 }
 
 // resolveAuditSubject determines the audit subject from attributes.

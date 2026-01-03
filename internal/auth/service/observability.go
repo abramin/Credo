@@ -26,21 +26,14 @@ func (s *Service) logAudit(ctx context.Context, event string, attributes ...any)
 		return
 	}
 	userIDStr := attrs.ExtractString(attributes, "user_id")
-	userID, _ := id.ParseUserID(userIDStr) // Best-effort for audit - ignore parse errors
 
-	// PRD-001B: Extract email for audit enrichment
-	email := attrs.ExtractString(attributes, "email")
-
-	err := s.auditPublisher.Emit(ctx, audit.Event{
-		UserID:    userID,
+	// Security publisher is fire-and-forget with internal buffering and retry
+	s.auditPublisher.Emit(ctx, audit.SecurityEvent{
 		Subject:   userIDStr,
 		Action:    event,
-		Email:     email,
 		RequestID: requestID,
+		Severity:  audit.SeverityInfo,
 	})
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to emit audit event", "error", err)
-	}
 }
 
 // authFailureAttrs holds parsed attributes for auth failure events.
@@ -91,24 +84,20 @@ func (s *Service) logAuthFailure(ctx context.Context, reason string, isError boo
 	s.logger.WarnContext(ctx, string(audit.EventAuthFailed), args...)
 }
 
-// emitAuthFailure emits auth failure events to the audit store for compliance tracking.
+// emitAuthFailure emits auth failure events to the security audit store.
 func (s *Service) emitAuthFailure(ctx context.Context, reason string, parsed authFailureAttrs) {
 	if s.auditPublisher == nil {
 		return
 	}
 
-	if err := s.auditPublisher.Emit(ctx, audit.Event{
-		UserID:          parsed.userID,
-		Subject:         parsed.userIDStr,
-		Action:          string(audit.EventAuthFailed),
-		Reason:          reason,
-		Decision:        "denied",
-		RequestingParty: parsed.clientID,
-		Email:           parsed.email,
-		RequestID:       parsed.requestID,
-	}); err != nil && s.logger != nil {
-		s.logger.ErrorContext(ctx, "failed to emit auth failure audit event", "error", err)
-	}
+	// Security publisher is fire-and-forget with internal buffering and retry
+	s.auditPublisher.Emit(ctx, audit.SecurityEvent{
+		Subject:   parsed.userIDStr,
+		Action:    string(audit.EventAuthFailed),
+		Reason:    reason,
+		RequestID: parsed.requestID,
+		Severity:  audit.SeverityWarning,
+	})
 }
 
 // incrementUserCreated increments the users created metric if metrics are enabled

@@ -49,7 +49,7 @@ import (
 	"credo/internal/consent/service"
 	"credo/internal/consent/store"
 	id "credo/pkg/domain"
-	auditpublisher "credo/pkg/platform/audit/publisher"
+	"credo/pkg/platform/audit/publishers/compliance"
 	auditstore "credo/pkg/platform/audit/store/memory"
 	adminmw "credo/pkg/platform/middleware/admin"
 	"credo/pkg/requestcontext"
@@ -72,7 +72,7 @@ func newConsentTestHarness(userIDStr string) *consentTestHarness {
 	auditStore := auditstore.NewInMemoryStore()
 	svc := service.New(
 		consentStore,
-		auditpublisher.NewPublisher(auditStore),
+		compliance.New(auditStore),
 		logger,
 		service.WithConsentTTL(365*24*time.Hour),
 	)
@@ -273,11 +273,9 @@ func TestConsentExpiryAndIDReuse(t *testing.T) {
 		case consentModel.AuditActionConsentGranted:
 			assert.NotEmpty(t, event.Purpose, "grant event should have purpose")
 			assert.Equal(t, consentModel.AuditDecisionGranted, event.Decision, "grant event should have 'granted' decision")
-			assert.Equal(t, consentModel.AuditReasonUserInitiated, event.Reason, "grant event should have reason")
 		case consentModel.AuditActionConsentRevoked:
 			assert.NotEmpty(t, event.Purpose, "revoke event should have purpose")
 			assert.Equal(t, consentModel.AuditDecisionRevoked, event.Decision, "revoke event should have 'revoked' decision")
-			assert.Equal(t, consentModel.AuditReasonUserInitiated, event.Reason, "revoke event should have reason")
 		}
 	}
 	assert.Equal(t, 4, actionCounts["consent_granted"], "should have 4 grant events")

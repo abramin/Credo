@@ -15,6 +15,8 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/compliance"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 )
 
 // stubCache is a test double for the cache store
@@ -716,17 +718,37 @@ func (e *consentError) Error() string {
 	return e.message
 }
 
-// stubAuditPort is a test double for audit publishing
-type stubAuditPort struct {
-	emitErr    error
-	emitCalls  int
-	lastAction string
+// failingAuditStore is a test double that always returns an error.
+// Used to test fail-closed audit semantics.
+type failingAuditStore struct {
+	err error
 }
 
-func (p *stubAuditPort) Emit(_ context.Context, event audit.Event) error {
-	p.emitCalls++
-	p.lastAction = event.Action
-	return p.emitErr
+func (f *failingAuditStore) Append(_ context.Context, _ audit.Event) error {
+	return f.err
+}
+
+func (f *failingAuditStore) ListByUser(_ context.Context, _ id.UserID) ([]audit.Event, error) {
+	return nil, f.err
+}
+
+func (f *failingAuditStore) ListAll(_ context.Context) ([]audit.Event, error) {
+	return nil, f.err
+}
+
+func (f *failingAuditStore) ListRecent(_ context.Context, _ int) ([]audit.Event, error) {
+	return nil, f.err
+}
+
+// newFailingAuditor creates a compliance publisher that will fail on emit.
+func newFailingAuditor(err error) *compliance.Publisher {
+	return compliance.New(&failingAuditStore{err: err})
+}
+
+// newSuccessAuditor creates a compliance publisher with an in-memory store.
+func newSuccessAuditor() (*compliance.Publisher, *auditmemory.InMemoryStore) {
+	store := auditmemory.NewInMemoryStore()
+	return compliance.New(store), store
 }
 
 func (s *ServiceSuite) TestSanctionsAuditFailClosed() {
@@ -737,9 +759,7 @@ func (s *ServiceSuite) TestSanctionsAuditFailClosed() {
 
 	s.Run("returns error when cached listed sanctions audit fails", func() {
 		cache := newStubCache()
-		auditPort := &stubAuditPort{
-			emitErr: &auditError{message: "audit system unavailable"},
-		}
+		auditor := newFailingAuditor(errors.New("audit system unavailable"))
 
 		sanctionsRecord := &models.SanctionsRecord{
 			NationalID: "ABC123456",
@@ -751,20 +771,17 @@ func (s *ServiceSuite) TestSanctionsAuditFailClosed() {
 		_ = cache.SaveSanction(ctx, nationalID, sanctionsRecord)
 
 		orch := newTestOrchestrator(nil, nil)
-		svc := New(orch, cache, nil, false, WithAuditor(auditPort))
+		svc := New(orch, cache, nil, false, WithAuditor(auditor))
 
 		result, err := svc.Sanctions(ctx, userID, nationalID)
 		s.Require().Error(err)
 		s.Nil(result)
 		s.Contains(err.Error(), "unable to complete sanctions check")
-		s.Equal(1, auditPort.emitCalls)
 	})
 
 	s.Run("returns error when audit fails for listed sanctions", func() {
 		cache := newStubCache()
-		auditPort := &stubAuditPort{
-			emitErr: &auditError{message: "audit system unavailable"},
-		}
+		auditor := newFailingAuditor(errors.New("audit system unavailable"))
 
 		sanctionsRecord := &models.SanctionsRecord{
 			NationalID: "ABC123456",
@@ -782,18 +799,17 @@ func (s *ServiceSuite) TestSanctionsAuditFailClosed() {
 		}
 
 		orch := newTestOrchestrator(nil, sanctionsProv)
-		svc := New(orch, cache, nil, false, WithAuditor(auditPort))
+		svc := New(orch, cache, nil, false, WithAuditor(auditor))
 
 		result, err := svc.Sanctions(ctx, userID, nationalID)
 		s.Require().Error(err)
 		s.Nil(result)
 		s.Contains(err.Error(), "unable to complete sanctions check")
-		s.Equal(1, auditPort.emitCalls)
 	})
 
 	s.Run("returns result when audit succeeds for listed sanctions", func() {
 		cache := newStubCache()
-		auditPort := &stubAuditPort{emitErr: nil}
+		auditor, auditStore := newSuccessAuditor()
 
 		sanctionsRecord := &models.SanctionsRecord{
 			NationalID: "ABC123456",
@@ -811,21 +827,22 @@ func (s *ServiceSuite) TestSanctionsAuditFailClosed() {
 		}
 
 		orch := newTestOrchestrator(nil, sanctionsProv)
-		svc := New(orch, cache, nil, false, WithAuditor(auditPort))
+		svc := New(orch, cache, nil, false, WithAuditor(auditor))
 
 		result, err := svc.Sanctions(ctx, userID, nationalID)
 		s.Require().NoError(err)
 		s.NotNil(result)
 		s.True(result.Listed)
-		s.Equal(1, auditPort.emitCalls)
-		s.Equal("registry_sanctions_checked", auditPort.lastAction)
+
+		// Verify audit event was emitted
+		events, _ := auditStore.ListAll(ctx)
+		s.Len(events, 1)
+		s.Equal("registry_sanctions_checked", events[0].Action)
 	})
 
 	s.Run("fails when audit fails for non-listed sanctions (fail-closed)", func() {
 		cache := newStubCache()
-		auditPort := &stubAuditPort{
-			emitErr: &auditError{message: "audit system unavailable"},
-		}
+		auditor := newFailingAuditor(errors.New("audit system unavailable"))
 
 		sanctionsRecord := &models.SanctionsRecord{
 			NationalID: "ABC123456",
@@ -843,7 +860,7 @@ func (s *ServiceSuite) TestSanctionsAuditFailClosed() {
 		}
 
 		orch := newTestOrchestrator(nil, sanctionsProv)
-		svc := New(orch, cache, nil, false, WithAuditor(auditPort))
+		svc := New(orch, cache, nil, false, WithAuditor(auditor))
 
 		result, err := svc.Sanctions(ctx, userID, nationalID)
 		// All sanctions audits are now fail-closed for complete audit trail

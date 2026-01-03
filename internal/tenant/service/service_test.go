@@ -13,7 +13,7 @@ import (
 	tenantstore "credo/internal/tenant/store/tenant"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	auditpublisher "credo/pkg/platform/audit/publisher"
+	"credo/pkg/platform/audit/publishers/security"
 	auditmemory "credo/pkg/platform/audit/store/memory"
 )
 
@@ -33,7 +33,7 @@ func (s *ServiceSuite) SetupTest() {
 		s.tenantStore,
 		s.clientStore,
 		nil,
-		WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
+		WithAuditPublisher(security.New(auditStore)),
 	)
 	s.Require().NoError(err)
 	s.service = svc

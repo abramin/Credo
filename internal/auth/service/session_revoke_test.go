@@ -54,7 +54,6 @@ func (s *ServiceSuite) TestSessionRevocation_ValidationAndAuthorization() {
 			Status: models.SessionStatusActive,
 		}
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(session, nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.RevokeSession(ctx, userID, sessionID)
 		s.Require().Error(err)
@@ -92,7 +91,6 @@ func (s *ServiceSuite) TestSessionRevocation_LogoutAll() {
 		s.mockSessionStore.EXPECT().RevokeSessionIfActive(gomock.Any(), sessions[2].ID, gomock.Any()).Return(nil)
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessions[1].ID).Return(nil)
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessions[2].ID).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.LogoutAll(ctx, userID, currentSessionID, true)
 
@@ -109,7 +107,6 @@ func (s *ServiceSuite) TestSessionRevocation_LogoutAll() {
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessions[0].ID).Return(nil)
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessions[1].ID).Return(nil)
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), sessions[2].ID).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.LogoutAll(ctx, userID, currentSessionID, false)
 
@@ -160,7 +157,6 @@ func (s *ServiceSuite) TestSessionRevocation_LogoutAll() {
 		s.mockSessionStore.EXPECT().RevokeSessionIfActive(gomock.Any(), succeedingSession.ID, gomock.Any()).
 			Return(nil)
 		s.mockRefreshStore.EXPECT().DeleteBySessionID(gomock.Any(), succeedingSession.ID).Return(nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.LogoutAll(ctx, userID, currentSessionID, true)
 
