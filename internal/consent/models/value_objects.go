@@ -84,3 +84,9 @@ func NewConsentScope(userID id.UserID, purpose Purpose) (ConsentScope, error) {
 	}
 	return ConsentScope{UserID: userID, Purpose: purpose}, nil
 }
+
+// RecordFilter allows filtering consent records by purpose and status.
+type RecordFilter struct {
+	Purpose *Purpose
+	Status  *Status
+}

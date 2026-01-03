@@ -7,32 +7,6 @@ import (
 	dErrors "credo/pkg/domain-errors"
 )
 
-// Audit event actions
-const (
-	AuditActionConsentGranted     = "consent_granted"
-	AuditActionConsentRevoked     = "consent_revoked"
-	AuditActionConsentDeleted     = "consent_deleted"
-	AuditActionConsentCheckPassed = "consent_check_passed"
-	AuditActionConsentCheckFailed = "consent_check_failed"
-)
-
-// Audit event decisions
-const (
-	AuditDecisionGranted = "granted"
-	AuditDecisionRevoked = "revoked"
-	AuditDecisionDeleted = "deleted"
-	AuditDecisionDenied  = "denied"
-)
-
-// Audit event reasons
-const (
-	AuditReasonUserInitiated      = "user_initiated"
-	AuditReasonUserBulkRevocation = "user_bulk_revocation"
-	AuditReasonSecurityConcern    = "security_concern"
-	AuditReasonGdprSelfService    = "gdpr_self_service"
-	AuditReasonGdprErasureRequest = "gdpr_erasure_request"
-)
-
 // Record captures a user's decision for a specific purpose.
 //
 // # Scoping Invariant
@@ -163,12 +137,6 @@ func (c Record) ComputeStatus(now time.Time) Status {
 		return StatusExpired
 	}
 	return StatusActive
-}
-
-// RecordFilter allows filtering consent records by purpose and status.
-type RecordFilter struct {
-	Purpose *Purpose
-	Status  *Status
 }
 
 // Ensure enforces that consent exists and is active for the given purpose.
