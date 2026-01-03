@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"credo/internal/tenant/models"
+	tenantsqlc "credo/internal/tenant/store/sqlc"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
 	txcontext "credo/pkg/platform/tx"
@@ -17,24 +18,23 @@ import (
 
 // PostgresStore persists tenants in PostgreSQL.
 type PostgresStore struct {
-	db *sql.DB
+	db      *sql.DB
+	queries *tenantsqlc.Queries
 }
 
 // NewPostgres constructs a PostgreSQL-backed tenant store.
 func NewPostgres(db *sql.DB) *PostgresStore {
-	return &PostgresStore{db: db}
-}
-
-type dbExecutor interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-func (s *PostgresStore) execer(ctx context.Context) dbExecutor {
-	if tx, ok := txcontext.From(ctx); ok {
-		return tx
+	return &PostgresStore{
+		db:      db,
+		queries: tenantsqlc.New(db),
 	}
-	return s.db
+}
+
+func (s *PostgresStore) queriesFor(ctx context.Context) *tenantsqlc.Queries {
+	if tx, ok := txcontext.From(ctx); ok {
+		return s.queries.WithTx(tx)
+	}
+	return s.queries
 }
 
 // CreateIfNameAvailable atomically creates the tenant if the name is not already taken (case-insensitive).
@@ -42,17 +42,13 @@ func (s *PostgresStore) CreateIfNameAvailable(ctx context.Context, tenant *model
 	if tenant == nil {
 		return fmt.Errorf("tenant is required")
 	}
-	query := `
-		INSERT INTO tenants (id, name, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
-	`
-	_, err := s.execer(ctx).ExecContext(ctx, query,
-		uuid.UUID(tenant.ID),
-		tenant.Name,
-		string(tenant.Status),
-		tenant.CreatedAt,
-		tenant.UpdatedAt,
-	)
+	err := s.queriesFor(ctx).CreateTenant(ctx, tenantsqlc.CreateTenantParams{
+		ID:        uuid.UUID(tenant.ID),
+		Name:      tenant.Name,
+		Status:    string(tenant.Status),
+		CreatedAt: tenant.CreatedAt,
+		UpdatedAt: tenant.UpdatedAt,
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("tenant name must be unique: %w", sentinel.ErrAlreadyUsed)
@@ -64,45 +60,35 @@ func (s *PostgresStore) CreateIfNameAvailable(ctx context.Context, tenant *model
 
 // FindByID retrieves a tenant by its UUID.
 func (s *PostgresStore) FindByID(ctx context.Context, tenantID id.TenantID) (*models.Tenant, error) {
-	query := `
-		SELECT id, name, status, created_at, updated_at
-		FROM tenants
-		WHERE id = $1
-	`
-	tenant, err := scanTenant(s.execer(ctx).QueryRowContext(ctx, query, uuid.UUID(tenantID)))
+	row, err := s.queriesFor(ctx).GetTenantByID(ctx, uuid.UUID(tenantID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
 		}
 		return nil, fmt.Errorf("find tenant by id: %w", err)
 	}
-	return tenant, nil
+	return toTenant(row), nil
 }
 
 // FindByName retrieves a tenant by name (case-insensitive).
 func (s *PostgresStore) FindByName(ctx context.Context, name string) (*models.Tenant, error) {
-	query := `
-		SELECT id, name, status, created_at, updated_at
-		FROM tenants
-		WHERE lower(name) = lower($1)
-	`
-	tenant, err := scanTenant(s.execer(ctx).QueryRowContext(ctx, query, name))
+	row, err := s.queriesFor(ctx).GetTenantByName(ctx, name)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
 		}
 		return nil, fmt.Errorf("find tenant by name: %w", err)
 	}
-	return tenant, nil
+	return toTenant(row), nil
 }
 
 // Count returns the total number of tenants.
 func (s *PostgresStore) Count(ctx context.Context) (int, error) {
-	var count int
-	if err := s.execer(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM tenants`).Scan(&count); err != nil {
+	count, err := s.queriesFor(ctx).CountTenants(ctx)
+	if err != nil {
 		return 0, fmt.Errorf("count tenants: %w", err)
 	}
-	return count, nil
+	return int(count), nil
 }
 
 // Update updates an existing tenant.
@@ -110,17 +96,12 @@ func (s *PostgresStore) Update(ctx context.Context, tenant *models.Tenant) error
 	if tenant == nil {
 		return fmt.Errorf("tenant is required")
 	}
-	query := `
-		UPDATE tenants
-		SET name = $2, status = $3, updated_at = $4
-		WHERE id = $1
-	`
-	res, err := s.execer(ctx).ExecContext(ctx, query,
-		uuid.UUID(tenant.ID),
-		tenant.Name,
-		string(tenant.Status),
-		tenant.UpdatedAt,
-	)
+	res, err := s.queriesFor(ctx).UpdateTenant(ctx, tenantsqlc.UpdateTenantParams{
+		ID:        uuid.UUID(tenant.ID),
+		Name:      tenant.Name,
+		Status:    string(tenant.Status),
+		UpdatedAt: tenant.UpdatedAt,
+	})
 	if err != nil {
 		return fmt.Errorf("update tenant: %w", err)
 	}
@@ -134,20 +115,14 @@ func (s *PostgresStore) Update(ctx context.Context, tenant *models.Tenant) error
 	return nil
 }
 
-type tenantRow interface {
-	Scan(dest ...any) error
-}
-
-func scanTenant(row tenantRow) (*models.Tenant, error) {
-	var tenant models.Tenant
-	var status string
-	var tenantID uuid.UUID
-	if err := row.Scan(&tenantID, &tenant.Name, &status, &tenant.CreatedAt, &tenant.UpdatedAt); err != nil {
-		return nil, err
+func toTenant(row tenantsqlc.Tenant) *models.Tenant {
+	return &models.Tenant{
+		ID:        id.TenantID(row.ID),
+		Name:      row.Name,
+		Status:    models.TenantStatus(row.Status),
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
 	}
-	tenant.ID = id.TenantID(tenantID)
-	tenant.Status = models.TenantStatus(status)
-	return &tenant, nil
 }
 
 func isUniqueViolation(err error) bool {

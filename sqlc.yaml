@@ -26,3 +26,72 @@ sql:
         overrides:
           - db_type: "uuid"
             go_type: "github.com/google/uuid.UUID"
+  - engine: "postgresql"
+    schema: "migrations/*.up.sql"
+    queries: "internal/evidence/registry/store/sqlc/queries/*.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/evidence/registry/store/sqlc"
+        sql_package: "database/sql"
+        emit_interface: false
+  - engine: "postgresql"
+    schema: "migrations/*.up.sql"
+    queries: "internal/evidence/vc/store/sqlc/queries/*.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/evidence/vc/store/sqlc"
+        sql_package: "database/sql"
+        emit_interface: false
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+  - engine: "postgresql"
+    schema: "migrations/*.up.sql"
+    queries: "internal/ratelimit/store/sqlc/queries/*.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/ratelimit/store/sqlc"
+        sql_package: "database/sql"
+        emit_interface: false
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+  - engine: "postgresql"
+    schema: "migrations/*.up.sql"
+    queries: "internal/tenant/store/sqlc/queries/*.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/tenant/store/sqlc"
+        sql_package: "database/sql"
+        emit_interface: false
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+  - engine: "postgresql"
+    schema: "migrations/*.up.sql"
+    queries: "pkg/platform/audit/outbox/store/postgres/sqlc/queries/*.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "pkg/platform/audit/outbox/store/postgres/sqlc"
+        sql_package: "database/sql"
+        emit_interface: false
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+  - engine: "postgresql"
+    schema: "migrations/*.up.sql"
+    queries: "pkg/platform/audit/store/postgres/sqlc/queries/*.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "pkg/platform/audit/store/postgres/sqlc"
+        sql_package: "database/sql"
+        emit_interface: false
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"

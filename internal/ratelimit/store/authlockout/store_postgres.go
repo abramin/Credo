@@ -8,57 +8,52 @@ import (
 
 	"credo/internal/ratelimit/config"
 	"credo/internal/ratelimit/models"
+	ratelimitsqlc "credo/internal/ratelimit/store/sqlc"
 )
 
 // PostgresStore persists auth lockout records in PostgreSQL.
 // This store is pure I/O—all domain logic (lock checks, cutoff calculations) belongs in the service.
 type PostgresStore struct {
-	db *sql.DB
+	db      *sql.DB
+	queries *ratelimitsqlc.Queries
 }
 
 // NewPostgres constructs a PostgreSQL-backed auth lockout store.
 // The config parameter is accepted for API compatibility but stores don't use config
 // (business rules belong in the service layer).
 func NewPostgres(db *sql.DB, _ *config.AuthLockoutConfig) *PostgresStore {
-	return &PostgresStore{db: db}
+	return &PostgresStore{
+		db:      db,
+		queries: ratelimitsqlc.New(db),
+	}
 }
 
 func (s *PostgresStore) Get(ctx context.Context, identifier string) (*models.AuthLockout, error) {
-	query := `
-		SELECT identifier, failure_count, daily_failures, locked_until, last_failure_at, requires_captcha
-		FROM auth_lockouts
-		WHERE identifier = $1
-	`
-	record, err := scanAuthLockout(s.db.QueryRowContext(ctx, query, identifier))
+	record, err := s.queries.GetAuthLockout(ctx, identifier)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get auth lockout: %w", err)
 	}
-	return record, nil
+	return toAuthLockout(record), nil
 }
 
 // GetOrCreate retrieves an existing lockout record or creates a new one with zero counts.
 // This is pure I/O—the service owns counter increments via domain methods.
 func (s *PostgresStore) GetOrCreate(ctx context.Context, identifier string, now time.Time) (*models.AuthLockout, error) {
-	query := `
-		INSERT INTO auth_lockouts (identifier, failure_count, daily_failures, locked_until, last_failure_at, requires_captcha)
-		VALUES ($1, 0, 0, NULL, $2, FALSE)
-		ON CONFLICT (identifier) DO UPDATE SET
-			identifier = EXCLUDED.identifier
-		RETURNING identifier, failure_count, daily_failures, locked_until, last_failure_at, requires_captcha
-	`
-	record, err := scanAuthLockout(s.db.QueryRowContext(ctx, query, identifier, now))
+	record, err := s.queries.GetOrCreateAuthLockout(ctx, ratelimitsqlc.GetOrCreateAuthLockoutParams{
+		Identifier:    identifier,
+		LastFailureAt: now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get or create auth lockout: %w", err)
 	}
-	return record, nil
+	return toAuthLockout(record), nil
 }
 
 func (s *PostgresStore) Clear(ctx context.Context, identifier string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM auth_lockouts WHERE identifier = $1`, identifier)
-	if err != nil {
+	if err := s.queries.DeleteAuthLockout(ctx, identifier); err != nil {
 		return fmt.Errorf("clear auth lockout: %w", err)
 	}
 	return nil
@@ -68,25 +63,14 @@ func (s *PostgresStore) Update(ctx context.Context, record *models.AuthLockout) 
 	if record == nil {
 		return fmt.Errorf("auth lockout record is required")
 	}
-	query := `
-		INSERT INTO auth_lockouts (identifier, failure_count, daily_failures, locked_until, last_failure_at, requires_captcha)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (identifier) DO UPDATE SET
-			failure_count = EXCLUDED.failure_count,
-			daily_failures = EXCLUDED.daily_failures,
-			locked_until = EXCLUDED.locked_until,
-			last_failure_at = EXCLUDED.last_failure_at,
-			requires_captcha = EXCLUDED.requires_captcha
-	`
-	_, err := s.db.ExecContext(ctx, query,
-		record.Identifier,
-		record.FailureCount,
-		record.DailyFailures,
-		record.LockedUntil,
-		record.LastFailureAt,
-		record.RequiresCaptcha,
-	)
-	if err != nil {
+	if err := s.queries.UpsertAuthLockout(ctx, ratelimitsqlc.UpsertAuthLockoutParams{
+		Identifier:      record.Identifier,
+		FailureCount:    int32(record.FailureCount),
+		DailyFailures:   int32(record.DailyFailures),
+		LockedUntil:     nullTime(record.LockedUntil),
+		LastFailureAt:   record.LastFailureAt,
+		RequiresCaptcha: record.RequiresCaptcha,
+	}); err != nil {
 		return fmt.Errorf("update auth lockout: %w", err)
 	}
 	return nil
@@ -96,33 +80,24 @@ func (s *PostgresStore) Update(ctx context.Context, record *models.AuthLockout) 
 // This prevents TOCTOU races where concurrent requests could bypass hard lock thresholds.
 // The method uses a single atomic UPDATE...RETURNING to ensure consistency.
 func (s *PostgresStore) RecordFailureAtomic(ctx context.Context, identifier string, now time.Time) (*models.AuthLockout, error) {
-	query := `
-		INSERT INTO auth_lockouts (identifier, failure_count, daily_failures, locked_until, last_failure_at, requires_captcha)
-		VALUES ($1, 1, 1, NULL, $2, FALSE)
-		ON CONFLICT (identifier) DO UPDATE SET
-			failure_count = auth_lockouts.failure_count + 1,
-			daily_failures = auth_lockouts.daily_failures + 1,
-			last_failure_at = $2
-		RETURNING identifier, failure_count, daily_failures, locked_until, last_failure_at, requires_captcha
-	`
-	record, err := scanAuthLockout(s.db.QueryRowContext(ctx, query, identifier, now))
+	record, err := s.queries.RecordFailureAtomic(ctx, ratelimitsqlc.RecordFailureAtomicParams{
+		Identifier:    identifier,
+		LastFailureAt: now,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("record failure atomic: %w", err)
 	}
-	return record, nil
+	return toAuthLockout(record), nil
 }
 
 // ApplyHardLockAtomic atomically sets the hard lock if thresholds are met.
 // Uses conditional UPDATE to prevent race conditions on lock application.
 func (s *PostgresStore) ApplyHardLockAtomic(ctx context.Context, identifier string, lockedUntil time.Time, dailyThreshold int) (applied bool, err error) {
-	query := `
-		UPDATE auth_lockouts
-		SET locked_until = $2
-		WHERE identifier = $1
-		  AND daily_failures >= $3
-		  AND (locked_until IS NULL OR locked_until < NOW())
-	`
-	result, err := s.db.ExecContext(ctx, query, identifier, lockedUntil, dailyThreshold)
+	result, err := s.queries.ApplyHardLock(ctx, ratelimitsqlc.ApplyHardLockParams{
+		Identifier:    identifier,
+		LockedUntil:   sql.NullTime{Time: lockedUntil, Valid: true},
+		DailyFailures: int32(dailyThreshold),
+	})
 	if err != nil {
 		return false, fmt.Errorf("apply hard lock atomic: %w", err)
 	}
@@ -137,14 +112,10 @@ func (s *PostgresStore) ApplyHardLockAtomic(ctx context.Context, identifier stri
 func (s *PostgresStore) SetRequiresCaptchaAtomic(ctx context.Context, identifier string, lockoutThreshold int) (applied bool, err error) {
 	// Count consecutive lockouts by checking daily_failures threshold breaches
 	// This is a simplified check - in practice you might track lockout_count separately
-	query := `
-		UPDATE auth_lockouts
-		SET requires_captcha = TRUE
-		WHERE identifier = $1
-		  AND requires_captcha = FALSE
-		  AND daily_failures >= $2
-	`
-	result, err := s.db.ExecContext(ctx, query, identifier, lockoutThreshold)
+	result, err := s.queries.SetRequiresCaptcha(ctx, ratelimitsqlc.SetRequiresCaptchaParams{
+		Identifier:    identifier,
+		DailyFailures: int32(lockoutThreshold),
+	})
 	if err != nil {
 		return false, fmt.Errorf("set requires captcha atomic: %w", err)
 	}
@@ -166,17 +137,18 @@ func (s *PostgresStore) ResetFailureCount(ctx context.Context, cutoff time.Time)
 		_ = tx.Rollback()
 	}()
 
-	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(failure_count), 0) FROM auth_lockouts WHERE last_failure_at < $1`, cutoff).Scan(&total); err != nil {
+	qtx := s.queries.WithTx(tx)
+	total, err := qtx.SumFailureCountBefore(ctx, cutoff)
+	if err != nil {
 		return 0, fmt.Errorf("sum failure count: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE auth_lockouts SET failure_count = 0 WHERE last_failure_at < $1`, cutoff); err != nil {
+	if err := qtx.ResetFailureCountBefore(ctx, cutoff); err != nil {
 		return 0, fmt.Errorf("reset failure count: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit reset failure count: %w", err)
 	}
-	return total, nil
+	return int(total), nil
 }
 
 // ResetDailyFailures resets daily failure counts for records with last_failure_at before cutoff.
@@ -190,31 +162,37 @@ func (s *PostgresStore) ResetDailyFailures(ctx context.Context, cutoff time.Time
 		_ = tx.Rollback()
 	}()
 
-	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(daily_failures), 0) FROM auth_lockouts WHERE last_failure_at < $1`, cutoff).Scan(&total); err != nil {
+	qtx := s.queries.WithTx(tx)
+	total, err := qtx.SumDailyFailuresBefore(ctx, cutoff)
+	if err != nil {
 		return 0, fmt.Errorf("sum daily failures: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE auth_lockouts SET daily_failures = 0 WHERE last_failure_at < $1`, cutoff); err != nil {
+	if err := qtx.ResetDailyFailuresBefore(ctx, cutoff); err != nil {
 		return 0, fmt.Errorf("reset daily failures: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit reset daily failures: %w", err)
 	}
-	return total, nil
+	return int(total), nil
 }
 
-type authLockoutRow interface {
-	Scan(dest ...any) error
+func toAuthLockout(record ratelimitsqlc.AuthLockout) *models.AuthLockout {
+	lockout := &models.AuthLockout{
+		Identifier:      record.Identifier,
+		FailureCount:    int(record.FailureCount),
+		DailyFailures:   int(record.DailyFailures),
+		LastFailureAt:   record.LastFailureAt,
+		RequiresCaptcha: record.RequiresCaptcha,
+	}
+	if record.LockedUntil.Valid {
+		lockout.LockedUntil = &record.LockedUntil.Time
+	}
+	return lockout
 }
 
-func scanAuthLockout(row authLockoutRow) (*models.AuthLockout, error) {
-	var record models.AuthLockout
-	var lockedUntil sql.NullTime
-	if err := row.Scan(&record.Identifier, &record.FailureCount, &record.DailyFailures, &lockedUntil, &record.LastFailureAt, &record.RequiresCaptcha); err != nil {
-		return nil, err
+func nullTime(value *time.Time) sql.NullTime {
+	if value == nil {
+		return sql.NullTime{}
 	}
-	if lockedUntil.Valid {
-		record.LockedUntil = &lockedUntil.Time
-	}
-	return &record, nil
+	return sql.NullTime{Time: *value, Valid: true}
 }

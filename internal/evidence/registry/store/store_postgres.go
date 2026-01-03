@@ -9,6 +9,7 @@ import (
 
 	"credo/internal/evidence/registry/metrics"
 	"credo/internal/evidence/registry/models"
+	registrysqlc "credo/internal/evidence/registry/store/sqlc"
 	id "credo/pkg/domain"
 	"credo/pkg/requestcontext"
 )
@@ -18,6 +19,7 @@ type PostgresCache struct {
 	db       *sql.DB
 	cacheTTL time.Duration
 	metrics  *metrics.Metrics
+	queries  *registrysqlc.Queries
 }
 
 // NewPostgresCache constructs a PostgreSQL-backed registry cache.
@@ -26,18 +28,18 @@ func NewPostgresCache(db *sql.DB, cacheTTL time.Duration, metrics *metrics.Metri
 		db:       db,
 		cacheTTL: cacheTTL,
 		metrics:  metrics,
+		queries:  registrysqlc.New(db),
 	}
 }
 
 func (c *PostgresCache) FindCitizen(ctx context.Context, nationalID id.NationalID, regulated bool) (*models.CitizenRecord, error) {
 	start := time.Now()
 	cutoff := requestcontext.Now(ctx).Add(-c.cacheTTL)
-	query := `
-		SELECT national_id, full_name, date_of_birth, address, valid, source, checked_at, regulated
-		FROM citizen_cache
-		WHERE national_id = $1 AND regulated = $2 AND checked_at >= $3
-	`
-	record, err := scanCitizen(c.db.QueryRowContext(ctx, query, nationalID.String(), regulated, cutoff))
+	record, err := c.queries.GetCitizenCache(ctx, registrysqlc.GetCitizenCacheParams{
+		NationalID: nationalID.String(),
+		Regulated:  regulated,
+		CheckedAt:  cutoff,
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.recordMiss("citizen", start)
@@ -46,36 +48,23 @@ func (c *PostgresCache) FindCitizen(ctx context.Context, nationalID id.NationalI
 		return nil, fmt.Errorf("find citizen cache: %w", err)
 	}
 	c.recordHit("citizen", start)
-	return record, nil
+	return toCitizenRecord(record), nil
 }
 
 func (c *PostgresCache) SaveCitizen(ctx context.Context, key id.NationalID, record *models.CitizenRecord, regulated bool) error {
 	if record == nil {
 		return fmt.Errorf("citizen record is required")
 	}
-	query := `
-		INSERT INTO citizen_cache (
-			national_id, full_name, date_of_birth, address, valid, source, checked_at, regulated
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (national_id, regulated) DO UPDATE SET
-			full_name = EXCLUDED.full_name,
-			date_of_birth = EXCLUDED.date_of_birth,
-			address = EXCLUDED.address,
-			valid = EXCLUDED.valid,
-			source = EXCLUDED.source,
-			checked_at = EXCLUDED.checked_at
-	`
-	_, err := c.db.ExecContext(ctx, query,
-		key.String(),
-		record.FullName,
-		record.DateOfBirth,
-		record.Address,
-		record.Valid,
-		record.Source,
-		record.CheckedAt,
-		regulated,
-	)
+	err := c.queries.UpsertCitizenCache(ctx, registrysqlc.UpsertCitizenCacheParams{
+		NationalID:  key.String(),
+		FullName:    record.FullName,
+		DateOfBirth: record.DateOfBirth,
+		Address:     record.Address,
+		Valid:       record.Valid,
+		Source:      record.Source,
+		CheckedAt:   record.CheckedAt,
+		Regulated:   regulated,
+	})
 	if err != nil {
 		return fmt.Errorf("save citizen cache: %w", err)
 	}
@@ -85,12 +74,10 @@ func (c *PostgresCache) SaveCitizen(ctx context.Context, key id.NationalID, reco
 func (c *PostgresCache) FindSanction(ctx context.Context, nationalID id.NationalID) (*models.SanctionsRecord, error) {
 	start := time.Now()
 	cutoff := requestcontext.Now(ctx).Add(-c.cacheTTL)
-	query := `
-		SELECT national_id, listed, source, checked_at
-		FROM sanctions_cache
-		WHERE national_id = $1 AND checked_at >= $2
-	`
-	record, err := scanSanction(c.db.QueryRowContext(ctx, query, nationalID.String(), cutoff))
+	record, err := c.queries.GetSanctionsCache(ctx, registrysqlc.GetSanctionsCacheParams{
+		NationalID: nationalID.String(),
+		CheckedAt:  cutoff,
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.recordMiss("sanctions", start)
@@ -99,57 +86,44 @@ func (c *PostgresCache) FindSanction(ctx context.Context, nationalID id.National
 		return nil, fmt.Errorf("find sanctions cache: %w", err)
 	}
 	c.recordHit("sanctions", start)
-	return record, nil
+	return toSanctionsRecord(record), nil
 }
 
 func (c *PostgresCache) SaveSanction(ctx context.Context, key id.NationalID, record *models.SanctionsRecord) error {
 	if record == nil {
 		return fmt.Errorf("sanctions record is required")
 	}
-	query := `
-		INSERT INTO sanctions_cache (national_id, listed, source, checked_at)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (national_id) DO UPDATE SET
-			listed = EXCLUDED.listed,
-			source = EXCLUDED.source,
-			checked_at = EXCLUDED.checked_at
-	`
-	_, err := c.db.ExecContext(ctx, query,
-		key.String(),
-		record.Listed,
-		record.Source,
-		record.CheckedAt,
-	)
+	err := c.queries.UpsertSanctionsCache(ctx, registrysqlc.UpsertSanctionsCacheParams{
+		NationalID: key.String(),
+		Listed:     record.Listed,
+		Source:     record.Source,
+		CheckedAt:  record.CheckedAt,
+	})
 	if err != nil {
 		return fmt.Errorf("save sanctions cache: %w", err)
 	}
 	return nil
 }
 
-type citizenRow interface {
-	Scan(dest ...any) error
-}
-
-func scanCitizen(row citizenRow) (*models.CitizenRecord, error) {
-	var record models.CitizenRecord
-	var storedRegulated bool
-	if err := row.Scan(&record.NationalID, &record.FullName, &record.DateOfBirth, &record.Address, &record.Valid, &record.Source, &record.CheckedAt, &storedRegulated); err != nil {
-		return nil, err
+func toCitizenRecord(record registrysqlc.CitizenCache) *models.CitizenRecord {
+	return &models.CitizenRecord{
+		NationalID:  record.NationalID,
+		FullName:    record.FullName,
+		DateOfBirth: record.DateOfBirth,
+		Address:     record.Address,
+		Valid:       record.Valid,
+		Source:      record.Source,
+		CheckedAt:   record.CheckedAt,
 	}
-	_ = storedRegulated
-	return &record, nil
 }
 
-type sanctionRow interface {
-	Scan(dest ...any) error
-}
-
-func scanSanction(row sanctionRow) (*models.SanctionsRecord, error) {
-	var record models.SanctionsRecord
-	if err := row.Scan(&record.NationalID, &record.Listed, &record.Source, &record.CheckedAt); err != nil {
-		return nil, err
+func toSanctionsRecord(record registrysqlc.SanctionsCache) *models.SanctionsRecord {
+	return &models.SanctionsRecord{
+		NationalID: record.NationalID,
+		Listed:     record.Listed,
+		Source:     record.Source,
+		CheckedAt:  record.CheckedAt,
 	}
-	return &record, nil
 }
 
 func (c *PostgresCache) recordHit(recordType string, start time.Time) {

@@ -9,6 +9,7 @@ import (
 
 	id "credo/pkg/domain"
 	audit "credo/pkg/platform/audit"
+	auditsqlc "credo/pkg/platform/audit/store/postgres/sqlc"
 	txcontext "credo/pkg/platform/tx"
 
 	"github.com/google/uuid"
@@ -18,23 +19,23 @@ import (
 // Events are written to the outbox table and published to Kafka by the outbox worker.
 // Kafka is the source of truth for audit events.
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	queries *auditsqlc.Queries
 }
 
 // New creates a new PostgreSQL audit store that writes to the outbox.
 func New(db *sql.DB) *Store {
-	return &Store{db: db}
-}
-
-type dbExecutor interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
-
-func (s *Store) execer(ctx context.Context) dbExecutor {
-	if tx, ok := txcontext.From(ctx); ok {
-		return tx
+	return &Store{
+		db:      db,
+		queries: auditsqlc.New(db),
 	}
-	return s.db
+}
+
+func (s *Store) queriesFor(ctx context.Context) *auditsqlc.Queries {
+	if tx, ok := txcontext.From(ctx); ok {
+		return s.queries.WithTx(tx)
+	}
+	return s.queries
 }
 
 // outboxPayload is the JSON structure published to Kafka.
@@ -94,18 +95,14 @@ func (s *Store) Append(ctx context.Context, event audit.Event) error {
 		aggregateID = uuid.UUID(event.UserID).String()
 	}
 
-	query := `
-		INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
-	_, err = s.execer(ctx).ExecContext(ctx, query,
-		uuid.New(), // outbox entry ID
-		aggregateType,
-		aggregateID,
-		event.Action,
-		payloadBytes,
-		time.Now(),
-	)
+	err = s.queriesFor(ctx).InsertOutboxEntry(ctx, auditsqlc.InsertOutboxEntryParams{
+		ID:            uuid.New(), // outbox entry ID
+		AggregateType: aggregateType,
+		AggregateID:   aggregateID,
+		EventType:     event.Action,
+		Payload:       json.RawMessage(payloadBytes),
+		CreatedAt:     time.Now(),
+	})
 	if err != nil {
 		return fmt.Errorf("insert outbox entry: %w", err)
 	}
@@ -116,38 +113,26 @@ func (s *Store) Append(ctx context.Context, event audit.Event) error {
 // Used by the Kafka consumer to materialize events for querying.
 // This is idempotent - duplicate inserts are ignored via ON CONFLICT DO NOTHING.
 func (s *Store) AppendWithID(ctx context.Context, eventID uuid.UUID, event audit.Event) error {
-	query := `
-		INSERT INTO audit_events (
-			id, category, timestamp, user_id, subject, action,
-			purpose, requesting_party, decision, reason,
-			email, request_id, actor_id
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		ON CONFLICT (id) DO NOTHING
-	`
-
-	var userID *uuid.UUID
+	var userID uuid.NullUUID
 	if !event.UserID.IsNil() {
-		uid := uuid.UUID(event.UserID)
-		userID = &uid
+		userID = uuid.NullUUID{UUID: uuid.UUID(event.UserID), Valid: true}
 	}
 
-	_, err := s.db.ExecContext(ctx, query,
-		eventID,
-		string(event.Category),
-		event.Timestamp,
-		userID,
-		event.Subject,
-		event.Action,
-		event.Purpose,
-		event.RequestingParty,
-		event.Decision,
-		event.Reason,
-		event.Email,
-		event.RequestID,
-		event.ActorID,
-	)
-	if err != nil {
+	if err := s.queries.InsertAuditEvent(ctx, auditsqlc.InsertAuditEventParams{
+		ID:              eventID,
+		Category:        string(event.Category),
+		Timestamp:       event.Timestamp,
+		UserID:          userID,
+		Subject:         event.Subject,
+		Action:          event.Action,
+		Purpose:         event.Purpose,
+		RequestingParty: event.RequestingParty,
+		Decision:        event.Decision,
+		Reason:          event.Reason,
+		Email:           event.Email,
+		RequestID:       event.RequestID,
+		ActorID:         event.ActorID,
+	}); err != nil {
 		return fmt.Errorf("insert audit event: %w", err)
 	}
 	return nil
@@ -155,103 +140,133 @@ func (s *Store) AppendWithID(ctx context.Context, eventID uuid.UUID, event audit
 
 // ListByUser returns events for a specific user.
 func (s *Store) ListByUser(ctx context.Context, userID id.UserID) ([]audit.Event, error) {
-	query := `
-		SELECT category, timestamp, user_id, subject, action,
-			   purpose, requesting_party, decision, reason,
-			   email, request_id, actor_id
-		FROM audit_events
-		WHERE user_id = $1
-		ORDER BY timestamp DESC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, uuid.UUID(userID))
+	rows, err := s.queries.ListAuditEventsByUser(ctx, uuid.NullUUID{UUID: uuid.UUID(userID), Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("query audit events: %w", err)
 	}
-	defer rows.Close()
-
-	return s.scanEvents(rows)
+	return mapAuditEvents(toAuditEventRowsFromByUser(rows)), nil
 }
 
 // ListAll returns all audit events (admin only).
 func (s *Store) ListAll(ctx context.Context) ([]audit.Event, error) {
-	query := `
-		SELECT category, timestamp, user_id, subject, action,
-			   purpose, requesting_party, decision, reason,
-			   email, request_id, actor_id
-		FROM audit_events
-		ORDER BY timestamp DESC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query)
+	rows, err := s.queries.ListAuditEvents(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query audit events: %w", err)
 	}
-	defer rows.Close()
-
-	return s.scanEvents(rows)
+	return mapAuditEvents(toAuditEventRowsFromAll(rows)), nil
 }
 
 // ListRecent returns the N most recent events.
 func (s *Store) ListRecent(ctx context.Context, limit int) ([]audit.Event, error) {
-	query := `
-		SELECT category, timestamp, user_id, subject, action,
-			   purpose, requesting_party, decision, reason,
-			   email, request_id, actor_id
-		FROM audit_events
-		ORDER BY timestamp DESC
-		LIMIT $1
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, limit)
+	rows, err := s.queries.ListRecentAuditEvents(ctx, int32(limit))
 	if err != nil {
 		return nil, fmt.Errorf("query audit events: %w", err)
 	}
-	defer rows.Close()
-
-	return s.scanEvents(rows)
+	return mapAuditEvents(toAuditEventRowsFromRecent(rows)), nil
 }
 
-// scanEvents scans multiple rows into audit.Event slice.
-func (s *Store) scanEvents(rows *sql.Rows) ([]audit.Event, error) {
-	var events []audit.Event
+type auditEventRow struct {
+	Category        string
+	Timestamp       time.Time
+	UserID          uuid.NullUUID
+	Subject         string
+	Action          string
+	Purpose         string
+	RequestingParty string
+	Decision        string
+	Reason          string
+	Email           string
+	RequestID       string
+	ActorID         string
+}
 
-	for rows.Next() {
-		var (
-			category       string
-			event          audit.Event
-			userIDNullable *uuid.UUID
-		)
-
-		err := rows.Scan(
-			&category,
-			&event.Timestamp,
-			&userIDNullable,
-			&event.Subject,
-			&event.Action,
-			&event.Purpose,
-			&event.RequestingParty,
-			&event.Decision,
-			&event.Reason,
-			&event.Email,
-			&event.RequestID,
-			&event.ActorID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("scan audit event: %w", err)
-		}
-
-		event.Category = audit.EventCategory(category)
-		if userIDNullable != nil {
-			event.UserID = id.UserID(*userIDNullable)
-		}
-
-		events = append(events, event)
+func mapAuditEvents(rows []auditEventRow) []audit.Event {
+	events := make([]audit.Event, 0, len(rows))
+	for _, row := range rows {
+		events = append(events, toAuditEvent(row))
 	}
+	return events
+}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate audit events: %w", err)
+func toAuditEventRowsFromByUser(rows []auditsqlc.ListAuditEventsByUserRow) []auditEventRow {
+	events := make([]auditEventRow, 0, len(rows))
+	for _, row := range rows {
+		events = append(events, auditEventRow{
+			Category:        row.Category,
+			Timestamp:       row.Timestamp,
+			UserID:          row.UserID,
+			Subject:         row.Subject,
+			Action:          row.Action,
+			Purpose:         row.Purpose,
+			RequestingParty: row.RequestingParty,
+			Decision:        row.Decision,
+			Reason:          row.Reason,
+			Email:           row.Email,
+			RequestID:       row.RequestID,
+			ActorID:         row.ActorID,
+		})
 	}
+	return events
+}
 
-	return events, nil
+func toAuditEventRowsFromAll(rows []auditsqlc.ListAuditEventsRow) []auditEventRow {
+	events := make([]auditEventRow, 0, len(rows))
+	for _, row := range rows {
+		events = append(events, auditEventRow{
+			Category:        row.Category,
+			Timestamp:       row.Timestamp,
+			UserID:          row.UserID,
+			Subject:         row.Subject,
+			Action:          row.Action,
+			Purpose:         row.Purpose,
+			RequestingParty: row.RequestingParty,
+			Decision:        row.Decision,
+			Reason:          row.Reason,
+			Email:           row.Email,
+			RequestID:       row.RequestID,
+			ActorID:         row.ActorID,
+		})
+	}
+	return events
+}
+
+func toAuditEventRowsFromRecent(rows []auditsqlc.ListRecentAuditEventsRow) []auditEventRow {
+	events := make([]auditEventRow, 0, len(rows))
+	for _, row := range rows {
+		events = append(events, auditEventRow{
+			Category:        row.Category,
+			Timestamp:       row.Timestamp,
+			UserID:          row.UserID,
+			Subject:         row.Subject,
+			Action:          row.Action,
+			Purpose:         row.Purpose,
+			RequestingParty: row.RequestingParty,
+			Decision:        row.Decision,
+			Reason:          row.Reason,
+			Email:           row.Email,
+			RequestID:       row.RequestID,
+			ActorID:         row.ActorID,
+		})
+	}
+	return events
+}
+
+func toAuditEvent(row auditEventRow) audit.Event {
+	event := audit.Event{
+		Category:        audit.EventCategory(row.Category),
+		Timestamp:       row.Timestamp,
+		Subject:         row.Subject,
+		Action:          row.Action,
+		Purpose:         row.Purpose,
+		RequestingParty: row.RequestingParty,
+		Decision:        row.Decision,
+		Reason:          row.Reason,
+		Email:           row.Email,
+		RequestID:       row.RequestID,
+		ActorID:         row.ActorID,
+	}
+	if row.UserID.Valid {
+		event.UserID = id.UserID(row.UserID.UUID)
+	}
+	return event
 }
