@@ -527,20 +527,6 @@ func filterRecords(records []*models.Record, filter *models.RecordFilter, now ti
 	return filtered
 }
 
-func auditReasonForRevokeAll(ctx context.Context) string {
-	if admin.IsAdminRequest(ctx) {
-		return models.AuditReasonSecurityConcern
-	}
-	return models.AuditReasonUserBulkRevocation
-}
-
-func auditReasonForDeleteAll(ctx context.Context) string {
-	if admin.IsAdminRequest(ctx) {
-		return models.AuditReasonGdprErasureRequest
-	}
-	return models.AuditReasonGdprSelfService
-}
-
 // Require enforces that a user has active consent for the given purpose.
 // It records audit/metrics outcomes for missing, revoked, expired, or active states.
 func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.Purpose) error {
@@ -598,55 +584,6 @@ func (s *Service) emitAudit(ctx context.Context, event audit.ComplianceEvent) {
 			"user_id", event.UserID,
 			"purpose", event.Purpose,
 		)
-	}
-}
-
-// incrementConsentsGranted increments the consents granted metric if metrics are enabled
-func (s *Service) incrementConsentsGranted(purpose models.Purpose) {
-	if s.metrics != nil {
-		s.metrics.IncrementConsentsGranted(string(purpose))
-	}
-}
-
-// incrementConsentsRevoked increments the consents revoked metric if metrics are enabled
-func (s *Service) incrementConsentsRevoked(purpose models.Purpose) {
-	if s.metrics != nil {
-		s.metrics.IncrementConsentsRevoked(string(purpose))
-	}
-}
-
-// incrementConsentCheckPassed increments the consent check passed metric if metrics are enabled
-func (s *Service) incrementConsentCheckPassed(purpose models.Purpose) {
-	if s.metrics != nil {
-		s.metrics.IncrementConsentCheckPassed(string(purpose))
-	}
-}
-
-// incrementConsentCheckFailed increments the consent check failed metric if metrics are enabled
-func (s *Service) incrementConsentCheckFailed(purpose models.Purpose) {
-	if s.metrics != nil {
-		s.metrics.IncrementConsentCheckFailed(string(purpose))
-	}
-}
-
-// incrementActiveConsents updates the active consents gauge when it increases.
-func (s *Service) incrementActiveConsents(count float64) {
-	if s.metrics != nil {
-		s.metrics.IncrementActiveConsents(count)
-	}
-}
-
-// decrementActiveConsents updates the active consents gauge when it decreases.
-func (s *Service) decrementActiveConsents(count float64) {
-	if s.metrics != nil {
-		s.metrics.DecrementActiveConsents(count)
-	}
-}
-
-// observeRecordsPerUser records the distribution of consent records per user.
-func (s *Service) observeRecordsPerUser(count float64) {
-	if s.metrics != nil {
-		s.metrics.ObserveRecordsPerUser(count)
 	}
 }
 
