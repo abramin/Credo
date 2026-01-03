@@ -37,7 +37,7 @@ func Test_GenerateAccessToken(t *testing.T) {
 	assert.NotNil(t, claims)
 	assert.Equal(t, userID.String(), claims.UserID)
 	assert.Equal(t, sessionID.String(), claims.SessionID)
-	assert.Equal(t, clientID, claims.ClientID)
+	assert.Equal(t, clientID.String(), claims.ClientID)
 	assert.WithinDuration(t, time.Now().Add(expiresIn), claims.ExpiresAt.Time, time.Minute)
 }
 
@@ -66,7 +66,7 @@ func Test_ValidateToken_ValidTokent(t *testing.T) {
 	assert.NotNil(t, claims)
 	assert.Equal(t, userID.String(), claims.UserID)
 	assert.Equal(t, sessionID.String(), claims.SessionID)
-	assert.Equal(t, clientID, claims.ClientID)
+	assert.Equal(t, clientID.String(), claims.ClientID)
 }
 
 func Test_ValidateToken_RejectsAlgorithmConfusion(t *testing.T) {
@@ -125,7 +125,7 @@ func Test_GenerateIDToken(t *testing.T) {
 	assert.NotNil(t, claims)
 	assert.Equal(t, userID.String(), claims.Subject)
 	assert.Equal(t, sessionID.String(), claims.SessionID)
-	assert.Equal(t, clientID, claims.ClientID)
+	assert.Equal(t, clientID.String(), claims.ClientID)
 	assert.WithinDuration(t, time.Now().Add(expiresIn), claims.ExpiresAt.Time, time.Minute)
 }
 func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
@@ -139,7 +139,7 @@ func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
 		assert.NotNil(t, claims)
 		assert.Equal(t, userID.String(), claims.UserID)
 		assert.Equal(t, sessionID.String(), claims.SessionID)
-		assert.Equal(t, clientID, claims.ClientID)
+		assert.Equal(t, clientID.String(), claims.ClientID)
 	})
 
 	t.Run("expired token still parses", func(t *testing.T) {
@@ -280,6 +280,7 @@ func Test_PerTenantIssuerInToken(t *testing.T) {
 	ctx := context.Background()
 	service := NewJWTService("signing-key", "https://auth.example.com", "audience", time.Hour)
 	testTenantID := id.TenantID(uuid.New())
+	expectedIssuer := "https://auth.example.com/tenants/" + testTenantID.String()
 
 	t.Run("access token has per-tenant issuer", func(t *testing.T) {
 		token, err := service.GenerateAccessToken(ctx, userID, sessionID, clientID, testTenantID, []string{"openid"})
@@ -288,8 +289,8 @@ func Test_PerTenantIssuerInToken(t *testing.T) {
 		claims, err := service.ValidateToken(token)
 		require.NoError(t, err)
 
-		assert.Equal(t, "https://auth.example.com/tenants/tenant-abc-123", claims.Issuer)
-		assert.Equal(t, testTenantID, claims.TenantID)
+		assert.Equal(t, expectedIssuer, claims.Issuer)
+		assert.Equal(t, testTenantID.String(), claims.TenantID)
 	})
 
 	t.Run("ID token has per-tenant issuer", func(t *testing.T) {
@@ -299,6 +300,6 @@ func Test_PerTenantIssuerInToken(t *testing.T) {
 		claims, err := service.ValidateIDToken(token)
 		require.NoError(t, err)
 
-		assert.Equal(t, "https://auth.example.com/tenants/tenant-abc-123", claims.Issuer)
+		assert.Equal(t, expectedIssuer, claims.Issuer)
 	})
 }

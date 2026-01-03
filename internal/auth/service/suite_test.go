@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -115,16 +114,16 @@ func (s *ServiceSuite) newTestSession(sessionID id.SessionID, userID id.UserID, 
 	}
 }
 
-func (s *ServiceSuite) expectTokenGeneration(userID id.UserID, sessionID id.SessionID, clientUUID id.ClientID, tenantID id.TenantID, scopes []string) (accessToken, accessTokenJTI, idToken, refreshToken string) {
+func (s *ServiceSuite) expectTokenGeneration(userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID, scopes []string) (accessToken, accessTokenJTI, idToken, refreshToken string) {
 	accessToken = "mock-access-token"
 	accessTokenJTI = "mock-access-token-jti"
 	idToken = "mock-id-token"
 	refreshToken = "ref_mock-refresh-token"
 
 	s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(
-		gomock.Any(), uuid.UUID(userID), uuid.UUID(sessionID), clientUUID.String(), tenantID.String(), scopes,
+		gomock.Any(), userID, sessionID, clientID, tenantID, scopes,
 	).Return(accessToken, accessTokenJTI, nil)
-	s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), uuid.UUID(userID), uuid.UUID(sessionID), clientUUID.String(), tenantID.String()).Return(idToken, nil)
+	s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), userID, sessionID, clientID, tenantID).Return(idToken, nil)
 	s.mockJWT.EXPECT().CreateRefreshToken().Return(refreshToken, nil)
 	s.mockJWT.EXPECT().TokenType().Return("Bearer")
 
