@@ -89,10 +89,6 @@ linters-settings:
       - name: unused-parameter
       - name: var-naming
 
-      # tastey, but usually worth it in a backend
-      - name: naked-return
-        arguments: [10] # allow only in very small funcs
-
   gosec:
     severity: medium
     confidence: medium
