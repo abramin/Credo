@@ -317,7 +317,7 @@ func (s *PostgresStoreSuite) TestNotFoundError() {
 	ctx := context.Background()
 
 	// FindByID with non-existent ID
-	_, err := s.store.FindByID(ctx, "vc_"+uuid.NewString())
+	_, err := s.store.FindByID(ctx, models.CredentialID("vc_"+uuid.NewString()))
 	s.ErrorIs(err, sentinel.ErrNotFound)
 
 	// FindBySubjectAndType with no credentials

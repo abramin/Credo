@@ -33,7 +33,7 @@ func TestPostgresStoreSuite(t *testing.T) {
 func (s *PostgresStoreSuite) SetupSuite() {
 	mgr := containers.GetManager()
 	s.postgres = mgr.GetPostgres(s.T())
-	s.store = authlockout.NewPostgres(s.postgres.DB)
+	s.store = authlockout.NewPostgres(s.postgres.DB, nil)
 }
 
 func (s *PostgresStoreSuite) SetupTest() {
