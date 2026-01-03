@@ -264,3 +264,63 @@ func (s *ServiceSuite) TestClientResolution() {
 		s.True(dErrors.HasCode(err, dErrors.CodeNotFound), "expected not found when tenant mismatched")
 	})
 }
+
+// TestClientLifecycle verifies client activation/deactivation error codes.
+// Feature files test HTTP 409, but these verify the exact CodeConflict error
+// is returned by the service layer (mirrors model tests for service path).
+func (s *ServiceSuite) TestClientLifecycle() {
+	s.Run("deactivate already-inactive client returns CodeConflict", func() {
+		tenantRecord := s.createTestTenant("ClientLifecycle1")
+		client := s.createTestClient(tenantRecord.ID)
+
+		// First deactivation succeeds
+		_, err := s.service.DeactivateClient(context.Background(), client.ID)
+		s.Require().NoError(err)
+
+		// Second deactivation returns conflict
+		_, err = s.service.DeactivateClient(context.Background(), client.ID)
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeConflict),
+			"expected CodeConflict for double-deactivation, got: %v", err)
+	})
+
+	s.Run("reactivate already-active client returns CodeConflict", func() {
+		tenantRecord := s.createTestTenant("ClientLifecycle2")
+		client := s.createTestClient(tenantRecord.ID)
+
+		// Client is already active, so reactivation should fail
+		_, err := s.service.ReactivateClient(context.Background(), client.ID)
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeConflict),
+			"expected CodeConflict for reactivating already-active client, got: %v", err)
+	})
+
+	s.Run("deactivate then reactivate succeeds", func() {
+		tenantRecord := s.createTestTenant("ClientLifecycle3")
+		client := s.createTestClient(tenantRecord.ID)
+
+		// Deactivate
+		deactivated, err := s.service.DeactivateClient(context.Background(), client.ID)
+		s.Require().NoError(err)
+		s.Equal(tenant.ClientStatusInactive, deactivated.Status)
+
+		// Reactivate
+		reactivated, err := s.service.ReactivateClient(context.Background(), client.ID)
+		s.Require().NoError(err)
+		s.Equal(tenant.ClientStatusActive, reactivated.Status)
+	})
+
+	s.Run("deactivate non-existent client returns CodeNotFound", func() {
+		_, err := s.service.DeactivateClient(context.Background(), id.ClientID(uuid.New()))
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeNotFound),
+			"expected CodeNotFound for non-existent client, got: %v", err)
+	})
+
+	s.Run("reactivate non-existent client returns CodeNotFound", func() {
+		_, err := s.service.ReactivateClient(context.Background(), id.ClientID(uuid.New()))
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeNotFound),
+			"expected CodeNotFound for non-existent client, got: %v", err)
+	})
+}

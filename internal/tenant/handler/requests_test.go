@@ -4,138 +4,147 @@ import (
 	"strings"
 	"testing"
 
-	"credo/pkg/platform/validation"
+	"github.com/stretchr/testify/suite"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"credo/pkg/platform/validation"
 )
 
-func TestCreateClientRequest_Validate_SizeLimits(t *testing.T) {
-	validRequest := func() *CreateClientRequest {
-		return &CreateClientRequest{
-			TenantID:      "550e8400-e29b-41d4-a716-446655440000",
-			Name:          "Test Client",
-			RedirectURIs:  []string{"https://example.com/callback"},
-			AllowedGrants: []string{"authorization_code"},
-			AllowedScopes: []string{"openid", "profile"},
-		}
-	}
+// CreateClientRequestSuite tests CreateClientRequest validation and normalization.
+type CreateClientRequestSuite struct {
+	suite.Suite
+}
 
-	t.Run("valid request passes validation", func(t *testing.T) {
-		req := validRequest()
+func TestCreateClientRequestSuite(t *testing.T) {
+	suite.Run(t, new(CreateClientRequestSuite))
+}
+
+func (s *CreateClientRequestSuite) validRequest() *CreateClientRequest {
+	return &CreateClientRequest{
+		TenantID:      "550e8400-e29b-41d4-a716-446655440000",
+		Name:          "Test Client",
+		RedirectURIs:  []string{"https://example.com/callback"},
+		AllowedGrants: []string{"authorization_code"},
+		AllowedScopes: []string{"openid", "profile"},
+	}
+}
+
+// TestValidation verifies size limit enforcement on CreateClientRequest.
+func (s *CreateClientRequestSuite) TestValidation() {
+	s.Run("valid request passes", func() {
+		req := s.validRequest()
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("too many redirect URIs rejected", func(t *testing.T) {
-		req := validRequest()
+	s.Run("too many redirect URIs rejected", func() {
+		req := s.validRequest()
 		req.RedirectURIs = make([]string, validation.MaxRedirectURIs+1)
 		for i := range req.RedirectURIs {
 			req.RedirectURIs[i] = "https://example.com/callback"
 		}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "too many redirect URIs")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "too many redirect URIs")
 	})
 
-	t.Run("max redirect URIs allowed", func(t *testing.T) {
-		req := validRequest()
+	s.Run("max redirect URIs allowed", func() {
+		req := s.validRequest()
 		req.RedirectURIs = make([]string, validation.MaxRedirectURIs)
 		for i := range req.RedirectURIs {
 			req.RedirectURIs[i] = "https://example.com/callback"
 		}
 
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("too many grant types rejected", func(t *testing.T) {
-		req := validRequest()
+	s.Run("too many grant types rejected", func() {
+		req := s.validRequest()
 		req.AllowedGrants = make([]string, validation.MaxGrants+1)
 		for i := range req.AllowedGrants {
 			req.AllowedGrants[i] = "authorization_code"
 		}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "too many grant types")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "too many grant types")
 	})
 
-	t.Run("max grant types allowed", func(t *testing.T) {
-		req := validRequest()
+	s.Run("max grant types allowed", func() {
+		req := s.validRequest()
 		req.AllowedGrants = make([]string, validation.MaxGrants)
 		for i := range req.AllowedGrants {
 			req.AllowedGrants[i] = "authorization_code"
 		}
 
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("too many scopes rejected", func(t *testing.T) {
-		req := validRequest()
+	s.Run("too many scopes rejected", func() {
+		req := s.validRequest()
 		req.AllowedScopes = make([]string, validation.MaxScopes+1)
 		for i := range req.AllowedScopes {
 			req.AllowedScopes[i] = "scope"
 		}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "too many scopes")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "too many scopes")
 	})
 
-	t.Run("max scopes allowed", func(t *testing.T) {
-		req := validRequest()
+	s.Run("max scopes allowed", func() {
+		req := s.validRequest()
 		req.AllowedScopes = make([]string, validation.MaxScopes)
 		for i := range req.AllowedScopes {
 			req.AllowedScopes[i] = "scope"
 		}
 
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("redirect URI exceeds max length rejected", func(t *testing.T) {
-		req := validRequest()
+	s.Run("redirect URI exceeds max length rejected", func() {
+		req := s.validRequest()
 		req.RedirectURIs = []string{"https://example.com/" + strings.Repeat("a", validation.MaxRedirectURILength)}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "redirect URI exceeds max length")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "redirect URI exceeds max length")
 	})
 
-	t.Run("redirect URI at max length allowed", func(t *testing.T) {
-		req := validRequest()
-		// Create a URL that's exactly at the max length
+	s.Run("redirect URI at max length allowed", func() {
+		req := s.validRequest()
 		baseURL := "https://example.com/"
 		padding := strings.Repeat("a", validation.MaxRedirectURILength-len(baseURL))
 		req.RedirectURIs = []string{baseURL + padding}
 
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("scope exceeds max length rejected", func(t *testing.T) {
-		req := validRequest()
+	s.Run("scope exceeds max length rejected", func() {
+		req := s.validRequest()
 		req.AllowedScopes = []string{strings.Repeat("a", validation.MaxScopeLength+1)}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "scope exceeds max length")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "scope exceeds max length")
 	})
 
-	t.Run("scope at max length allowed", func(t *testing.T) {
-		req := validRequest()
+	s.Run("scope at max length allowed", func() {
+		req := s.validRequest()
 		req.AllowedScopes = []string{strings.Repeat("a", validation.MaxScopeLength)}
 
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 }
 
-func TestCreateClientRequest_Validate_RequiredFields(t *testing.T) {
-	t.Run("missing name rejected", func(t *testing.T) {
+// TestRequiredFields verifies required field enforcement.
+func (s *CreateClientRequestSuite) TestRequiredFields() {
+	s.Run("missing name rejected", func() {
 		req := &CreateClientRequest{
 			TenantID:      "550e8400-e29b-41d4-a716-446655440000",
 			RedirectURIs:  []string{"https://example.com/callback"},
@@ -144,11 +153,11 @@ func TestCreateClientRequest_Validate_RequiredFields(t *testing.T) {
 		}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "name is required")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "name is required")
 	})
 
-	t.Run("missing redirect_uris rejected", func(t *testing.T) {
+	s.Run("missing redirect_uris rejected", func() {
 		req := &CreateClientRequest{
 			TenantID:      "550e8400-e29b-41d4-a716-446655440000",
 			Name:          "Test Client",
@@ -157,20 +166,21 @@ func TestCreateClientRequest_Validate_RequiredFields(t *testing.T) {
 		}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "at least one redirect_uri is required")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "at least one redirect_uri is required")
 	})
 
-	t.Run("nil request rejected", func(t *testing.T) {
+	s.Run("nil request rejected", func() {
 		var req *CreateClientRequest
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "request is required")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "request is required")
 	})
 }
 
-func TestCreateClientRequest_Normalize(t *testing.T) {
-	t.Run("trims whitespace and deduplicates", func(t *testing.T) {
+// TestNormalize verifies input normalization.
+func (s *CreateClientRequestSuite) TestNormalize() {
+	s.Run("trims whitespace and deduplicates", func() {
 		req := &CreateClientRequest{
 			Name:          "  Test Client  ",
 			RedirectURIs:  []string{"  https://example.com/callback  ", "https://example.com/callback"},
@@ -180,29 +190,39 @@ func TestCreateClientRequest_Normalize(t *testing.T) {
 
 		req.Normalize()
 
-		assert.Equal(t, "Test Client", req.Name)
-		assert.Len(t, req.RedirectURIs, 1)
-		assert.Equal(t, "https://example.com/callback", req.RedirectURIs[0])
-		assert.Len(t, req.AllowedGrants, 1)
-		assert.Equal(t, "authorization_code", req.AllowedGrants[0])
-		assert.Len(t, req.AllowedScopes, 1)
-		assert.Equal(t, "openid", req.AllowedScopes[0])
+		s.Equal("Test Client", req.Name)
+		s.Len(req.RedirectURIs, 1)
+		s.Equal("https://example.com/callback", req.RedirectURIs[0])
+		s.Len(req.AllowedGrants, 1)
+		s.Equal("authorization_code", req.AllowedGrants[0])
+		s.Len(req.AllowedScopes, 1)
+		s.Equal("openid", req.AllowedScopes[0])
 	})
 
-	t.Run("nil request does not panic", func(t *testing.T) {
+	s.Run("nil request does not panic", func() {
 		var req *CreateClientRequest
-		assert.NotPanics(t, func() { req.Normalize() })
+		s.NotPanics(func() { req.Normalize() })
 	})
 }
 
-func TestUpdateClientRequest_Validate_SizeLimits(t *testing.T) {
-	t.Run("empty request is valid", func(t *testing.T) {
+// UpdateClientRequestSuite tests UpdateClientRequest validation and normalization.
+type UpdateClientRequestSuite struct {
+	suite.Suite
+}
+
+func TestUpdateClientRequestSuite(t *testing.T) {
+	suite.Run(t, new(UpdateClientRequestSuite))
+}
+
+// TestValidation verifies size limit enforcement on UpdateClientRequest.
+func (s *UpdateClientRequestSuite) TestValidation() {
+	s.Run("empty request is valid", func() {
 		req := &UpdateClientRequest{}
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("too many redirect URIs rejected", func(t *testing.T) {
+	s.Run("too many redirect URIs rejected", func() {
 		uris := make([]string, validation.MaxRedirectURIs+1)
 		for i := range uris {
 			uris[i] = "https://example.com/callback"
@@ -210,11 +230,11 @@ func TestUpdateClientRequest_Validate_SizeLimits(t *testing.T) {
 		req := &UpdateClientRequest{RedirectURIs: &uris}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "too many redirect URIs")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "too many redirect URIs")
 	})
 
-	t.Run("max redirect URIs allowed", func(t *testing.T) {
+	s.Run("max redirect URIs allowed", func() {
 		uris := make([]string, validation.MaxRedirectURIs)
 		for i := range uris {
 			uris[i] = "https://example.com/callback"
@@ -222,10 +242,10 @@ func TestUpdateClientRequest_Validate_SizeLimits(t *testing.T) {
 		req := &UpdateClientRequest{RedirectURIs: &uris}
 
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("too many grant types rejected", func(t *testing.T) {
+	s.Run("too many grant types rejected", func() {
 		grants := make([]string, validation.MaxGrants+1)
 		for i := range grants {
 			grants[i] = "authorization_code"
@@ -233,11 +253,11 @@ func TestUpdateClientRequest_Validate_SizeLimits(t *testing.T) {
 		req := &UpdateClientRequest{AllowedGrants: &grants}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "too many grant types")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "too many grant types")
 	})
 
-	t.Run("too many scopes rejected", func(t *testing.T) {
+	s.Run("too many scopes rejected", func() {
 		scopes := make([]string, validation.MaxScopes+1)
 		for i := range scopes {
 			scopes[i] = "scope"
@@ -245,38 +265,39 @@ func TestUpdateClientRequest_Validate_SizeLimits(t *testing.T) {
 		req := &UpdateClientRequest{AllowedScopes: &scopes}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "too many scopes")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "too many scopes")
 	})
 
-	t.Run("redirect URI exceeds max length rejected", func(t *testing.T) {
+	s.Run("redirect URI exceeds max length rejected", func() {
 		uris := []string{"https://example.com/" + strings.Repeat("a", validation.MaxRedirectURILength)}
 		req := &UpdateClientRequest{RedirectURIs: &uris}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "redirect URI exceeds max length")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "redirect URI exceeds max length")
 	})
 
-	t.Run("scope exceeds max length rejected", func(t *testing.T) {
+	s.Run("scope exceeds max length rejected", func() {
 		scopes := []string{strings.Repeat("a", validation.MaxScopeLength+1)}
 		req := &UpdateClientRequest{AllowedScopes: &scopes}
 
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "scope exceeds max length")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "scope exceeds max length")
 	})
 
-	t.Run("nil request rejected", func(t *testing.T) {
+	s.Run("nil request rejected", func() {
 		var req *UpdateClientRequest
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "request is required")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "request is required")
 	})
 }
 
-func TestUpdateClientRequest_Normalize(t *testing.T) {
-	t.Run("trims and deduplicates pointer fields", func(t *testing.T) {
+// TestNormalize verifies input normalization.
+func (s *UpdateClientRequestSuite) TestNormalize() {
+	s.Run("trims and deduplicates pointer fields", func() {
 		name := "  Test Client  "
 		uris := []string{"  https://example.com/callback  ", "https://example.com/callback"}
 		grants := []string{"  AUTHORIZATION_CODE  ", "authorization_code"}
@@ -291,57 +312,68 @@ func TestUpdateClientRequest_Normalize(t *testing.T) {
 
 		req.Normalize()
 
-		assert.Equal(t, "Test Client", *req.Name)
-		assert.Len(t, *req.RedirectURIs, 1)
-		assert.Equal(t, "https://example.com/callback", (*req.RedirectURIs)[0])
-		assert.Len(t, *req.AllowedGrants, 1)
-		assert.Equal(t, "authorization_code", (*req.AllowedGrants)[0])
-		assert.Len(t, *req.AllowedScopes, 1)
-		assert.Equal(t, "openid", (*req.AllowedScopes)[0])
+		s.Equal("Test Client", *req.Name)
+		s.Len(*req.RedirectURIs, 1)
+		s.Equal("https://example.com/callback", (*req.RedirectURIs)[0])
+		s.Len(*req.AllowedGrants, 1)
+		s.Equal("authorization_code", (*req.AllowedGrants)[0])
+		s.Len(*req.AllowedScopes, 1)
+		s.Equal("openid", (*req.AllowedScopes)[0])
 	})
 
-	t.Run("nil request does not panic", func(t *testing.T) {
+	s.Run("nil request does not panic", func() {
 		var req *UpdateClientRequest
-		assert.NotPanics(t, func() { req.Normalize() })
+		s.NotPanics(func() { req.Normalize() })
 	})
 
-	t.Run("nil fields do not cause panic", func(t *testing.T) {
+	s.Run("nil fields do not cause panic", func() {
 		req := &UpdateClientRequest{}
-		assert.NotPanics(t, func() { req.Normalize() })
+		s.NotPanics(func() { req.Normalize() })
 	})
 }
 
-func TestCreateTenantRequest_Validate(t *testing.T) {
-	t.Run("valid request passes", func(t *testing.T) {
+// CreateTenantRequestSuite tests CreateTenantRequest validation and normalization.
+type CreateTenantRequestSuite struct {
+	suite.Suite
+}
+
+func TestCreateTenantRequestSuite(t *testing.T) {
+	suite.Run(t, new(CreateTenantRequestSuite))
+}
+
+// TestValidation verifies required field enforcement.
+func (s *CreateTenantRequestSuite) TestValidation() {
+	s.Run("valid request passes", func() {
 		req := &CreateTenantRequest{Name: "Test Tenant"}
 		err := req.Validate()
-		assert.NoError(t, err)
+		s.NoError(err)
 	})
 
-	t.Run("missing name rejected", func(t *testing.T) {
+	s.Run("missing name rejected", func() {
 		req := &CreateTenantRequest{}
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "name is required")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "name is required")
 	})
 
-	t.Run("nil request rejected", func(t *testing.T) {
+	s.Run("nil request rejected", func() {
 		var req *CreateTenantRequest
 		err := req.Validate()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "request is required")
+		s.Require().Error(err)
+		s.Contains(err.Error(), "request is required")
 	})
 }
 
-func TestCreateTenantRequest_Normalize(t *testing.T) {
-	t.Run("trims whitespace", func(t *testing.T) {
+// TestNormalize verifies input normalization.
+func (s *CreateTenantRequestSuite) TestNormalize() {
+	s.Run("trims whitespace", func() {
 		req := &CreateTenantRequest{Name: "  Test Tenant  "}
 		req.Normalize()
-		assert.Equal(t, "Test Tenant", req.Name)
+		s.Equal("Test Tenant", req.Name)
 	})
 
-	t.Run("nil request does not panic", func(t *testing.T) {
+	s.Run("nil request does not panic", func() {
 		var req *CreateTenantRequest
-		assert.NotPanics(t, func() { req.Normalize() })
+		s.NotPanics(func() { req.Normalize() })
 	})
 }
