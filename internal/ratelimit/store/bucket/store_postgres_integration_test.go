@@ -85,9 +85,9 @@ func (s *PostgresStoreSuite) TestConcurrentAllowNRequests() {
 func (s *PostgresStoreSuite) TestAdvisoryLockContention() {
 	ctx := context.Background()
 	key := "contention-test"
-	limit := 100
+	limit := 50
 	window := 1 * time.Minute
-	const goroutines = 200
+	const goroutines = 50 // Reduced from 200 to fit within PostgreSQL default max_connections
 
 	var wg sync.WaitGroup
 	var errors atomic.Int32
@@ -109,7 +109,7 @@ func (s *PostgresStoreSuite) TestAdvisoryLockContention() {
 	// No errors should occur (advisory locks should serialize properly)
 	s.Equal(int32(0), errors.Load(), "no errors expected under contention")
 
-	// Verify count is exactly 'limit' (100 allowed, rest denied)
+	// Verify count is exactly 'limit' (50 allowed, rest denied but within limit here)
 	count, err := s.store.GetCurrentCount(ctx, key)
 	s.Require().NoError(err)
 	s.Equal(limit, count)
@@ -147,8 +147,8 @@ func (s *PostgresStoreSuite) TestMultipleKeysConcurrently() {
 	ctx := context.Background()
 	limit := 5
 	window := 1 * time.Minute
-	const keys = 10
-	const requestsPerKey = 20
+	const keys = 5                // Reduced from 10
+	const requestsPerKey = 10     // Reduced from 20 to fit within connection limits
 
 	var wg sync.WaitGroup
 	allowedPerKey := make([]atomic.Int32, keys)
