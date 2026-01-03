@@ -15,7 +15,7 @@ import (
 
 	"credo/internal/auth/models"
 	"credo/internal/auth/service/mocks"
-	tenant "credo/internal/tenant/models"
+	"credo/internal/auth/types"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/audit/publishers/security"
 	auditmemory "credo/pkg/platform/audit/store/memory"
@@ -78,16 +78,15 @@ func TestServiceSuite(t *testing.T) {
 
 // Shared test fixture builders - used across multiple test files
 
-func (s *ServiceSuite) newTestClient(tenantID id.TenantID, clientUUID id.ClientID) (*tenant.Client, *tenant.Tenant) {
-	return &tenant.Client{
+func (s *ServiceSuite) newTestClient(tenantID id.TenantID, clientUUID id.ClientID) (*types.ResolvedClient, *types.ResolvedTenant) {
+	return &types.ResolvedClient{
 			ID:            clientUUID,
 			TenantID:      tenantID,
 			OAuthClientID: "client-123",
-			Name:          "Test Client",
-			Status:        "active",
-		}, &tenant.Tenant{
-			ID:   tenantID,
-			Name: "Test Tenant",
+			Active:        true,
+		}, &types.ResolvedTenant{
+			ID:     tenantID,
+			Active: true,
 		}
 }
 

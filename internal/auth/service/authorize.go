@@ -12,7 +12,7 @@ import (
 	"credo/internal/auth/device"
 	"credo/internal/auth/email"
 	"credo/internal/auth/models"
-	tenant "credo/internal/tenant/models"
+	"credo/internal/auth/types"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
@@ -41,8 +41,8 @@ type authorizeParams struct {
 	DeviceID          string
 	DeviceFingerprint string
 	DeviceDisplayName string
-	Client            *tenant.Client
-	Tenant            *tenant.Tenant
+	Client            *types.ResolvedClient
+	Tenant            *types.ResolvedTenant
 }
 
 type authorizeResult struct {

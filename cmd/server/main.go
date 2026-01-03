@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"credo/internal/admin"
+	adminAdapters "credo/internal/admin/adapters"
 	authAdapters "credo/internal/auth/adapters"
 	"credo/internal/auth/device"
 	authHandler "credo/internal/auth/handler"
@@ -506,9 +507,12 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 		DeviceBindingEnabled:   infra.Cfg.Auth.DeviceBindingEnabled,
 	}
 
-	// Wrap tenant service with circuit breaker for resilience
+	// Wrap tenant service with adapter to map to auth types
+	clientAdapter := authAdapters.NewTenantClientResolver(tenantService)
+
+	// Wrap with circuit breaker for resilience
 	resilientClientResolver := authAdapters.NewResilientClientResolver(
-		tenantService,
+		clientAdapter,
 		infra.Log,
 		authAdapters.WithFailureThreshold(5),
 		authAdapters.WithCacheTTL(5*time.Minute),
@@ -574,10 +578,14 @@ func buildAuthModulePostgres(infra *infraBundle, clientResolver authService.Clie
 		return nil, err
 	}
 
+	// Wrap auth stores with admin adapters to decouple admin from auth models
+	adminUserStore := adminAdapters.NewUserStoreAdapter(users)
+	adminSessionStore := adminAdapters.NewSessionStoreAdapter(sessions)
+
 	return &authModule{
 		Service:    authSvc,
 		Handler:    authHandler.New(authSvc, rateLimitAdapter, infra.AuthMetrics, infra.Log, infra.Cfg.Auth.DeviceCookieName, infra.Cfg.Auth.DeviceCookieMaxAge),
-		AdminSvc:   admin.NewService(users, sessions, auditSt),
+		AdminSvc:   admin.NewService(adminUserStore, adminSessionStore, auditSt),
 		Cleanup:    cleanupSvc,
 		AuditStore: auditSt,
 	}, nil
@@ -613,11 +621,15 @@ func buildAuthModuleInMemory(infra *infraBundle, clientResolver authService.Clie
 		return nil, err
 	}
 
+	// Wrap auth stores with admin adapters to decouple admin from auth models
+	adminUserStore := adminAdapters.NewUserStoreAdapter(users)
+	adminSessionStore := adminAdapters.NewSessionStoreAdapter(sessions)
+
 	// No cleanup worker for in-memory stores (not needed for tests)
 	return &authModule{
 		Service:    authSvc,
 		Handler:    authHandler.New(authSvc, rateLimitAdapter, infra.AuthMetrics, infra.Log, infra.Cfg.Auth.DeviceCookieName, infra.Cfg.Auth.DeviceCookieMaxAge),
-		AdminSvc:   admin.NewService(users, sessions, auditSt),
+		AdminSvc:   admin.NewService(adminUserStore, adminSessionStore, auditSt),
 		Cleanup:    nil,
 		AuditStore: auditSt,
 	}, nil

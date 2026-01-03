@@ -15,8 +15,8 @@ import (
 	"credo/internal/auth/metrics"
 	"credo/internal/auth/models"
 	"credo/internal/auth/store/revocation"
+	"credo/internal/auth/types"
 	jwttoken "credo/internal/jwt_token"
-	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit/publishers/security"
@@ -117,7 +117,7 @@ type AuditPublisher = *security.Publisher
 type ClientResolver interface {
 	// ResolveClient maps client_id -> client and tenant as a single choke point.
 	// If the client or tenant is inactive, returns an invalid_client error.
-	ResolveClient(ctx context.Context, clientID string) (*tenant.Client, *tenant.Tenant, error)
+	ResolveClient(ctx context.Context, clientID string) (*types.ResolvedClient, *types.ResolvedTenant, error)
 }
 
 // Service orchestrates auth workflows across stores, tokens, audits, and metrics.

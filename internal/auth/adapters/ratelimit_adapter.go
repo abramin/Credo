@@ -4,10 +4,13 @@ import (
 	"context"
 
 	"credo/internal/auth/ports"
-	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/service/authlockout"
 	"credo/internal/ratelimit/service/requestlimit"
 )
+
+// classAuth is a local constant for the auth endpoint class.
+// Defined here to avoid coupling to internal/ratelimit/models.
+const classAuth = "auth"
 
 // RateLimitAdapter is an in-process adapter that implements ports.RateLimitPort
 // by directly calling the ratelimit services. This maintains the hexagonal
@@ -43,7 +46,7 @@ func (a *RateLimitAdapter) CheckAuthRateLimit(ctx context.Context, identifier, i
 	}
 
 	// Secondary defense: IP rate limit for auth endpoints
-	ipResult, err := a.requests.CheckIP(ctx, ip, models.ClassAuth)
+	ipResult, err := a.requests.CheckIP(ctx, ip, classAuth)
 	if err != nil {
 		return nil, err
 	}

@@ -12,8 +12,8 @@ package mocks
 import (
 	context "context"
 	models "credo/internal/auth/models"
+	types "credo/internal/auth/types"
 	jwttoken "credo/internal/jwt_token"
-	models0 "credo/internal/tenant/models"
 	domain "credo/pkg/domain"
 	audit "credo/pkg/platform/audit"
 	reflect "reflect"
@@ -669,11 +669,11 @@ func (m *MockClientResolver) EXPECT() *MockClientResolverMockRecorder {
 }
 
 // ResolveClient mocks base method.
-func (m *MockClientResolver) ResolveClient(ctx context.Context, clientID string) (*models0.Client, *models0.Tenant, error) {
+func (m *MockClientResolver) ResolveClient(ctx context.Context, clientID string) (*types.ResolvedClient, *types.ResolvedTenant, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResolveClient", ctx, clientID)
-	ret0, _ := ret[0].(*models0.Client)
-	ret1, _ := ret[1].(*models0.Tenant)
+	ret0, _ := ret[0].(*types.ResolvedClient)
+	ret1, _ := ret[1].(*types.ResolvedTenant)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
