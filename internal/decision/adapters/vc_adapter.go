@@ -23,6 +23,7 @@ func NewVCAdapter(store vcstore.Store) ports.VCPort {
 }
 
 // FindBySubjectAndType retrieves a credential by user ID and type.
+// Side effects: calls the VC store and may perform external I/O.
 // Returns nil, nil if no credential exists (not an error).
 func (a *VCAdapter) FindBySubjectAndType(ctx context.Context, userID id.UserID, credType vcmodels.CredentialType) (*vcmodels.CredentialRecord, error) {
 	record, err := a.store.FindBySubjectAndType(ctx, userID, credType)

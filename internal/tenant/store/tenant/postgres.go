@@ -9,6 +9,7 @@ import (
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
+	txcontext "credo/pkg/platform/tx"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,6 +25,18 @@ func NewPostgres(db *sql.DB) *PostgresStore {
 	return &PostgresStore{db: db}
 }
 
+type dbExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (s *PostgresStore) execer(ctx context.Context) dbExecutor {
+	if tx, ok := txcontext.From(ctx); ok {
+		return tx
+	}
+	return s.db
+}
+
 // CreateIfNameAvailable atomically creates the tenant if the name is not already taken (case-insensitive).
 func (s *PostgresStore) CreateIfNameAvailable(ctx context.Context, tenant *models.Tenant) error {
 	if tenant == nil {
@@ -33,7 +46,7 @@ func (s *PostgresStore) CreateIfNameAvailable(ctx context.Context, tenant *model
 		INSERT INTO tenants (id, name, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5)
 	`
-	_, err := s.db.ExecContext(ctx, query,
+	_, err := s.execer(ctx).ExecContext(ctx, query,
 		uuid.UUID(tenant.ID),
 		tenant.Name,
 		string(tenant.Status),
@@ -56,7 +69,7 @@ func (s *PostgresStore) FindByID(ctx context.Context, tenantID id.TenantID) (*mo
 		FROM tenants
 		WHERE id = $1
 	`
-	tenant, err := scanTenant(s.db.QueryRowContext(ctx, query, uuid.UUID(tenantID)))
+	tenant, err := scanTenant(s.execer(ctx).QueryRowContext(ctx, query, uuid.UUID(tenantID)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -73,7 +86,7 @@ func (s *PostgresStore) FindByName(ctx context.Context, name string) (*models.Te
 		FROM tenants
 		WHERE lower(name) = lower($1)
 	`
-	tenant, err := scanTenant(s.db.QueryRowContext(ctx, query, name))
+	tenant, err := scanTenant(s.execer(ctx).QueryRowContext(ctx, query, name))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -86,7 +99,7 @@ func (s *PostgresStore) FindByName(ctx context.Context, name string) (*models.Te
 // Count returns the total number of tenants.
 func (s *PostgresStore) Count(ctx context.Context) (int, error) {
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tenants`).Scan(&count); err != nil {
+	if err := s.execer(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM tenants`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count tenants: %w", err)
 	}
 	return count, nil
@@ -102,7 +115,7 @@ func (s *PostgresStore) Update(ctx context.Context, tenant *models.Tenant) error
 		SET name = $2, status = $3, updated_at = $4
 		WHERE id = $1
 	`
-	res, err := s.db.ExecContext(ctx, query,
+	res, err := s.execer(ctx).ExecContext(ctx, query,
 		uuid.UUID(tenant.ID),
 		tenant.Name,
 		string(tenant.Status),

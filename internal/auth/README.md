@@ -35,7 +35,7 @@ This is a distinct bounded context because its language and invariants are speci
 | **UserInfo**           | `service/userinfo.go`                          |
 | **Device Binding**     | `device/device.go`, `service/device_binding.go` |
 | **Revocation Reason**  | `models.RevocationReason`                       |
-| **Audit events**       | emitted via `service/observability.go#logAudit` |
+| **Audit events**       | emitted via `service/observability.go#logAudit` (security publisher) |
 
 > **Architecture Note:** Device ID cookie extraction happens in middleware (cross-cutting), while cookie setting happens in the auth handler (business logic). See `docs/engineering/architecture.md` for rationale.
 

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	evidenceports "credo/internal/evidence/ports"
 	registrymodels "credo/internal/evidence/registry/models"
 	"credo/internal/evidence/vc/domain/credential"
 	"credo/internal/evidence/vc/domain/shared"
@@ -16,6 +15,7 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/ops"
 	"credo/pkg/platform/sentinel"
 	"credo/pkg/requestcontext"
 )
@@ -28,7 +28,7 @@ type Service struct {
 	store       store.Store
 	registry    ports.RegistryPort
 	consentPort ports.ConsentPort
-	auditor     evidenceports.AuditPublisher
+	auditor     *ops.Publisher
 	regulated   bool
 	logger      *slog.Logger
 }
@@ -55,8 +55,9 @@ func NewService(store store.Store, registry ports.RegistryPort, consentPort port
 	return svc
 }
 
-// WithAuditor configures an audit publisher for the service.
-func WithAuditor(auditor evidenceports.AuditPublisher) Option {
+// WithAuditor configures an ops audit publisher for the service.
+// VC events use fire-and-forget semantics via the ops publisher.
+func WithAuditor(auditor *ops.Publisher) Option {
 	return func(s *Service) {
 		s.auditor = auditor
 	}
@@ -185,7 +186,7 @@ func (s *Service) Verify(ctx context.Context, credentialID models.CredentialID) 
 	return result, nil
 }
 
-const vcIssuancePurpose = "vc_issuance"
+const vcIssuancePurpose id.ConsentPurpose = id.ConsentPurposeVCIssuance
 
 func (s *Service) requireVCIssuanceConsent(ctx context.Context, userID id.UserID) error {
 	if s.consentPort == nil {
@@ -202,46 +203,29 @@ func (s *Service) emitAudit(ctx context.Context, credential models.CredentialRec
 		return
 	}
 
-	event := audit.Event{
+	event := audit.OpsEvent{
 		Action:    "vc_issued",
-		Purpose:   "vc_issuance",
-		UserID:    credential.Subject,
-		Subject:   credential.ID.String(),
-		Decision:  "issued",
-		Reason:    "user_initiated",
+		Subject:   credential.Subject.String(),
 		RequestID: requestcontext.RequestID(ctx),
 	}
 
-	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
-		s.logger.ErrorContext(ctx, "failed to emit vc_issued audit event",
-			"error", err,
-			"user_id", credential.Subject,
-		)
-	}
+	// Fire-and-forget via ops publisher - no error handling needed
+	s.auditor.Track(ctx, event)
 }
 
 func (s *Service) emitVerifyAudit(ctx context.Context, credential models.CredentialRecord) {
-	// TODO: this should probably error if auditor is nil?
 	if s.auditor == nil {
 		return
 	}
 
-	event := audit.Event{
+	event := audit.OpsEvent{
 		Action:    "vc_verified",
-		Purpose:   "vc_verification",
-		UserID:    credential.Subject,
-		Subject:   credential.ID.String(),
-		Decision:  "verified",
-		Reason:    "user_initiated",
+		Subject:   credential.Subject.String(),
 		RequestID: requestcontext.RequestID(ctx),
 	}
 
-	if err := s.auditor.Emit(ctx, event); err != nil && s.logger != nil {
-		s.logger.ErrorContext(ctx, "failed to emit vc_verified audit event",
-			"error", err,
-			"user_id", credential.Subject,
-		)
-	}
+	// Fire-and-forget via ops publisher - no error handling needed
+	s.auditor.Track(ctx, event)
 }
 
 func isOver18(birthDate, now time.Time) bool {

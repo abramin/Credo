@@ -7,8 +7,6 @@ import (
 	sessionStore "credo/internal/auth/store/session"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/sentinel"
-
-	"go.uber.org/mock/gomock"
 )
 
 // AGENTS.MD JUSTIFICATION: Stable error-code mapping across boundary failures
@@ -20,7 +18,6 @@ func (s *ServiceSuite) TestHandleTokenError() {
 	assertTokenError := func(name string, err error, flow TokenFlow, expectedCode dErrors.Code, expectedMsg string) {
 		s.Run(name, func() {
 			ctx := context.Background()
-			s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 			result := s.service.handleTokenError(ctx, err, clientID, &recordID, flow)
 
@@ -55,7 +52,6 @@ func (s *ServiceSuite) TestHandleTokenError_AuditAttributes() {
 		ctx := context.Background()
 		clientID := "client-123"
 		recordID := "record-456"
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.handleTokenError(ctx, sentinel.ErrAlreadyUsed, clientID, &recordID, TokenFlowCode)
 		s.Require().Error(err)
@@ -64,7 +60,6 @@ func (s *ServiceSuite) TestHandleTokenError_AuditAttributes() {
 	s.Run("excludes record_id when nil", func() {
 		ctx := context.Background()
 		clientID := "client-123"
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		err := s.service.handleTokenError(ctx, sentinel.ErrAlreadyUsed, clientID, nil, TokenFlowCode)
 		s.Require().Error(err)

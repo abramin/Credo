@@ -43,6 +43,9 @@ func NewPostgresTRL(db *sql.DB, opts ...PostgresTRLOption) *PostgresTRL {
 
 // RevokeToken adds a token to the revocation list with TTL.
 func (t *PostgresTRL) RevokeToken(ctx context.Context, jti string, ttl time.Duration) error {
+	if err := validateTTL(ttl); err != nil {
+		return err
+	}
 	expiresAt := t.clock().Add(ttl)
 	query := `
 		INSERT INTO token_revocations (jti, expires_at)
@@ -78,6 +81,9 @@ func (t *PostgresTRL) IsRevoked(ctx context.Context, jti string) (bool, error) {
 func (t *PostgresTRL) RevokeSessionTokens(ctx context.Context, sessionID string, jtis []string, ttl time.Duration) error {
 	if len(jtis) == 0 {
 		return nil
+	}
+	if err := validateTTL(ttl); err != nil {
+		return err
 	}
 
 	// Filter empty JTIs

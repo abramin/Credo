@@ -10,6 +10,7 @@ import (
 	"credo/internal/tenant/models"
 	id "credo/pkg/domain"
 	"credo/pkg/platform/sentinel"
+	txcontext "credo/pkg/platform/tx"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,18 @@ type PostgresStore struct {
 // NewPostgres constructs a PostgreSQL-backed client store.
 func NewPostgres(db *sql.DB) *PostgresStore {
 	return &PostgresStore{db: db}
+}
+
+type dbExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (s *PostgresStore) execer(ctx context.Context) dbExecutor {
+	if tx, ok := txcontext.From(ctx); ok {
+		return tx
+	}
+	return s.db
 }
 
 // Create persists a new client.
@@ -50,7 +63,7 @@ func (s *PostgresStore) Create(ctx context.Context, client *models.Client) error
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = s.execer(ctx).ExecContext(ctx, query,
 		uuid.UUID(client.ID),
 		uuid.UUID(client.TenantID),
 		client.Name,
@@ -102,7 +115,7 @@ func (s *PostgresStore) Update(ctx context.Context, client *models.Client) error
 			updated_at = $9
 		WHERE id = $1
 	`
-	res, err := s.db.ExecContext(ctx, query,
+	res, err := s.execer(ctx).ExecContext(ctx, query,
 		uuid.UUID(client.ID),
 		client.Name,
 		client.OAuthClientID,
@@ -134,7 +147,7 @@ func (s *PostgresStore) FindByID(ctx context.Context, clientID id.ClientID) (*mo
 		FROM clients
 		WHERE id = $1
 	`
-	client, err := scanClient(s.db.QueryRowContext(ctx, query, uuid.UUID(clientID)))
+	client, err := scanClient(s.execer(ctx).QueryRowContext(ctx, query, uuid.UUID(clientID)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -152,7 +165,7 @@ func (s *PostgresStore) FindByTenantAndID(ctx context.Context, tenantID id.Tenan
 		FROM clients
 		WHERE id = $1 AND tenant_id = $2
 	`
-	client, err := scanClient(s.db.QueryRowContext(ctx, query, uuid.UUID(clientID), uuid.UUID(tenantID)))
+	client, err := scanClient(s.execer(ctx).QueryRowContext(ctx, query, uuid.UUID(clientID), uuid.UUID(tenantID)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -170,7 +183,7 @@ func (s *PostgresStore) FindByOAuthClientID(ctx context.Context, oauthClientID s
 		FROM clients
 		WHERE oauth_client_id = $1
 	`
-	client, err := scanClient(s.db.QueryRowContext(ctx, query, oauthClientID))
+	client, err := scanClient(s.execer(ctx).QueryRowContext(ctx, query, oauthClientID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, sentinel.ErrNotFound
@@ -183,7 +196,7 @@ func (s *PostgresStore) FindByOAuthClientID(ctx context.Context, oauthClientID s
 // CountByTenant returns the number of clients registered under a tenant.
 func (s *PostgresStore) CountByTenant(ctx context.Context, tenantID id.TenantID) (int, error) {
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE tenant_id = $1`, uuid.UUID(tenantID)).Scan(&count); err != nil {
+	if err := s.execer(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM clients WHERE tenant_id = $1`, uuid.UUID(tenantID)).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count clients by tenant: %w", err)
 	}
 	return count, nil
@@ -194,55 +207,52 @@ type clientRow interface {
 }
 
 func scanClient(row clientRow) (*models.Client, error) {
-	var client models.Client
-	var tenantID uuid.UUID
-	var clientID uuid.UUID
-	var secret sql.NullString
-	var redirectBytes []byte
-	var grantsBytes []byte
-	var scopesBytes []byte
-	var status string
-
-	err := row.Scan(
-		&clientID,
-		&tenantID,
-		&client.Name,
-		&client.OAuthClientID,
-		&secret,
-		&redirectBytes,
-		&grantsBytes,
-		&scopesBytes,
-		&status,
-		&client.CreatedAt,
-		&client.UpdatedAt,
+	var (
+		clientID, tenantID         uuid.UUID
+		secret                     sql.NullString
+		redirectBytes, grantsBytes []byte
+		scopesBytes                []byte
+		status                     string
+		client                     models.Client
 	)
-	if err != nil {
+
+	if err := row.Scan(
+		&clientID, &tenantID,
+		&client.Name, &client.OAuthClientID, &secret,
+		&redirectBytes, &grantsBytes, &scopesBytes,
+		&status, &client.CreatedAt, &client.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
 
 	if secret.Valid {
 		client.ClientSecretHash = secret.String
 	}
-	if len(redirectBytes) > 0 {
-		if err := json.Unmarshal(redirectBytes, &client.RedirectURIs); err != nil {
-			return nil, fmt.Errorf("unmarshal redirect uris: %w", err)
-		}
+	if err := unmarshalJSONIfPresent(redirectBytes, &client.RedirectURIs, "redirect_uris"); err != nil {
+		return nil, err
 	}
-	if len(grantsBytes) > 0 {
-		if err := json.Unmarshal(grantsBytes, &client.AllowedGrants); err != nil {
-			return nil, fmt.Errorf("unmarshal allowed grants: %w", err)
-		}
+	if err := unmarshalJSONIfPresent(grantsBytes, &client.AllowedGrants, "allowed_grants"); err != nil {
+		return nil, err
 	}
-	if len(scopesBytes) > 0 {
-		if err := json.Unmarshal(scopesBytes, &client.AllowedScopes); err != nil {
-			return nil, fmt.Errorf("unmarshal allowed scopes: %w", err)
-		}
+	if err := unmarshalJSONIfPresent(scopesBytes, &client.AllowedScopes, "allowed_scopes"); err != nil {
+		return nil, err
 	}
 
 	client.ID = id.ClientID(clientID)
 	client.TenantID = id.TenantID(tenantID)
 	client.Status = models.ClientStatus(status)
 	return &client, nil
+}
+
+// unmarshalJSONIfPresent unmarshals JSON data into target if data is non-empty.
+func unmarshalJSONIfPresent[T any](data []byte, target *T, field string) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(data, target); err != nil {
+		return fmt.Errorf("unmarshal %s: %w", field, err)
+	}
+	return nil
 }
 
 func nullString(value string) sql.NullString {

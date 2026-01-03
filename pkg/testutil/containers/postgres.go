@@ -72,12 +72,9 @@ func NewPostgresContainer(t *testing.T) *PostgresContainer {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 
-	t.Cleanup(func() {
-		_ = db.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = container.Terminate(ctx)
-	})
+	// Note: We don't register t.Cleanup here because the container is managed
+	// by the singleton Manager and shared across test suites. Ryuk (testcontainers'
+	// cleanup sidecar) handles container cleanup when the test process exits.
 
 	return pc
 }
@@ -126,6 +123,41 @@ func (p *PostgresContainer) TruncateTables(ctx context.Context, tables ...string
 // TruncateAll truncates the standard integration test tables.
 func (p *PostgresContainer) TruncateAll(ctx context.Context) error {
 	return p.TruncateTables(ctx, "outbox", "audit_events")
+}
+
+// TruncateModuleTables truncates all module tables for full integration test isolation.
+// Tables are truncated with CASCADE to handle foreign key dependencies.
+func (p *PostgresContainer) TruncateModuleTables(ctx context.Context) error {
+	// Order matters due to FK constraints; CASCADE handles dependencies
+	tables := []string{
+		// Audit tables (no FK dependencies on them)
+		"outbox",
+		"audit_events",
+
+		// Rate limit tables
+		"global_throttle",
+		"auth_lockouts",
+		"rate_limit_events",
+		"rate_limit_allowlist",
+
+		// Evidence tables (vc_credentials depends on users)
+		"vc_credentials",
+		"citizen_cache",
+		"sanctions_cache",
+		"token_revocations",
+
+		// Auth tables (sessions, codes, tokens depend on users/clients)
+		"refresh_tokens",
+		"authorization_codes",
+		"sessions",
+		"consents",
+
+		// Core tables (users depends on tenants via clients)
+		"users",
+		"clients",
+		"tenants",
+	}
+	return p.TruncateTables(ctx, tables...)
 }
 
 // Exec runs a SQL statement and returns the result.

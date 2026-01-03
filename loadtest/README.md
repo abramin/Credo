@@ -67,12 +67,17 @@ DISABLE_RATE_LIMITING=true make run
 | `LARGE_TENANT_CLIENT_COUNT` | `500` | Clients per large tenant |
 | `SCOPES` | `openid,profile` | OAuth scopes |
 | `SCENARIO` | `all` | Which scenario to run |
+| `QUICK` | `false` | Halve all durations (~38 min vs ~76 min) |
 
 ### Run Scenarios
 
 ```bash
 # Run all scenarios (requires DISABLE_RATE_LIMITING=true)
+# Full run: ~76 minutes
 k6 run loadtest/k6-credo.js
+
+# Quick run: ~38 minutes (halves all durations)
+k6 run loadtest/k6-credo.js -e QUICK=true
 
 # Run specific scenario
 k6 run loadtest/k6-credo.js -e SCENARIO=token_refresh_storm
@@ -145,6 +150,15 @@ k6 run loadtest/k6-credo.js -e SCENARIO=rate_limit_cardinality
 - **Setup**: Creates tenant with 500 clients
 - **Target**: p95 latency < 100ms (COUNT queries should be O(1))
 
+### 7b. Tenant Name Lookup (`tenant_name_lookup`)
+
+**Purpose**: Validate case-insensitive tenant name lookup using functional index
+
+- **Load**: 200 req/sec for 1 minute
+- **Setup**: Creates 5 tenants with known names
+- **Method**: Lookups use random case variations (UPPER, lower, Mixed)
+- **Target**: p95 latency < 50ms (functional index on lower(name))
+
 ### 8. Rate Limit Sustained (`rate_limit_sustained`)
 
 **Purpose**: Validate rate limiting under sustained high request rate
@@ -161,24 +175,162 @@ k6 run loadtest/k6-credo.js -e SCENARIO=rate_limit_cardinality
 - **Method**: X-Forwarded-For header spoofing
 - **Run with**: Rate limiting ENABLED
 
+## Decision Module Scenarios
+
+### 15. Decision Age Verification (`decision_age_verify`)
+
+**Purpose**: Baseline throughput for age verification decisions
+
+- **Load**: Ramp 100→500 req/s over 5 minutes
+- **Target**: p95 latency < 150ms
+
+### 16. Decision Sanctions Screening (`decision_sanctions`)
+
+**Purpose**: Baseline throughput for sanctions screening (fail-closed audit)
+
+- **Load**: Ramp 100→800 req/s over 5 minutes
+- **Target**: p95 latency < 100ms
+
+### 17. Decision Same User Contention (`decision_same_user`)
+
+**Purpose**: Test audit contention with many decisions for same user
+
+- **Load**: 50 VUs for 2 minutes
+- **Target**: p95 latency < 200ms
+
+### 18. Decision Cache Hit Test (`decision_cache_hit`)
+
+**Purpose**: Measure cache effectiveness with repeated national IDs
+
+- **Load**: 200 req/s for 2 minutes using 10 fixed IDs
+- **Target**: p95 latency < 100ms (cache hits)
+
+### 19. Decision Rule Paths (`decision_rule_paths`)
+
+**Purpose**: Coverage of all decision outcomes (pass, fail, pass_with_conditions)
+
+- **Load**: 100 VUs for 3 minutes cycling through 5 profiles
+- **Target**: p95 latency < 200ms
+
+### 20. Decision Consent Denial (`decision_consent_denial`)
+
+**Purpose**: Verify denied consent fails fast without evidence fetch
+
+- **Load**: 200 req/s for 2 minutes
+- **Target**: p95 latency < 50ms (fast-fail path)
+
+## Evidence Module Scenarios
+
+### 21. Evidence Citizen Lookup (`evidence_citizen`)
+
+**Purpose**: Baseline throughput for citizen registry lookups
+
+- **Load**: Ramp 100→500 req/s over 4 minutes
+- **Target**: p95 latency < 150ms
+
+### 22. Evidence Sanctions Lookup (`evidence_sanctions`)
+
+**Purpose**: Baseline throughput for sanctions registry lookups
+
+- **Load**: Ramp 100→500 req/s over 4 minutes
+- **Target**: p95 latency < 150ms
+
+### 23. Evidence VC Issuance (`evidence_vc_issue`)
+
+**Purpose**: Full VC issuance flow under load
+
+- **Load**: 100 req/s for 2 minutes
+- **Target**: p95 latency < 3000ms (includes registry lookup)
+
+### 24. Evidence Cache Stampede (`evidence_cache_stampede`)
+
+**Purpose**: 1000 concurrent requests on same cache entry
+
+- **Load**: 100 VUs × 1000 shared iterations
+- **Target**: p95 latency < 500ms, minimal provider calls
+
+### 25. Evidence Check Combined (`evidence_check`)
+
+**Purpose**: Combined citizen + sanctions check throughput
+
+- **Load**: 200 req/s for 3 minutes (70% cache hits, 30% misses)
+- **Target**: p95 latency < 200ms
+
+## Additional Auth Scenarios
+
+### 26. Auth Code Replay Attack (`auth_code_replay`)
+
+**Purpose**: Verify replay protection under concurrent reuse attempts
+
+- **Load**: 50 VUs × 3 iterations (reuse same code)
+- **Target**: Exactly 1 success per code, all replays blocked
+
+### 27. TRL Write Saturation (`trl_write_saturation`)
+
+**Purpose**: Measure Token Revocation List write throughput ceiling
+
+- **Load**: 500 req/s for 1 minute
+- **Target**: p95 latency < 50ms
+
+### 28. Userinfo Throughput (`userinfo_throughput`)
+
+**Purpose**: Baseline for read-only userinfo endpoint
+
+- **Load**: 2000 req/s for 30 seconds
+- **Target**: p95 latency < 50ms
+
+## Additional Consent Scenarios
+
+### 29. Consent Revoke/Grant Race (`consent_revoke_grant_race`)
+
+**Purpose**: Test re-grant cooldown under rapid cycling
+
+- **Load**: 50 VUs for 1 minute alternating grant/revoke
+- **Target**: p95 latency < 200ms, cooldown enforced
+
+### 30. Consent GDPR Delete (`consent_gdpr_delete`)
+
+**Purpose**: Verify DeleteAll consistency
+
+- **Load**: 50 VUs × 5 iterations (create user → grant → delete → verify)
+- **Target**: p95 latency < 300ms, list empty after delete
+
 ## Metrics Collected
 
-| Metric                   | Description                          |
-| ------------------------ | ------------------------------------ |
-| `token_refresh_latency`  | Token refresh endpoint latency       |
-| `consent_grant_latency`  | Consent grant endpoint latency       |
-| `session_list_latency`   | Session list endpoint latency        |
-| `oauth_flow_latency`     | Full OAuth flow latency              |
-| `authorize_latency`      | Authorize endpoint latency           |
-| `token_exchange_latency` | Token exchange latency               |
-| `resolve_client_latency` | ResolveClient call latency           |
-| `create_client_latency`  | CreateClient endpoint latency        |
-| `get_tenant_latency`     | GetTenant endpoint latency           |
-| `rate_limit_latency`     | Health endpoint latency (rate tests) |
-| `rate_limited_count`     | Count of 429 responses               |
-| `token_errors`           | Count of token refresh failures      |
-| `consent_errors`         | Count of consent grant failures      |
-| `error_rate`             | Overall error rate                   |
+| Metric                      | Description                              |
+| --------------------------- | ---------------------------------------- |
+| `token_refresh_latency`     | Token refresh endpoint latency           |
+| `consent_grant_latency`     | Consent grant endpoint latency           |
+| `session_list_latency`      | Session list endpoint latency            |
+| `oauth_flow_latency`        | Full OAuth flow latency                  |
+| `authorize_latency`         | Authorize endpoint latency               |
+| `token_exchange_latency`    | Token exchange latency                   |
+| `resolve_client_latency`    | ResolveClient call latency               |
+| `create_client_latency`     | CreateClient endpoint latency            |
+| `get_tenant_latency`        | GetTenant endpoint latency               |
+| `get_tenant_by_name_latency` | GetTenantByName endpoint latency        |
+| `rate_limit_latency`        | Health endpoint latency (rate tests)     |
+| `rate_limited_count`        | Count of 429 responses                   |
+| `token_errors`              | Count of token refresh failures          |
+| `consent_errors`            | Count of consent grant failures          |
+| `error_rate`                | Overall error rate                       |
+| `decision_evaluate_latency` | Decision evaluation latency              |
+| `decision_age_verify_latency` | Age verification decision latency      |
+| `decision_sanctions_latency` | Sanctions screening decision latency    |
+| `decision_errors`           | Count of decision failures               |
+| `evidence_citizen_latency`  | Citizen registry lookup latency          |
+| `evidence_sanctions_latency` | Sanctions registry lookup latency       |
+| `evidence_vc_issue_latency` | VC issuance pipeline latency             |
+| `evidence_check_latency`    | Combined evidence check latency          |
+| `evidence_errors`           | Count of evidence lookup failures        |
+| `evidence_cache_hits`       | Count of evidence cache hits             |
+| `evidence_cache_misses`     | Count of evidence cache misses           |
+| `auth_code_replay_latency`  | Auth code exchange latency (replay test) |
+| `auth_code_replay_errors`   | Security: replay attacks that succeeded  |
+| `trl_write_latency`         | Token revocation list write latency      |
+| `userinfo_latency`          | Userinfo endpoint latency                |
+| `consent_revoke_latency`    | Consent revoke endpoint latency          |
+| `consent_delete_latency`    | Consent delete (GDPR) latency            |
 
 ## Viewing Results
 

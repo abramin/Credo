@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"credo/internal/tenant/secrets"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/sentinel"
 	"credo/pkg/requestcontext"
 )
 
@@ -21,6 +23,7 @@ type ClientService struct {
 	tenants      TenantStore // Read-only: used to verify tenant exists and is active
 	auditEmitter *auditEmitter
 	metrics      *tenantmetrics.Metrics
+	tx           StoreTx
 }
 
 func NewClientService(clients ClientStore, tenants TenantStore, opts ...Option) *ClientService {
@@ -28,11 +31,16 @@ func NewClientService(clients ClientStore, tenants TenantStore, opts ...Option) 
 	for _, opt := range opts {
 		opt(cfg)
 	}
+	tx := cfg.tx
+	if tx == nil {
+		tx = newInMemoryStoreTx()
+	}
 	return &ClientService{
 		clients:      clients,
 		tenants:      tenants,
 		auditEmitter: newAuditEmitter(cfg.logger, cfg.auditPublisher),
 		metrics:      cfg.metrics,
+		tx:           tx,
 	}
 }
 
@@ -46,43 +54,56 @@ func (s *ClientService) CreateClient(ctx context.Context, cmd *CreateClientComma
 		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid client request")
 	}
 
-	tenant, err := s.tenants.FindByID(ctx, cmd.TenantID)
-	if err != nil {
-		return nil, "", wrapTenantErr(err, "failed to load tenant")
-	}
-	if !tenant.IsActive() {
-		return nil, "", dErrors.New(dErrors.CodeValidation, "cannot create client under inactive tenant")
-	}
+	var client *models.Client
+	var secret string
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		tenant, err := s.tenants.FindByID(txCtx, cmd.TenantID)
+		if err != nil {
+			return wrapTenantErr(err, "failed to load tenant")
+		}
+		if !tenant.IsActive() {
+			return dErrors.New(dErrors.CodeValidation, "cannot create client under inactive tenant")
+		}
 
-	secret, secretHash, err := generateSecret(cmd.Public)
-	if err != nil {
-		return nil, "", err
-	}
+		secretValue, secretHash, err := generateSecret(cmd.Public)
+		if err != nil {
+			return err
+		}
 
-	client, err := models.NewClient(
-		id.ClientID(uuid.New()),
-		cmd.TenantID,
-		cmd.Name,
-		uuid.NewString(),
-		secretHash,
-		cmd.RedirectURIs,
-		cmd.AllowedGrants,
-		cmd.AllowedScopes,
-		requestcontext.Now(ctx),
-	)
-	if err != nil {
-		return nil, "", err
-	}
+		newClient, err := models.NewClient(
+			id.ClientID(uuid.New()),
+			cmd.TenantID,
+			cmd.Name,
+			uuid.NewString(),
+			secretHash,
+			cmd.RedirectURIs,
+			cmd.AllowedGrants,
+			cmd.AllowedScopes,
+			requestcontext.Now(txCtx),
+		)
+		if err != nil {
+			return err
+		}
 
-	if err := s.clients.Create(ctx, client); err != nil {
-		return nil, "", dErrors.Wrap(err, dErrors.CodeInternal, "failed to create client")
-	}
+		if err := s.clients.Create(txCtx, newClient); err != nil {
+			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to create client")
+		}
 
-	s.auditEmitter.emitClientCreated(ctx, models.ClientCreated{
-		TenantID:   client.TenantID,
-		ClientID:   client.ID,
-		ClientName: client.Name,
+		if err := s.auditEmitter.emitClientCreated(txCtx, models.ClientCreated{
+			TenantID:   newClient.TenantID,
+			ClientID:   newClient.ID,
+			ClientName: newClient.Name,
+		}); err != nil {
+			return err
+		}
+
+		client = newClient
+		secret = secretValue
+		return nil
 	})
+	if err != nil {
+		return nil, "", err
+	}
 
 	return client, secret, nil
 }
@@ -120,11 +141,20 @@ func (s *ClientService) UpdateClient(ctx context.Context, clientID id.ClientID, 
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	client, err := s.clients.FindByID(ctx, clientID)
+	var updated *models.Client
+	var secret string
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		client, err := s.clients.FindByID(txCtx, clientID)
+		if err != nil {
+			return wrapClientErr(err, "failed to get client")
+		}
+		updated, secret, err = s.applyClientUpdate(txCtx, client, cmd)
+		return err
+	})
 	if err != nil {
-		return nil, "", wrapClientErr(err, "failed to get client")
+		return nil, "", err
 	}
-	return s.applyClientUpdate(ctx, client, cmd)
+	return updated, secret, nil
 }
 
 // UpdateClientForTenant enforces tenant scoping when updating a client.
@@ -136,11 +166,20 @@ func (s *ClientService) UpdateClientForTenant(ctx context.Context, tenantID id.T
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	client, err := s.clients.FindByTenantAndID(ctx, tenantID, clientID)
+	var updated *models.Client
+	var secret string
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		client, err := s.clients.FindByTenantAndID(txCtx, tenantID, clientID)
+		if err != nil {
+			return wrapClientErr(err, "failed to get client")
+		}
+		updated, secret, err = s.applyClientUpdate(txCtx, client, cmd)
+		return err
+	})
 	if err != nil {
-		return nil, "", wrapClientErr(err, "failed to get client")
+		return nil, "", err
 	}
-	return s.applyClientUpdate(ctx, client, cmd)
+	return updated, secret, nil
 }
 
 // DeactivateClient transitions a client to inactive status.
@@ -149,28 +188,39 @@ func (s *ClientService) DeactivateClient(ctx context.Context, clientID id.Client
 	if err := requireClientID(clientID); err != nil {
 		return nil, err
 	}
-	client, err := s.clients.FindByID(ctx, clientID)
-	if err != nil {
-		return nil, wrapClientErr(err, "failed to get client")
-	}
-
-	if err := client.Deactivate(requestcontext.Now(ctx)); err != nil {
-		if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-			return nil, dErrors.New(dErrors.CodeConflict, "client is already inactive")
+	var updated *models.Client
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		client, err := s.clients.FindByID(txCtx, clientID)
+		if err != nil {
+			return wrapClientErr(err, "failed to get client")
 		}
+
+		if err := client.Deactivate(requestcontext.Now(txCtx)); err != nil {
+			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+				return dErrors.New(dErrors.CodeConflict, "client is already inactive")
+			}
+			return err
+		}
+
+		if err := s.clients.Update(txCtx, client); err != nil {
+			return wrapClientErr(err, "failed to update client")
+		}
+
+		if err := s.auditEmitter.emitClientDeactivated(txCtx, models.ClientDeactivated{
+			TenantID: client.TenantID,
+			ClientID: client.ID,
+		}); err != nil {
+			return err
+		}
+
+		updated = client
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	if err := s.clients.Update(ctx, client); err != nil {
-		return nil, wrapClientErr(err, "failed to update client")
-	}
-
-	s.auditEmitter.emitClientDeactivated(ctx, models.ClientDeactivated{
-		TenantID: client.TenantID,
-		ClientID: client.ID,
-	})
-
-	return client, nil
+	return updated, nil
 }
 
 // ReactivateClient transitions a client to active status.
@@ -179,28 +229,39 @@ func (s *ClientService) ReactivateClient(ctx context.Context, clientID id.Client
 	if err := requireClientID(clientID); err != nil {
 		return nil, err
 	}
-	client, err := s.clients.FindByID(ctx, clientID)
-	if err != nil {
-		return nil, wrapClientErr(err, "failed to get client")
-	}
-
-	if err := client.Reactivate(requestcontext.Now(ctx)); err != nil {
-		if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-			return nil, dErrors.New(dErrors.CodeConflict, "client is already active")
+	var updated *models.Client
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		client, err := s.clients.FindByID(txCtx, clientID)
+		if err != nil {
+			return wrapClientErr(err, "failed to get client")
 		}
+
+		if err := client.Reactivate(requestcontext.Now(txCtx)); err != nil {
+			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+				return dErrors.New(dErrors.CodeConflict, "client is already active")
+			}
+			return err
+		}
+
+		if err := s.clients.Update(txCtx, client); err != nil {
+			return wrapClientErr(err, "failed to update client")
+		}
+
+		if err := s.auditEmitter.emitClientReactivated(txCtx, models.ClientReactivated{
+			TenantID: client.TenantID,
+			ClientID: client.ID,
+		}); err != nil {
+			return err
+		}
+
+		updated = client
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	if err := s.clients.Update(ctx, client); err != nil {
-		return nil, wrapClientErr(err, "failed to update client")
-	}
-
-	s.auditEmitter.emitClientReactivated(ctx, models.ClientReactivated{
-		TenantID: client.TenantID,
-		ClientID: client.ID,
-	})
-
-	return client, nil
+	return updated, nil
 }
 
 // RotateClientSecret generates a new secret for a confidential client.
@@ -210,11 +271,20 @@ func (s *ClientService) RotateClientSecret(ctx context.Context, clientID id.Clie
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	client, err := s.clients.FindByID(ctx, clientID)
+	var updated *models.Client
+	var secret string
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		client, err := s.clients.FindByID(txCtx, clientID)
+		if err != nil {
+			return wrapClientErr(err, "failed to get client")
+		}
+		updated, secret, err = s.rotateSecret(txCtx, client)
+		return err
+	})
 	if err != nil {
-		return nil, "", wrapClientErr(err, "failed to get client")
+		return nil, "", err
 	}
-	return s.rotateSecret(ctx, client)
+	return updated, secret, nil
 }
 
 // RotateClientSecretForTenant enforces tenant scoping when rotating a client secret.
@@ -225,11 +295,20 @@ func (s *ClientService) RotateClientSecretForTenant(ctx context.Context, tenantI
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	client, err := s.clients.FindByTenantAndID(ctx, tenantID, clientID)
+	var updated *models.Client
+	var secret string
+	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+		client, err := s.clients.FindByTenantAndID(txCtx, tenantID, clientID)
+		if err != nil {
+			return wrapClientErr(err, "failed to get client")
+		}
+		updated, secret, err = s.rotateSecret(txCtx, client)
+		return err
+	})
 	if err != nil {
-		return nil, "", wrapClientErr(err, "failed to get client")
+		return nil, "", err
 	}
-	return s.rotateSecret(ctx, client)
+	return updated, secret, nil
 }
 
 // VerifyClientSecret verifies a client's credentials for authentication.
@@ -246,17 +325,17 @@ func (s *ClientService) VerifyClientSecret(ctx context.Context, clientID id.Clie
 	client, err := s.clients.FindByID(ctx, clientID)
 	if err != nil {
 		// Return generic error to prevent client enumeration
-		return dErrors.New(dErrors.CodeInvalidClient, "invalid client credentials")
+		return invalidClientCredentials()
 	}
 
 	// Public clients cannot authenticate with a secret
 	if !client.IsConfidential() {
-		return dErrors.New(dErrors.CodeInvalidClient, "public client cannot use secret authentication")
+		return invalidClientCredentials()
 	}
 
 	// Verify the secret using bcrypt constant-time comparison
 	if err := secrets.Verify(providedSecret, client.ClientSecretHash); err != nil {
-		return dErrors.New(dErrors.CodeInvalidClient, "invalid client credentials")
+		return invalidClientCredentials()
 	}
 
 	return nil
@@ -276,17 +355,17 @@ func (s *ClientService) VerifyClientSecretByOAuthID(ctx context.Context, oauthCl
 	client, err := s.clients.FindByOAuthClientID(ctx, oauthClientID)
 	if err != nil {
 		// Return generic error to prevent client enumeration
-		return dErrors.New(dErrors.CodeInvalidClient, "invalid client credentials")
+		return invalidClientCredentials()
 	}
 
 	// Public clients cannot authenticate with a secret
 	if !client.IsConfidential() {
-		return dErrors.New(dErrors.CodeInvalidClient, "public client cannot use secret authentication")
+		return invalidClientCredentials()
 	}
 
 	// Verify the secret using bcrypt constant-time comparison
 	if err := secrets.Verify(providedSecret, client.ClientSecretHash); err != nil {
-		return dErrors.New(dErrors.CodeInvalidClient, "invalid client credentials")
+		return invalidClientCredentials()
 	}
 
 	return nil
@@ -305,18 +384,24 @@ func (s *ClientService) ResolveClient(ctx context.Context, clientID string) (*mo
 
 	client, err := s.clients.FindByOAuthClientID(ctx, clientID)
 	if err != nil {
-		return nil, nil, wrapClientErr(err, "failed to resolve client")
+		if errors.Is(err, sentinel.ErrNotFound) {
+			return nil, nil, invalidClientCredentials()
+		}
+		return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to resolve client")
 	}
 	if !client.IsActive() {
-		return nil, nil, dErrors.New(dErrors.CodeInvalidClient, "client is inactive")
+		return nil, nil, invalidClientCredentials()
 	}
 
 	tenant, err := s.tenants.FindByID(ctx, client.TenantID)
 	if err != nil {
-		return nil, nil, wrapTenantErr(err, "failed to load tenant for client")
+		if errors.Is(err, sentinel.ErrNotFound) {
+			return nil, nil, invalidClientCredentials()
+		}
+		return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to load tenant for client")
 	}
 	if !tenant.IsActive() {
-		return nil, nil, dErrors.New(dErrors.CodeInvalidClient, "tenant is inactive")
+		return nil, nil, invalidClientCredentials()
 	}
 	return client, tenant, nil
 }
@@ -339,10 +424,12 @@ func (s *ClientService) rotateSecret(ctx context.Context, client *models.Client)
 		return nil, "", wrapClientErr(err, "failed to update client")
 	}
 
-	s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
+	if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
 		TenantID: client.TenantID,
 		ClientID: client.ID,
-	})
+	}); err != nil {
+		return nil, "", err
+	}
 
 	return client, secret, nil
 }
@@ -373,10 +460,12 @@ func (s *ClientService) applyClientUpdate(ctx context.Context, client *models.Cl
 	}
 
 	if cmd.RotateSecret {
-		s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
+		if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
 			TenantID: client.TenantID,
 			ClientID: client.ID,
-		})
+		}); err != nil {
+			return nil, "", err
+		}
 	}
 
 	return client, rotatedSecret, nil
@@ -456,4 +545,8 @@ func generateSecret(isPublic bool) (secret, hash string, err error) {
 		return "", "", dErrors.Wrap(err, dErrors.CodeInternal, "failed to hash secret")
 	}
 	return secret, hash, nil
+}
+
+func invalidClientCredentials() error {
+	return dErrors.New(dErrors.CodeInvalidClient, "invalid client credentials")
 }

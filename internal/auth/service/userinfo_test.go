@@ -34,7 +34,6 @@ func (s *ServiceSuite) TestUserInfo_ErrorAndValidationHandling() {
 
 	s.Run("session lookup returns not found error", func() {
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(nil, sentinel.ErrNotFound)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		s.Require().ErrorIs(err, dErrors.New(dErrors.CodeUnauthorized, "session not found"))
@@ -47,7 +46,6 @@ func (s *ServiceSuite) TestUserInfo_ErrorAndValidationHandling() {
 			Status: models.SessionStatusActive,
 		}, nil)
 		s.mockUserStore.EXPECT().FindByID(gomock.Any(), existingUser.ID).Return(nil, sentinel.ErrNotFound)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		s.Require().ErrorIs(err, dErrors.New(dErrors.CodeUnauthorized, "user not found"))
@@ -58,7 +56,6 @@ func (s *ServiceSuite) TestUserInfo_ErrorAndValidationHandling() {
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(&models.Session{
 			Status: models.SessionStatusPendingConsent,
 		}, nil)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		s.Require().ErrorIs(err, dErrors.New(dErrors.CodeUnauthorized, "session not active"))
@@ -67,7 +64,6 @@ func (s *ServiceSuite) TestUserInfo_ErrorAndValidationHandling() {
 
 	s.Run("session store error", func() {
 		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), gomock.Any()).Return(nil, assert.AnError)
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		s.Require().Error(err)
@@ -81,7 +77,6 @@ func (s *ServiceSuite) TestUserInfo_ErrorAndValidationHandling() {
 			Status: models.SessionStatusActive,
 		}, nil)
 		s.mockUserStore.EXPECT().FindByID(gomock.Any(), existingUser.ID).Return(nil, errors.New("db error"))
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.UserInfo(context.Background(), uuid.New().String())
 		s.Require().Error(err)
@@ -90,7 +85,6 @@ func (s *ServiceSuite) TestUserInfo_ErrorAndValidationHandling() {
 	})
 
 	s.Run("missing session identifier", func() {
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.UserInfo(context.Background(), "")
 		s.Require().ErrorIs(err, dErrors.New(dErrors.CodeUnauthorized, "missing or invalid session"))
@@ -98,7 +92,6 @@ func (s *ServiceSuite) TestUserInfo_ErrorAndValidationHandling() {
 	})
 
 	s.Run("invalid session identifier", func() {
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		result, err := s.service.UserInfo(context.Background(), "invalid-uuid")
 		s.Require().ErrorIs(err, dErrors.New(dErrors.CodeUnauthorized, "invalid session ID"))

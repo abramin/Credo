@@ -13,6 +13,8 @@ import (
 	tenantstore "credo/internal/tenant/store/tenant"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/audit/publishers/security"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 )
 
 // ServiceSuite provides shared test setup for tenant service tests.
@@ -26,7 +28,13 @@ type ServiceSuite struct {
 func (s *ServiceSuite) SetupTest() {
 	s.tenantStore = tenantstore.NewInMemory()
 	s.clientStore = clientstore.NewInMemory()
-	svc, err := New(s.tenantStore, s.clientStore, nil)
+	auditStore := auditmemory.NewInMemoryStore()
+	svc, err := New(
+		s.tenantStore,
+		s.clientStore,
+		nil,
+		WithAuditPublisher(security.New(auditStore)),
+	)
 	s.Require().NoError(err)
 	s.service = svc
 }
@@ -87,7 +95,7 @@ func (s *ServiceSuite) TestTenantDetails() {
 		tenantRecord := s.createTestTenant("Acme")
 		s.createTestClient(tenantRecord.ID)
 
-		details, err := s.service.GetTenant(context.Background(), tenantRecord.ID)
+		details, err := s.service.GetTenantDetails(context.Background(), tenantRecord.ID)
 		s.Require().NoError(err)
 		s.Equal(1, details.ClientCount)
 		s.Equal(tenantRecord.ID, details.ID)
@@ -254,5 +262,65 @@ func (s *ServiceSuite) TestClientResolution() {
 		_, err := s.service.GetClientForTenant(context.Background(), t2.ID, created.ID)
 		s.Require().Error(err)
 		s.True(dErrors.HasCode(err, dErrors.CodeNotFound), "expected not found when tenant mismatched")
+	})
+}
+
+// TestClientLifecycle verifies client activation/deactivation error codes.
+// Feature files test HTTP 409, but these verify the exact CodeConflict error
+// is returned by the service layer (mirrors model tests for service path).
+func (s *ServiceSuite) TestClientLifecycle() {
+	s.Run("deactivate already-inactive client returns CodeConflict", func() {
+		tenantRecord := s.createTestTenant("ClientLifecycle1")
+		client := s.createTestClient(tenantRecord.ID)
+
+		// First deactivation succeeds
+		_, err := s.service.DeactivateClient(context.Background(), client.ID)
+		s.Require().NoError(err)
+
+		// Second deactivation returns conflict
+		_, err = s.service.DeactivateClient(context.Background(), client.ID)
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeConflict),
+			"expected CodeConflict for double-deactivation, got: %v", err)
+	})
+
+	s.Run("reactivate already-active client returns CodeConflict", func() {
+		tenantRecord := s.createTestTenant("ClientLifecycle2")
+		client := s.createTestClient(tenantRecord.ID)
+
+		// Client is already active, so reactivation should fail
+		_, err := s.service.ReactivateClient(context.Background(), client.ID)
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeConflict),
+			"expected CodeConflict for reactivating already-active client, got: %v", err)
+	})
+
+	s.Run("deactivate then reactivate succeeds", func() {
+		tenantRecord := s.createTestTenant("ClientLifecycle3")
+		client := s.createTestClient(tenantRecord.ID)
+
+		// Deactivate
+		deactivated, err := s.service.DeactivateClient(context.Background(), client.ID)
+		s.Require().NoError(err)
+		s.Equal(tenant.ClientStatusInactive, deactivated.Status)
+
+		// Reactivate
+		reactivated, err := s.service.ReactivateClient(context.Background(), client.ID)
+		s.Require().NoError(err)
+		s.Equal(tenant.ClientStatusActive, reactivated.Status)
+	})
+
+	s.Run("deactivate non-existent client returns CodeNotFound", func() {
+		_, err := s.service.DeactivateClient(context.Background(), id.ClientID(uuid.New()))
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeNotFound),
+			"expected CodeNotFound for non-existent client, got: %v", err)
+	})
+
+	s.Run("reactivate non-existent client returns CodeNotFound", func() {
+		_, err := s.service.ReactivateClient(context.Background(), id.ClientID(uuid.New()))
+		s.Require().Error(err)
+		s.True(dErrors.HasCode(err, dErrors.CodeNotFound),
+			"expected CodeNotFound for non-existent client, got: %v", err)
 	})
 }

@@ -22,7 +22,7 @@ import (
 	jwttoken "credo/internal/jwt_token"
 	tenantModels "credo/internal/tenant/models"
 	id "credo/pkg/domain"
-	auditpublisher "credo/pkg/platform/audit/publisher"
+	"credo/pkg/platform/audit/publishers/security"
 	auditstore "credo/pkg/platform/audit/store/memory"
 	adminmw "credo/pkg/platform/middleware/admin"
 	authmw "credo/pkg/platform/middleware/auth"
@@ -92,7 +92,7 @@ func SetupSuite(t *testing.T) (
 		clientResolver,
 		&cfg,
 		service.WithLogger(logger),
-		service.WithAuditPublisher(auditpublisher.NewPublisher(auditStore)),
+		service.WithAuditPublisher(security.New(auditStore)),
 	)
 
 	router := chi.NewRouter()

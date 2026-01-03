@@ -82,7 +82,6 @@ func (s *ServiceSuite) TestAuthorizationCodeFlow() {
 				return user, nil
 			})
 
-		s.mockAuditPublisher.EXPECT().Emit(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 		s.mockCodeStore.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 

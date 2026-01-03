@@ -73,10 +73,10 @@ import (
 	audit "credo/pkg/platform/audit"
 	auditconsumer "credo/pkg/platform/audit/consumer"
 	auditmetrics "credo/pkg/platform/audit/metrics"
+	auditpublishers "credo/pkg/platform/audit/publishers"
 	outboxmetrics "credo/pkg/platform/audit/outbox/metrics"
 	outboxpostgres "credo/pkg/platform/audit/outbox/store/postgres"
 	outboxworker "credo/pkg/platform/audit/outbox/worker"
-	auditpublisher "credo/pkg/platform/audit/publisher"
 	auditmemory "credo/pkg/platform/audit/store/memory"
 	auditpostgres "credo/pkg/platform/audit/store/postgres"
 	adminmw "credo/pkg/platform/middleware/admin"
@@ -166,7 +166,7 @@ func main() {
 		panic(err)
 	}
 
-	rlBundle, err := buildRateLimitServices(infra.Log, infra.DBPool)
+	rlBundle, err := buildRateLimitServices(infra)
 	if err != nil {
 		infra.Log.Error("failed to initialize rate limit services", "error", err)
 		os.Exit(1)
@@ -253,8 +253,20 @@ type rateLimitBundle struct {
 	cfg *rateLimitConfig.Config
 }
 
-func buildRateLimitServices(logger *slog.Logger, dbPool *database.Pool) (*rateLimitBundle, error) {
+func buildRateLimitServices(infra *infraBundle) (*rateLimitBundle, error) {
+	logger := infra.Log
+	dbPool := infra.DBPool
 	cfg := rateLimitConfig.DefaultConfig()
+
+	// Create audit system for security events
+	var auditSt audit.Store
+	if dbPool != nil {
+		auditSt = auditpostgres.New(dbPool.DB())
+	} else {
+		logger.Warn("no database connection, using in-memory rate limit audit store")
+		auditSt = auditmemory.NewInMemoryStore()
+	}
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), logger)
 
 	// Create stores - use Postgres if available, otherwise fall back to in-memory
 	var bucketStore requestlimit.BucketStore
@@ -271,17 +283,17 @@ func buildRateLimitServices(logger *slog.Logger, dbPool *database.Pool) (*rateLi
 		authLockoutSt = authlockoutStore.NewPostgres(dbPool.DB(), &cfg.AuthLockout)
 		globalThrottleSt = globalthrottleStore.NewPostgres(dbPool.DB(), &cfg.Global)
 	} else {
-		logger.Warn("no database connection, using in-memory rate limit stores")
 		bucketStore = rwbucketStore.New()
 		allowlistStore = rwallowlistStore.New()
 		authLockoutSt = authlockoutStore.New()
 		globalThrottleSt = globalthrottleStore.New()
 	}
 
-	// Create focused services
+	// Create focused services with security audit publisher
 	requestSvc, err := requestlimit.New(bucketStore, allowlistStore,
 		requestlimit.WithLogger(logger),
 		requestlimit.WithConfig(cfg),
+		requestlimit.WithAuditPublisher(auditSystem.Security),
 	)
 	if err != nil {
 		logger.Error("failed to create request limit service", "error", err)
@@ -290,6 +302,7 @@ func buildRateLimitServices(logger *slog.Logger, dbPool *database.Pool) (*rateLi
 
 	authLockoutSvc, err := authlockout.New(authLockoutSt,
 		authlockout.WithLogger(logger),
+		authlockout.WithAuditPublisher(auditSystem.Security),
 	)
 	if err != nil {
 		logger.Error("failed to create auth lockout service", "error", err)
@@ -298,6 +311,7 @@ func buildRateLimitServices(logger *slog.Logger, dbPool *database.Pool) (*rateLi
 
 	globalThrottleSvc, err := globalthrottle.New(globalThrottleSt,
 		globalthrottle.WithLogger(logger),
+		globalthrottle.WithAuditPublisher(auditSystem.Security),
 	)
 	if err != nil {
 		logger.Error("failed to create global throttle service", "error", err)
@@ -528,6 +542,9 @@ func buildAuthModulePostgres(infra *infraBundle, clientResolver authService.Clie
 		infra.Log.Info("using Postgres for sessions and token revocation")
 	}
 
+	// Create security publisher for auth events
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), infra.Log)
+
 	authSvc, err := authService.New(
 		users,
 		sessions,
@@ -539,11 +556,7 @@ func buildAuthModulePostgres(infra *infraBundle, clientResolver authService.Clie
 		authService.WithMetrics(infra.AuthMetrics),
 		authService.WithLogger(infra.Log),
 		authService.WithTRL(trl),
-		authService.WithAuditPublisher(auditpublisher.NewPublisher(
-			auditSt,
-			auditpublisher.WithMetrics(infra.AuditMetrics),
-			auditpublisher.WithPublisherLogger(infra.Log),
-		)),
+		authService.WithAuditPublisher(auditSystem.Security),
 	)
 	if err != nil {
 		return nil, err
@@ -580,6 +593,9 @@ func buildAuthModuleInMemory(infra *infraBundle, clientResolver authService.Clie
 	trl := revocationStore.NewInMemoryTRL()
 	auditSt := auditmemory.NewInMemoryStore()
 
+	// Create security publisher for auth events
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), infra.Log)
+
 	authSvc, err := authService.New(
 		users,
 		sessions,
@@ -591,11 +607,7 @@ func buildAuthModuleInMemory(infra *infraBundle, clientResolver authService.Clie
 		authService.WithMetrics(infra.AuthMetrics),
 		authService.WithLogger(infra.Log),
 		authService.WithTRL(trl),
-		authService.WithAuditPublisher(auditpublisher.NewPublisher(
-			auditSt,
-			auditpublisher.WithMetrics(infra.AuditMetrics),
-			auditpublisher.WithPublisherLogger(infra.Log),
-		)),
+		authService.WithAuditPublisher(auditSystem.Security),
 	)
 	if err != nil {
 		return nil, err
@@ -634,13 +646,12 @@ func buildConsentModule(infra *infraBundle) (*consentModule, error) {
 		consentService.WithMetrics(infra.ConsentMetrics),
 	)
 
+	// Create compliance publisher for consent audit events
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), infra.Log)
+
 	consentSvc := consentService.New(
 		store,
-		auditpublisher.NewPublisher(
-			auditSt,
-			auditpublisher.WithMetrics(infra.AuditMetrics),
-			auditpublisher.WithPublisherLogger(infra.Log),
-		),
+		auditSystem.Compliance,
 		infra.Log,
 		opts...,
 	)
@@ -655,23 +666,36 @@ func buildTenantModule(infra *infraBundle) (*tenantModule, error) {
 	var tenants tenantService.TenantStore
 	var clients tenantService.ClientStore
 	var userCounter tenantService.UserCounter
+	var auditSt audit.Store
+	var opts []tenantService.Option
 
 	if infra.DBPool != nil {
 		tenants = tenantstore.NewPostgres(infra.DBPool.DB())
 		clients = clientstore.NewPostgres(infra.DBPool.DB())
 		userCounter = userStore.NewPostgres(infra.DBPool.DB())
+		auditSt = auditpostgres.New(infra.DBPool.DB())
+		opts = append(opts, tenantService.WithTx(newTenantPostgresTx(infra.DBPool.DB())))
 	} else {
 		infra.Log.Warn("no database connection, using in-memory tenant stores")
 		tenants = tenantstore.NewInMemory()
 		clients = clientstore.NewInMemory()
 		userCounter = nil // user counting not available without database
+		auditSt = auditmemory.NewInMemoryStore()
 	}
+
+	// Create security publisher for tenant lifecycle events
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), infra.Log)
+
+	opts = append(opts,
+		tenantService.WithMetrics(infra.TenantMetrics),
+		tenantService.WithAuditPublisher(auditSystem.Security),
+	)
 
 	service, err := tenantService.New(
 		tenants,
 		clients,
 		userCounter,
-		tenantService.WithMetrics(infra.TenantMetrics),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tenant service: %w", err)
@@ -735,6 +759,11 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 	// Create consent adapter (needed by both service and handler)
 	consentAdapter := registryAdapters.NewConsentAdapter(consentSvc)
 
+	// Create tri-publisher audit system
+	// - Compliance: fail-closed for sanctions checks (service)
+	// - Ops: fire-and-forget for citizen lookups (handler)
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), infra.Log)
+
 	// Create registry service with orchestrator and consent port
 	// Tracing is handled automatically via OpenTelemetry SDK
 	svc := registryService.New(
@@ -743,16 +772,10 @@ func buildRegistryModule(infra *infraBundle, consentSvc *consentService.Service)
 		consentAdapter,
 		infra.Cfg.Security.RegulatedMode,
 		registryService.WithLogger(infra.Log),
+		registryService.WithAuditor(auditSystem.Compliance),
 	)
 
-	// Create audit publisher for handler
-	auditPort := auditpublisher.NewPublisher(
-		auditSt,
-		auditpublisher.WithMetrics(infra.AuditMetrics),
-		auditpublisher.WithPublisherLogger(infra.Log),
-	)
-
-	handler := registryHandler.New(svc, auditPort, infra.Log)
+	handler := registryHandler.New(svc, auditSystem.Ops, infra.Log)
 
 	return &registryModule{
 		Service: svc,
@@ -776,18 +799,15 @@ func buildVCModule(infra *infraBundle, consentSvc *consentService.Service, regis
 	consentAdapter := vcAdapters.NewConsentAdapter(consentSvc)
 	registryAdapter := vcAdapters.NewRegistryAdapter(registrySvc)
 
-	auditPort := auditpublisher.NewPublisher(
-		auditSt,
-		auditpublisher.WithMetrics(infra.AuditMetrics),
-		auditpublisher.WithPublisherLogger(infra.Log),
-	)
+	// Create ops publisher for fire-and-forget VC audit events
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), infra.Log)
 
 	svc := vcService.NewService(
 		store,
 		registryAdapter,
 		consentAdapter,
 		infra.Cfg.Security.RegulatedMode,
-		vcService.WithAuditor(auditPort),
+		vcService.WithAuditor(auditSystem.Ops),
 		vcService.WithLogger(infra.Log),
 	)
 
@@ -804,7 +824,7 @@ func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Servic
 	vcAdapter := decisionAdapters.NewVCAdapter(vcSt)
 	consentAdapter := decisionAdapters.NewConsentAdapter(consentSvc)
 
-	// Create audit publisher
+	// Create audit publisher using tri-publisher architecture
 	var auditSt audit.Store
 	if infra.DBPool != nil {
 		auditSt = auditpostgres.New(infra.DBPool.DB())
@@ -812,24 +832,23 @@ func buildDecisionModule(infra *infraBundle, registrySvc *registryService.Servic
 		infra.Log.Warn("no database connection, using in-memory decision audit store")
 		auditSt = auditmemory.NewInMemoryStore()
 	}
-	auditPort := auditpublisher.NewPublisher(
-		auditSt,
-		auditpublisher.WithMetrics(infra.AuditMetrics),
-		auditpublisher.WithPublisherLogger(infra.Log),
-	)
+	auditSystem := auditpublishers.New(auditSt, auditpublishers.DefaultConfig(), infra.Log)
 
 	// Create metrics
 	metrics := decisionmetrics.New()
 
-	// Create service
-	svc := decision.New(
+	// Create service with compliance publisher (fail-closed semantics)
+	svc, err := decision.New(
 		registryAdapter,
 		vcAdapter,
 		consentAdapter,
-		auditPort,
+		auditSystem.Compliance,
 		decision.WithMetrics(metrics),
 		decision.WithLogger(infra.Log),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	return &decisionModule{
 		Service: svc,

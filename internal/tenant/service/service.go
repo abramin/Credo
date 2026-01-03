@@ -39,9 +39,10 @@ func New(tenants TenantStore, clients ClientStore, users UserCounter, opts ...Op
 	}, nil
 }
 
-// GetTenant returns tenant details with user and client counts.
+// GetTenantDetails returns tenant details with user and client counts.
 // This method composes data from multiple stores.
-func (s *Service) GetTenant(ctx context.Context, tenantID id.TenantID) (*readmodels.TenantDetails, error) {
+// Named distinctly from TenantService.GetTenant to avoid shadowing confusion.
+func (s *Service) GetTenantDetails(ctx context.Context, tenantID id.TenantID) (*readmodels.TenantDetails, error) {
 	start := time.Now()
 	defer s.observeGetTenant(start)
 

@@ -19,7 +19,6 @@ info:
     ## Security
     - All endpoints require valid bearer token (JWT)
     - Consent required: `registry_check` purpose
-    - Rate limiting: 10 requests/minute per user (future)
     - TLS-only transport in production
 
 servers:
@@ -320,10 +319,7 @@ components:
             - bad_request
             - unauthorized
             - missing_consent
-            - invalid_consent
             - not_found
-            - conflict
-            - policy_violation
             - internal_error
             - registry_timeout
         error_description:
@@ -419,11 +415,11 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
           examples:
-            citizen_not_found:
-              summary: Citizen record not found
+            record_not_found:
+              summary: Registry record not found
               value:
                 error: not_found
-                error_description: "Citizen record not found in registry"
+                error_description: "Registry record not found"
 
     RegistryTimeout:
       description: External registry did not respond within timeout window

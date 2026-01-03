@@ -11,6 +11,7 @@ type serviceConfig struct {
 	logger         *slog.Logger
 	auditPublisher AuditPublisher
 	metrics        *tenantmetrics.Metrics
+	tx             StoreTx
 }
 
 // Option configures a service.
@@ -31,5 +32,11 @@ func WithAuditPublisher(publisher AuditPublisher) Option {
 func WithMetrics(m *tenantmetrics.Metrics) Option {
 	return func(c *serviceConfig) {
 		c.metrics = m
+	}
+}
+
+func WithTx(tx StoreTx) Option {
+	return func(c *serviceConfig) {
+		c.tx = tx
 	}
 }

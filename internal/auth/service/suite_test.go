@@ -17,6 +17,8 @@ import (
 	"credo/internal/auth/service/mocks"
 	tenant "credo/internal/tenant/models"
 	id "credo/pkg/domain"
+	"credo/pkg/platform/audit/publishers/security"
+	auditmemory "credo/pkg/platform/audit/store/memory"
 )
 
 type ServiceSuite struct {
@@ -27,7 +29,7 @@ type ServiceSuite struct {
 	mockCodeStore      *mocks.MockAuthCodeStore
 	mockRefreshStore   *mocks.MockRefreshTokenStore
 	mockJWT            *mocks.MockTokenGenerator
-	mockAuditPublisher *mocks.MockAuditPublisher
+	auditPublisher     *security.Publisher
 	mockTRL            *mocks.MockTokenRevocationList
 	mockClientResolver *mocks.MockClientResolver
 	service            *Service
@@ -40,7 +42,7 @@ func (s *ServiceSuite) SetupTest() {
 	s.mockCodeStore = mocks.NewMockAuthCodeStore(s.ctrl)
 	s.mockRefreshStore = mocks.NewMockRefreshTokenStore(s.ctrl)
 	s.mockJWT = mocks.NewMockTokenGenerator(s.ctrl)
-	s.mockAuditPublisher = mocks.NewMockAuditPublisher(s.ctrl)
+	s.auditPublisher = security.New(auditmemory.NewInMemoryStore())
 	s.mockTRL = mocks.NewMockTokenRevocationList(s.ctrl)
 	s.mockClientResolver = mocks.NewMockClientResolver(s.ctrl)
 
@@ -61,7 +63,7 @@ func (s *ServiceSuite) SetupTest() {
 		s.mockClientResolver,
 		cfg,
 		WithLogger(logger),
-		WithAuditPublisher(s.mockAuditPublisher),
+		WithAuditPublisher(s.auditPublisher),
 		WithTRL(s.mockTRL),
 	)
 }

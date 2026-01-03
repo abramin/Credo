@@ -23,8 +23,11 @@ type RequestContext struct {
 	NationalID string `json:"national_id"`
 }
 
-// Validate validates and parses the request.
+// Validate validates and parses the request at the HTTP trust boundary.
 // Implements the Validatable interface for httputil.DecodeAndPrepare.
+//
+// Validation order: size limits, required fields, lexical parsing, then
+// purpose-specific semantics for national IDs.
 func (r *EvaluateRequest) Validate() error {
 	if r == nil {
 		return dErrors.New(dErrors.CodeBadRequest, "request body is required")

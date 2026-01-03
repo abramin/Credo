@@ -14,7 +14,7 @@ import (
 	id "credo/pkg/domain"
 	pkgerrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
-	auditpublisher "credo/pkg/platform/audit/publisher"
+	"credo/pkg/platform/audit/publishers/compliance"
 	"credo/pkg/platform/middleware/admin"
 	"credo/pkg/platform/sentinel"
 	"credo/pkg/requestcontext"
@@ -50,7 +50,7 @@ const (
 type Service struct {
 	store                  Store
 	tx                     ConsentStoreTx
-	auditor                *auditpublisher.Publisher
+	auditor                *compliance.Publisher
 	metrics                *consentmetrics.Metrics
 	logger                 *slog.Logger
 	consentTTL             time.Duration
@@ -59,7 +59,7 @@ type Service struct {
 }
 
 // New constructs a consent service with defaults applied.
-func New(store Store, auditor *auditpublisher.Publisher, logger *slog.Logger, opts ...Option) *Service {
+func New(store Store, auditor *compliance.Publisher, logger *slog.Logger, opts ...Option) *Service {
 	svc := &Service{
 		store:                  store,
 		tx:                     newInMemoryConsentTx(store),
@@ -387,12 +387,11 @@ func (s *Service) createGrantTx(ctx context.Context, txStore Store, scope models
 
 // emitGrantAudit emits the audit event for a consent grant.
 func (s *Service) emitGrantAudit(ctx context.Context, userID id.UserID, purpose models.Purpose, now time.Time) {
-	s.emitAudit(ctx, audit.Event{
+	s.emitAudit(ctx, audit.ComplianceEvent{
 		UserID:    userID,
 		Purpose:   string(purpose),
 		Action:    models.AuditActionConsentGranted,
 		Decision:  models.AuditDecisionGranted,
-		Reason:    models.AuditReasonUserInitiated,
 		Timestamp: now,
 	})
 }
@@ -428,12 +427,11 @@ func (s *Service) Revoke(ctx context.Context, userID id.UserID, purposes []model
 	}
 
 	for _, record := range revoked {
-		s.emitAudit(ctx, audit.Event{
+		s.emitAudit(ctx, audit.ComplianceEvent{
 			UserID:    userID,
 			Purpose:   string(record.Purpose),
 			Action:    models.AuditActionConsentRevoked,
 			Decision:  models.AuditDecisionRevoked,
-			Reason:    models.AuditReasonUserInitiated,
 			Timestamp: now,
 		})
 		s.incrementConsentsRevoked(record.Purpose)
@@ -470,11 +468,10 @@ func (s *Service) RevokeAll(ctx context.Context, userID id.UserID) (int, error) 
 	if revokedCount > 0 {
 		// Include admin actor ID for audit attribution if present
 		actorID := admin.GetAdminActorID(ctx)
-		s.emitAudit(ctx, audit.Event{
+		s.emitAudit(ctx, audit.ComplianceEvent{
 			UserID:    userID,
 			Action:    models.AuditActionConsentRevoked,
 			Decision:  models.AuditDecisionRevoked,
-			Reason:    "bulk_revocation",
 			Timestamp: now,
 			ActorID:   actorID,
 		})
@@ -491,18 +488,25 @@ func (s *Service) DeleteAll(ctx context.Context, userID id.UserID) error {
 	if userID.IsNil() {
 		return pkgerrors.New(pkgerrors.CodeBadRequest, "user ID required")
 	}
-	if err := s.store.DeleteByUser(ctx, userID); err != nil {
-		return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to delete all consents")
+	now := requestcontext.Now(ctx)
+
+	txErr := s.withUserTx(ctx, userID, func(txCtx context.Context, txStore Store) error {
+		if err := txStore.DeleteByUser(txCtx, userID); err != nil {
+			return pkgerrors.Wrap(err, pkgerrors.CodeInternal, "failed to delete all consents")
+		}
+		return nil
+	})
+	if txErr != nil {
+		return txErr
 	}
 
 	// Include admin actor ID for audit attribution if present
 	actorID := admin.GetAdminActorID(ctx)
-	s.emitAudit(ctx, audit.Event{
+	s.emitAudit(ctx, audit.ComplianceEvent{
 		UserID:    userID,
 		Action:    models.AuditActionConsentDeleted,
 		Decision:  models.AuditDecisionDeleted,
-		Reason:    "bulk_deletion",
-		Timestamp: requestcontext.Now(ctx),
+		Timestamp: now,
 		ActorID:   actorID,
 	})
 
@@ -552,6 +556,20 @@ func filterRecords(records []*models.Record, filter *models.RecordFilter, now ti
 	return filtered
 }
 
+func auditReasonForRevokeAll(ctx context.Context) string {
+	if admin.IsAdminRequest(ctx) {
+		return models.AuditReasonSecurityConcern
+	}
+	return models.AuditReasonUserBulkRevocation
+}
+
+func auditReasonForDeleteAll(ctx context.Context) string {
+	if admin.IsAdminRequest(ctx) {
+		return models.AuditReasonGdprErasureRequest
+	}
+	return models.AuditReasonGdprSelfService
+}
+
 // Require enforces that a user has active consent for the given purpose.
 // It records audit/metrics outcomes for missing, revoked, expired, or active states.
 func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.Purpose) error {
@@ -592,7 +610,7 @@ func (s *Service) Require(ctx context.Context, userID id.UserID, purpose models.
 
 // emitAudit publishes an audit event and logs any persistence failures.
 // Side effects: write to audit store, logging on failure, and request ID enrichment.
-func (s *Service) emitAudit(ctx context.Context, event audit.Event) {
+func (s *Service) emitAudit(ctx context.Context, event audit.ComplianceEvent) {
 	if s.auditor == nil {
 		return
 	}
@@ -700,12 +718,11 @@ func (s *Service) recordConsentCheckOutcome(ctx context.Context, userID id.UserI
 		logMsg = "consent_check_failed"
 	}
 
-	s.emitAudit(ctx, audit.Event{
+	s.emitAudit(ctx, audit.ComplianceEvent{
 		UserID:    userID,
 		Purpose:   string(purpose),
 		Action:    action,
 		Decision:  outcome.decision,
-		Reason:    models.AuditReasonUserInitiated,
 		Timestamp: now,
 	})
 	s.logConsentCheck(ctx, logLevel, logMsg, userID, purpose, outcome.state.String())

@@ -37,12 +37,21 @@ import (
 )
 
 // Store is the persistence interface for auth lockout records.
+// Stores are pure I/O—domain logic (lock checks, counter increments) belongs here in the service.
 type Store interface {
-	RecordFailure(ctx context.Context, identifier string) (*models.AuthLockout, error)
+	GetOrCreate(ctx context.Context, identifier string, now time.Time) (*models.AuthLockout, error)
 	Get(ctx context.Context, identifier string) (*models.AuthLockout, error)
 	Clear(ctx context.Context, identifier string) error
-	IsLocked(ctx context.Context, identifier string) (bool, *time.Time, error)
 	Update(ctx context.Context, record *models.AuthLockout) error
+}
+
+// AtomicStore extends Store with atomic operations that prevent TOCTOU races.
+// Production PostgreSQL stores implement this interface.
+type AtomicStore interface {
+	Store
+	RecordFailureAtomic(ctx context.Context, identifier string, now time.Time) (*models.AuthLockout, error)
+	ApplyHardLockAtomic(ctx context.Context, identifier string, lockedUntil time.Time, dailyThreshold int) (applied bool, err error)
+	SetRequiresCaptchaAtomic(ctx context.Context, identifier string, lockoutThreshold int) (applied bool, err error)
 }
 
 // Service tracks authentication failures and enforces lockout policies.
@@ -130,15 +139,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 			"ip", privacy.AnonymizeIP(ip),
 			"locked_until", record.LockedUntil,
 		)
-		return &models.AuthRateLimitResult{
-			RateLimitResult: models.RateLimitResult{
-				Allowed:    false,
-				ResetAt:    *record.LockedUntil,
-				RetryAfter: retryAfter,
-			},
-			RequiresCaptcha: record.RequiresCaptcha,
-			FailureCount:    record.FailureCount,
-		}, nil
+		return s.buildAuthResult(false, 0, 0, retryAfter, *record.LockedUntil, record), nil
 	}
 
 	// Check failure count against sliding window (FR-2b: "5 attempts/15 min")
@@ -146,15 +147,7 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 		// Block - too many attempts in window
 		resetAt := s.config.BackoffPolicy().ResetTime(record.LastFailureAt)
 		retryAfter := max(int(resetAt.Sub(now).Seconds()), 0)
-		return &models.AuthRateLimitResult{
-			RateLimitResult: models.RateLimitResult{
-				Allowed:    false,
-				ResetAt:    resetAt,
-				RetryAfter: retryAfter,
-			},
-			RequiresCaptcha: record.RequiresCaptcha,
-			FailureCount:    record.FailureCount,
-		}, nil
+		return s.buildAuthResult(false, 0, 0, retryAfter, resetAt, record), nil
 	}
 
 	// Apply progressive backoff (FR-2b: "250ms → 500ms → 1s")
@@ -162,57 +155,109 @@ func (s *Service) Check(ctx context.Context, identifier, ip string) (*models.Aut
 	delay := s.GetProgressiveBackoff(record.FailureCount)
 	remaining := min(record.RemainingAttempts(s.config.AttemptsPerWindow), s.config.AttemptsPerWindow)
 
-	return &models.AuthRateLimitResult{
-		RateLimitResult: models.RateLimitResult{
-			Allowed:    true,
-			Limit:      s.config.AttemptsPerWindow,
-			Remaining:  remaining,
-			ResetAt:    now.Add(s.config.WindowDuration),
-			RetryAfter: int(delay.Milliseconds()),
-		},
-		RequiresCaptcha: record.RequiresCaptcha,
-		FailureCount:    record.FailureCount,
-	}, nil
+	return s.buildAuthResult(true, s.config.AttemptsPerWindow, remaining, int(delay.Milliseconds()), now.Add(s.config.WindowDuration), record), nil
 }
 
 // RecordFailure increments failure counters after a failed authentication attempt.
 // Call this AFTER credential validation fails.
 //
+// This method uses atomic operations when available (PostgreSQL) to prevent TOCTOU races.
+// Falls back to the sandwich pattern (read → compute → write) for non-atomic stores.
+//
 // Side effects:
-//   - Increments window and daily failure counts
+//   - Increments window and daily failure counts via domain method
 //   - Applies hard lock if daily threshold (10 failures) is reached
 //   - Sets CAPTCHA requirement after 3 consecutive lockouts in 24 hours
 //   - Emits audit event when hard lock is triggered
 func (s *Service) RecordFailure(ctx context.Context, identifier, ip string) (*models.AuthLockout, error) {
+	now := requestcontext.Now(ctx)
 	key := models.NewAuthLockoutKey(identifier, ip).String()
-	current, err := s.store.RecordFailure(ctx, key)
+
+	// Try atomic path if store supports it (prevents TOCTOU races)
+	if atomicStore, ok := s.store.(AtomicStore); ok {
+		return s.recordFailureAtomic(ctx, atomicStore, key, identifier, ip, now)
+	}
+
+	// Fallback: sandwich pattern for non-atomic stores (e.g., in-memory test stores)
+	return s.recordFailureNonAtomic(ctx, key, identifier, ip, now)
+}
+
+// recordFailureAtomic uses atomic database operations to prevent TOCTOU races.
+func (s *Service) recordFailureAtomic(ctx context.Context, store AtomicStore, key, identifier, ip string, now time.Time) (*models.AuthLockout, error) {
+	// Step 1: Atomically increment counters
+	current, err := store.RecordFailureAtomic(ctx, key, now)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to record auth failure")
 	}
 
-	now := requestcontext.Now(ctx)
+	// Step 2: Atomically apply hard lock if threshold reached
+	shouldHardLock := current.ShouldHardLock(s.config.HardLockThreshold)
+	if shouldHardLock {
+		lockedUntil := now.Add(s.config.HardLockDuration)
+		applied, err := store.ApplyHardLockAtomic(ctx, key, lockedUntil, s.config.HardLockThreshold)
+		if err != nil {
+			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to apply hard lock")
+		}
+		if applied {
+			current.LockedUntil = &lockedUntil
+			observability.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_triggered",
+				"identifier", identifier,
+				"ip", privacy.AnonymizeIP(ip),
+				"locked_until", current.LockedUntil,
+			)
+		}
+	}
 
-	// Compute state transitions upfront for clarity
+	// Step 3: Atomically set CAPTCHA requirement if threshold reached
+	if current.ShouldRequireCaptcha(s.config.CaptchaAfterLockouts) && !current.RequiresCaptcha {
+		applied, err := store.SetRequiresCaptchaAtomic(ctx, key, s.config.CaptchaAfterLockouts*s.config.HardLockThreshold)
+		if err != nil {
+			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to set captcha requirement")
+		}
+		if applied {
+			current.RequiresCaptcha = true
+		}
+	}
+
+	return current, nil
+}
+
+// recordFailureNonAtomic uses the sandwich pattern for non-atomic stores (tests).
+func (s *Service) recordFailureNonAtomic(ctx context.Context, key, identifier, ip string, now time.Time) (*models.AuthLockout, error) {
+	// === READ: Get or create the lockout record (pure I/O) ===
+	current, err := s.store.GetOrCreate(ctx, key, now)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to get auth lockout record")
+	}
+
+	// === COMPUTE: Apply domain logic (pure) ===
+	// Increment counters via domain method
+	current.RecordFailure(now)
+
+	// Compute state transitions
 	shouldHardLock := current.ShouldHardLock(s.config.HardLockThreshold)
 	shouldRequireCaptcha := current.ShouldRequireCaptcha(s.config.CaptchaAfterLockouts) && !current.RequiresCaptcha
 
 	if shouldHardLock {
 		current.ApplyHardLock(s.config.HardLockDuration, now)
-		observability.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_triggered",
-			"identifier", identifier,
-			"ip", privacy.AnonymizeIP(ip),
-			"locked_until", current.LockedUntil,
-		)
 	}
 
 	if shouldRequireCaptcha {
 		current.MarkRequiresCaptcha()
 	}
 
-	if shouldHardLock || shouldRequireCaptcha {
-		if err = s.store.Update(ctx, current); err != nil {
-			return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update auth lockout record")
-		}
+	// === WRITE: Persist the updated record ===
+	if err = s.store.Update(ctx, current); err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to update auth lockout record")
+	}
+
+	// Audit logging (side effect, after successful write)
+	if shouldHardLock {
+		observability.LogAudit(ctx, s.logger, s.auditPublisher, "auth_lockout_triggered",
+			"identifier", identifier,
+			"ip", privacy.AnonymizeIP(ip),
+			"locked_until", current.LockedUntil,
+		)
 	}
 
 	return current, nil
@@ -240,4 +285,19 @@ func (s *Service) Clear(ctx context.Context, identifier, ip string) error {
 // Implements exponential backoff: 250ms → 500ms → 1s (PRD-017 FR-2b).
 func (s *Service) GetProgressiveBackoff(failureCount int) time.Duration {
 	return s.config.CalculateBackoff(failureCount)
+}
+
+// buildAuthResult constructs an AuthRateLimitResult with common fields from the lockout record.
+func (s *Service) buildAuthResult(allowed bool, limit, remaining, retryAfter int, resetAt time.Time, record *models.AuthLockout) *models.AuthRateLimitResult {
+	return &models.AuthRateLimitResult{
+		RateLimitResult: models.RateLimitResult{
+			Allowed:    allowed,
+			Limit:      limit,
+			Remaining:  remaining,
+			ResetAt:    resetAt,
+			RetryAfter: retryAfter,
+		},
+		RequiresCaptcha: record.RequiresCaptcha,
+		FailureCount:    record.FailureCount,
+	}
 }

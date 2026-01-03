@@ -12,7 +12,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	evidenceports "credo/internal/evidence/ports"
 	"credo/internal/evidence/registry/models"
 	"credo/internal/evidence/registry/orchestrator"
 	"credo/internal/evidence/registry/ports"
@@ -21,7 +20,10 @@ import (
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/audit/publishers/compliance"
 	"credo/pkg/requestcontext"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Tracer for distributed tracing of registry operations.
@@ -48,7 +50,7 @@ type Service struct {
 	orchestrator *orchestrator.Orchestrator
 	cache        CacheStore
 	consentPort  ports.ConsentPort
-	auditor      evidenceports.AuditPublisher
+	auditor      *compliance.Publisher
 	regulated    bool
 	logger       *slog.Logger
 }
@@ -80,10 +82,10 @@ func WithLogger(logger *slog.Logger) Option {
 	}
 }
 
-// WithAuditor sets the audit port for the service.
+// WithAuditor sets the compliance auditor for the service.
 // When set, sanctions lookups will emit audit events with fail-closed semantics
-// for listed sanctions (audit must succeed before result is returned).
-func WithAuditor(auditor evidenceports.AuditPublisher) Option {
+// (audit must succeed before result is returned for all sanctions checks).
+func WithAuditor(auditor *compliance.Publisher) Option {
 	return func(s *Service) {
 		s.auditor = auditor
 	}
@@ -201,7 +203,7 @@ func (s *Service) requireConsent(ctx context.Context, userID id.UserID) error {
 	if s.consentPort == nil {
 		return nil
 	}
-	return s.consentPort.RequireConsent(ctx, userID.String(), "registry_check")
+	return s.consentPort.RequireConsent(ctx, userID, id.ConsentPurposeRegistryCheck)
 }
 
 // checkCache retrieves cached citizen and sanctions records.
@@ -213,19 +215,51 @@ func (s *Service) checkCache(ctx context.Context, nationalID id.NationalID) (cac
 		return result, nil
 	}
 
-	if cached, cacheErr := s.cache.FindCitizen(ctx, nationalID, s.regulated); cacheErr == nil {
-		result.citizen = cached
-		result.citizenCached = true
-	} else if !errors.Is(cacheErr, store.ErrNotFound) {
-		return cacheCheckResult{}, cacheErr
+	type citizenLookup struct {
+		record *models.CitizenRecord
+		hit    bool
+	}
+	type sanctionLookup struct {
+		record *models.SanctionsRecord
+		hit    bool
 	}
 
-	if cached, cacheErr := s.cache.FindSanction(ctx, nationalID); cacheErr == nil {
-		result.sanction = cached
-		result.sanctionsCached = true
-	} else if !errors.Is(cacheErr, store.ErrNotFound) {
-		return cacheCheckResult{}, cacheErr
+	var citizenResult citizenLookup
+	var sanctionResult sanctionLookup
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error {
+		cached, cacheErr := s.cache.FindCitizen(groupCtx, nationalID, s.regulated)
+		if cacheErr == nil {
+			citizenResult = citizenLookup{record: cached, hit: true}
+			return nil
+		}
+		if errors.Is(cacheErr, store.ErrNotFound) {
+			return nil
+		}
+		return cacheErr
+	})
+
+	group.Go(func() error {
+		cached, cacheErr := s.cache.FindSanction(groupCtx, nationalID)
+		if cacheErr == nil {
+			sanctionResult = sanctionLookup{record: cached, hit: true}
+			return nil
+		}
+		if errors.Is(cacheErr, store.ErrNotFound) {
+			return nil
+		}
+		return cacheErr
+	})
+
+	if err := group.Wait(); err != nil {
+		return cacheCheckResult{}, err
 	}
+
+	result.citizen = citizenResult.record
+	result.sanction = sanctionResult.record
+	result.citizenCached = citizenResult.hit
+	result.sanctionsCached = sanctionResult.hit
 
 	return result, nil
 }
@@ -262,24 +296,40 @@ func (s *Service) convertEvidence(result *orchestrator.LookupResult) (*models.Ci
 	for _, ev := range result.Evidence {
 		switch ev.ProviderType {
 		case providers.ProviderTypeCitizen:
-			verification, err := EvidenceToCitizenVerification(ev)
+			record, err := s.citizenRecordFromEvidence(ev)
 			if err != nil {
-				return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to convert citizen evidence")
+				return nil, nil, err
 			}
-			if s.regulated {
-				verification = verification.WithoutNationalID()
-			}
-			citizenRecord = CitizenVerificationToRecord(verification)
+			citizenRecord = record
 		case providers.ProviderTypeSanctions:
-			check, err := EvidenceToSanctionsCheck(ev)
+			record, err := s.sanctionsRecordFromEvidence(ev)
 			if err != nil {
-				return nil, nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to convert sanctions evidence")
+				return nil, nil, err
 			}
-			sanctionRecord = SanctionsCheckToRecord(check)
+			sanctionRecord = record
 		}
 	}
 
 	return citizenRecord, sanctionRecord, nil
+}
+
+func (s *Service) citizenRecordFromEvidence(ev *providers.Evidence) (*models.CitizenRecord, error) {
+	verification, err := EvidenceToCitizenVerification(ev)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to convert citizen evidence")
+	}
+	if s.regulated {
+		verification = verification.WithoutNationalID()
+	}
+	return CitizenVerificationToRecord(verification), nil
+}
+
+func (s *Service) sanctionsRecordFromEvidence(ev *providers.Evidence) (*models.SanctionsRecord, error) {
+	check, err := EvidenceToSanctionsCheck(ev)
+	if err != nil {
+		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to convert sanctions evidence")
+	}
+	return SanctionsCheckToRecord(check), nil
 }
 
 // cacheNewlyFetched saves records to cache. Only caches records that weren't already cached.
@@ -290,12 +340,28 @@ func (s *Service) cacheNewlyFetched(ctx context.Context, key id.NationalID, citi
 	if s.cache == nil {
 		return
 	}
+
 	if !fromCache.citizenCached && citizen != nil {
-		_ = s.cache.SaveCitizen(ctx, key, citizen, s.regulated)
+		if err := s.cache.SaveCitizen(ctx, key, citizen, s.regulated); err != nil {
+			s.logCacheSaveError(ctx, "citizen", key, err)
+		}
 	}
 	if !fromCache.sanctionsCached && sanction != nil {
-		_ = s.cache.SaveSanction(ctx, key, sanction)
+		if err := s.cache.SaveSanction(ctx, key, sanction); err != nil {
+			s.logCacheSaveError(ctx, "sanctions", key, err)
+		}
 	}
+}
+
+func (s *Service) logCacheSaveError(ctx context.Context, recordType string, key id.NationalID, err error) {
+	if s.logger == nil || err == nil {
+		return
+	}
+	s.logger.ErrorContext(ctx, "failed to save "+recordType+" cache",
+		"national_id", hashNationalID(key.String()),
+		"regulated", s.regulated,
+		"error", err,
+	)
 }
 
 // Citizen performs a single citizen lookup with cache-through semantics.
@@ -348,15 +414,10 @@ func (s *Service) Citizen(ctx context.Context, userID id.UserID, nationalID id.N
 	// Find citizen evidence and convert via domain aggregate
 	for _, ev := range result.Evidence {
 		if ev.ProviderType == providers.ProviderTypeCitizen {
-			verification, convErr := EvidenceToCitizenVerification(ev)
-			if convErr != nil {
-				err = dErrors.Wrap(convErr, dErrors.CodeInternal, "failed to convert citizen evidence")
+			record, err = s.citizenRecordFromEvidence(ev)
+			if err != nil {
 				return nil, err
 			}
-			if s.regulated {
-				verification = verification.WithoutNationalID()
-			}
-			record = CitizenVerificationToRecord(verification)
 			break
 		}
 	}
@@ -367,7 +428,9 @@ func (s *Service) Citizen(ctx context.Context, userID id.UserID, nationalID id.N
 	}
 
 	if s.cache != nil {
-		_ = s.cache.SaveCitizen(ctx, nationalID, record, s.regulated)
+		if err := s.cache.SaveCitizen(ctx, nationalID, record, s.regulated); err != nil {
+			s.logCacheSaveError(ctx, "citizen", nationalID, err)
+		}
 	}
 
 	return record, nil
@@ -462,13 +525,11 @@ func (s *Service) Sanctions(ctx context.Context, userID id.UserID, nationalID id
 	}
 
 	// Check cache
-	cacheHit := false
 	if s.cache != nil {
 		if cached, cacheErr := s.cache.FindSanction(ctx, nationalID); cacheErr == nil {
-			cacheHit = true
 			span.SetAttributes(attribute.Bool("cache.hit", true))
 			// Audit cached result before returning
-			if err := s.auditSanctionsCheck(ctx, userID, cached.Listed); err != nil {
+			if err = s.auditSanctionsCheck(ctx, userID, cached.Listed); err != nil {
 				return nil, err
 			}
 			return cached, nil
@@ -476,9 +537,7 @@ func (s *Service) Sanctions(ctx context.Context, userID id.UserID, nationalID id
 			return nil, cacheErr
 		}
 	}
-	if !cacheHit {
-		span.SetAttributes(attribute.Bool("cache.hit", false))
-	}
+	span.SetAttributes(attribute.Bool("cache.hit", false))
 
 	result, err := s.orchestrator.Lookup(ctx, orchestrator.LookupRequest{
 		Types: []providers.ProviderType{providers.ProviderTypeSanctions},
@@ -494,12 +553,10 @@ func (s *Service) Sanctions(ctx context.Context, userID id.UserID, nationalID id
 	// Find sanctions evidence and convert via domain aggregate
 	for _, ev := range result.Evidence {
 		if ev.ProviderType == providers.ProviderTypeSanctions {
-			check, convErr := EvidenceToSanctionsCheck(ev)
-			if convErr != nil {
-				err = dErrors.Wrap(convErr, dErrors.CodeInternal, "failed to convert sanctions evidence")
+			record, err = s.sanctionsRecordFromEvidence(ev)
+			if err != nil {
 				return nil, err
 			}
-			record = SanctionsCheckToRecord(check)
 			break
 		}
 	}
@@ -510,7 +567,9 @@ func (s *Service) Sanctions(ctx context.Context, userID id.UserID, nationalID id
 	}
 
 	if s.cache != nil {
-		_ = s.cache.SaveSanction(ctx, nationalID, record)
+		if err := s.cache.SaveSanction(ctx, nationalID, record); err != nil {
+			s.logCacheSaveError(ctx, "sanctions", nationalID, err)
+		}
 	}
 
 	// Audit before returning - fail-closed for listed sanctions
@@ -538,12 +597,11 @@ func (s *Service) auditSanctionsCheck(ctx context.Context, userID id.UserID, lis
 		decision = "listed"
 	}
 
-	event := audit.Event{
+	event := audit.ComplianceEvent{
 		Action:    "registry_sanctions_checked",
 		Purpose:   "registry_check",
 		UserID:    userID,
 		Decision:  decision,
-		Reason:    "user_initiated",
 		RequestID: requestcontext.RequestID(ctx),
 	}
 

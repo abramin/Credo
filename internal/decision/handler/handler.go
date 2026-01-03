@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -16,20 +15,15 @@ import (
 	"credo/pkg/requestcontext"
 )
 
-// Service defines the interface for decision operations.
-type Service interface {
-	Evaluate(ctx context.Context, req decision.EvaluateRequest) (*decision.EvaluateResult, error)
-}
-
 // Handler wires decision endpoints to the decision service.
 type Handler struct {
-	service Service
+	service *decision.Service
 	logger  *slog.Logger
 	metrics *metrics.Metrics
 }
 
 // New constructs a decision handler with its dependencies.
-func New(service Service, logger *slog.Logger, metrics *metrics.Metrics) *Handler {
+func New(service *decision.Service, logger *slog.Logger, metrics *metrics.Metrics) *Handler {
 	return &Handler{
 		service: service,
 		logger:  logger,
@@ -43,6 +37,9 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 // HandleEvaluate handles POST /decision/evaluate requests.
+//
+// Side effects: validates input, enforces authentication from context, calls the
+// decision service, writes an HTTP response, and logs request outcomes.
 func (h *Handler) HandleEvaluate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestID := requestcontext.RequestID(ctx)

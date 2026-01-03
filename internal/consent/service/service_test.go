@@ -30,7 +30,7 @@ import (
 	"credo/internal/consent/service/mocks"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
-	auditpublisher "credo/pkg/platform/audit/publisher"
+	"credo/pkg/platform/audit/publishers/compliance"
 	auditstore "credo/pkg/platform/audit/store/memory"
 	"credo/pkg/platform/sentinel"
 	"credo/pkg/requestcontext"
@@ -48,7 +48,7 @@ func (s *ServiceSuite) SetupTest() {
 	s.ctrl = gomock.NewController(s.T())
 	s.mockStore = mocks.NewMockStore(s.ctrl)
 	s.auditStore = auditstore.NewInMemoryStore()
-	auditor := auditpublisher.NewPublisher(s.auditStore)
+	auditor := compliance.New(s.auditStore)
 	s.service = New(
 		s.mockStore,
 		auditor,
@@ -166,7 +166,7 @@ func (s *ServiceSuite) TestRevokeAll_Audit() {
 		s.Require().NoError(err)
 		s.Require().Len(events, 1)
 		s.Assert().Equal(models.AuditActionConsentRevoked, events[0].Action)
-		s.Assert().Equal("bulk_revocation", events[0].Reason)
+		s.Assert().Equal(models.AuditDecisionRevoked, events[0].Decision)
 	})
 
 	s.Run("bulk revoke emits no audit event when count == 0", func() {

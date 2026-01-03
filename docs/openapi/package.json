@@ -1,0 +1,8 @@
+{
+  "name": "credo-openapi",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "@redocly/cli": "1.12.0"
+  }
+}

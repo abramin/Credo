@@ -13,5 +13,5 @@ type ConsentPort interface {
 	// RequireConsent enforces consent requirement for a purpose.
 	// Returns nil if consent is active, error otherwise.
 	// Error types should match pkg/domain-errors conventions.
-	RequireConsent(ctx context.Context, userID id.UserID, purpose string) error
+	RequireConsent(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) error
 }

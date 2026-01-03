@@ -46,6 +46,10 @@ type Event struct {
 	// Used for admin operations where an admin acts on a user's behalf.
 	// This is a string to support various actor identification schemes.
 	ActorID string
+	// SubjectIDHash is a SHA-256 hash of the subject identifier (e.g., national ID)
+	// being evaluated. Used for compliance traceability without storing raw PII.
+	// Only populated for decision events where a third-party identity is evaluated.
+	SubjectIDHash string
 }
 
 type AuditEvent string
@@ -135,4 +139,105 @@ func (e AuditEvent) Category() EventCategory {
 		return cat
 	}
 	return CategoryOperations
+}
+
+// -----------------------------------------------------------------------------
+// Right-sized event types for tri-publisher architecture
+// -----------------------------------------------------------------------------
+
+// ComplianceEvent captures regulatory-significant actions requiring guaranteed persistence.
+// Fields are chosen to satisfy GDPR Article 30 and similar requirements.
+// Use with ComplianceAuditor for fail-closed semantics.
+type ComplianceEvent struct {
+	Timestamp     time.Time // When the event occurred (set automatically if zero)
+	UserID        id.UserID // The user affected (required)
+	Subject       string    // Human-readable subject identifier
+	Action        string    // The action taken (e.g., "consent_granted")
+	Purpose       string    // Purpose of data processing (for consent events)
+	Decision      string    // Outcome of the action (e.g., "granted", "denied")
+	SubjectIDHash string    // SHA-256 hash of external ID (for traceability without PII)
+	RequestID     string    // Correlation ID for request tracing
+	ActorID       string    // Admin who performed action (if different from UserID)
+}
+
+// Category returns CategoryCompliance (always).
+func (e ComplianceEvent) Category() EventCategory { return CategoryCompliance }
+
+// ToLegacyEvent converts to the legacy Event type for backwards compatibility.
+func (e ComplianceEvent) ToLegacyEvent() Event {
+	return Event{
+		Category:      CategoryCompliance,
+		Timestamp:     e.Timestamp,
+		UserID:        e.UserID,
+		Subject:       e.Subject,
+		Action:        e.Action,
+		Purpose:       e.Purpose,
+		Decision:      e.Decision,
+		SubjectIDHash: e.SubjectIDHash,
+		RequestID:     e.RequestID,
+		ActorID:       e.ActorID,
+	}
+}
+
+// SecurityEvent captures security-relevant actions for SIEM and alerting.
+// Events are processed asynchronously with buffering and retry.
+// Use with SecurityAuditor for non-blocking emission.
+type SecurityEvent struct {
+	Timestamp time.Time // When the event occurred (set automatically if zero)
+	Subject   string    // Entity involved (user_id, IP, client_id)
+	Action    string    // Security action (e.g., "auth_failed", "lockout_triggered")
+	Reason    string    // Why this happened (e.g., "invalid_password", "rate_exceeded")
+	IP        string    // Client IP address (critical for security forensics)
+	RequestID string    // Correlation ID
+	ActorID   string    // Actor if different from subject
+	Severity  Severity  // "info", "warning", "critical" for SIEM routing
+}
+
+// Severity levels for security events.
+type Severity string
+
+const (
+	SeverityInfo     Severity = "info"
+	SeverityWarning  Severity = "warning"
+	SeverityCritical Severity = "critical"
+)
+
+// Category returns CategorySecurity (always).
+func (e SecurityEvent) Category() EventCategory { return CategorySecurity }
+
+// ToLegacyEvent converts to the legacy Event type for backwards compatibility.
+func (e SecurityEvent) ToLegacyEvent() Event {
+	return Event{
+		Category:  CategorySecurity,
+		Timestamp: e.Timestamp,
+		Subject:   e.Subject,
+		Action:    e.Action,
+		Reason:    e.Reason,
+		RequestID: e.RequestID,
+		ActorID:   e.ActorID,
+	}
+}
+
+// OpsEvent captures operational events with minimal overhead.
+// Events are fire-and-forget with optional sampling.
+// Use with OpsTracker for non-blocking, sampled emission.
+type OpsEvent struct {
+	Timestamp time.Time // When the event occurred (set automatically if zero)
+	Subject   string    // Entity involved
+	Action    string    // Operational action (e.g., "token_issued")
+	RequestID string    // Correlation ID
+}
+
+// Category returns CategoryOperations (always).
+func (e OpsEvent) Category() EventCategory { return CategoryOperations }
+
+// ToLegacyEvent converts to the legacy Event type for backwards compatibility.
+func (e OpsEvent) ToLegacyEvent() Event {
+	return Event{
+		Category:  CategoryOperations,
+		Timestamp: e.Timestamp,
+		Subject:   e.Subject,
+		Action:    e.Action,
+		RequestID: e.RequestID,
+	}
 }

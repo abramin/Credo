@@ -116,21 +116,35 @@ func (s *PostgresBucketStore) GetCurrentCount(ctx context.Context, key string) (
 	}
 
 	now := requestcontext.Now(ctx)
-	query := `
-		WITH recent AS (
-			SELECT window_seconds
-			FROM rate_limit_events
-			WHERE key = $1
-			ORDER BY occurred_at DESC
-			LIMIT 1
-		)
-		SELECT COALESCE(SUM(cost), 0)
+
+	// First, get the window duration from the most recent event
+	var windowSeconds sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT window_seconds
 		FROM rate_limit_events
 		WHERE key = $1
-		  AND occurred_at >= $2 - (SELECT make_interval(secs => window_seconds) FROM recent)
-	`
+		ORDER BY occurred_at DESC
+		LIMIT 1
+	`, key).Scan(&windowSeconds)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No events exist for this key
+			return 0, nil
+		}
+		return 0, fmt.Errorf("get rate limit window: %w", err)
+	}
+	if !windowSeconds.Valid {
+		return 0, nil
+	}
+
+	// Now count events within the window
+	cutoff := now.Add(-time.Duration(windowSeconds.Int64) * time.Second)
 	var count int
-	err := s.db.QueryRowContext(ctx, query, key, now).Scan(&count)
+	err = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(cost), 0)
+		FROM rate_limit_events
+		WHERE key = $1 AND occurred_at >= $2
+	`, key, cutoff).Scan(&count)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil
