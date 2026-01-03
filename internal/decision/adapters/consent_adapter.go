@@ -3,25 +3,20 @@ package adapters
 import (
 	"context"
 
+	consentcontracts "credo/contracts/consent"
 	"credo/internal/decision/ports"
 	id "credo/pkg/domain"
 )
-
-// consentRequirer defines the interface for consent enforcement.
-// Defined locally to avoid coupling to consent service package.
-type consentRequirer interface {
-	Require(ctx context.Context, userID id.UserID, purpose id.ConsentPurpose) error
-}
 
 // ConsentAdapter implements ports.ConsentPort by calling the consent service.
 // This maintains hexagonal architecture boundaries while keeping
 // everything in a single process.
 type ConsentAdapter struct {
-	consent consentRequirer
+	consent consentcontracts.Requirer
 }
 
 // NewConsentAdapter creates a new consent adapter.
-func NewConsentAdapter(consent consentRequirer) ports.ConsentPort {
+func NewConsentAdapter(consent consentcontracts.Requirer) ports.ConsentPort {
 	return &ConsentAdapter{consent: consent}
 }
 

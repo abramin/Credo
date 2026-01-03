@@ -519,13 +519,9 @@ func buildAuthModule(ctx context.Context, infra *infraBundle, tenantService *ten
 	)
 
 	// Create rate limit adapter for auth handler (nil if rate limiting is disabled)
-	// Wrappers convert ratelimit types to auth adapter's local types, maintaining decoupling.
 	var rateLimitAdapter authPorts.RateLimitPort
 	if !infra.Cfg.DemoMode && !infra.Cfg.DisableRateLimiting {
-		rateLimitAdapter = authAdapters.New(
-			&authLockoutWrapper{svc: authLockoutSvc},
-			&requestLimiterWrapper{svc: requestSvc},
-		)
+		rateLimitAdapter = NewRateLimitAdapter(authLockoutSvc, requestSvc)
 	}
 
 	if infra.DBPool != nil {

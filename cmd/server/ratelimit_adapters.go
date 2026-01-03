@@ -3,63 +3,79 @@ package main
 import (
 	"context"
 
-	authAdapters "credo/internal/auth/adapters"
+	"credo/internal/auth/ports"
 	"credo/internal/ratelimit/models"
 	"credo/internal/ratelimit/service/authlockout"
 	"credo/internal/ratelimit/service/requestlimit"
 )
 
-// authLockoutWrapper adapts authlockout.Service to auth adapter's AuthLockoutChecker interface.
-// This wrapper converts ratelimit types to auth adapter types at the composition root,
-// keeping the auth module decoupled from ratelimit/models.
-type authLockoutWrapper struct {
-	svc *authlockout.Service
+// RateLimitAdapter implements ports.RateLimitPort by calling ratelimit services directly.
+// This adapter lives in the composition root to keep the auth module decoupled from
+// ratelimit internals. When splitting into microservices, replace with a gRPC adapter.
+type RateLimitAdapter struct {
+	authLockout *authlockout.Service
+	requests    *requestlimit.Service
 }
 
-func (w *authLockoutWrapper) Check(ctx context.Context, identifier, ip string) (*authAdapters.AuthCheckResult, error) {
-	result, err := w.svc.Check(ctx, identifier, ip)
+// NewRateLimitAdapter creates an adapter that implements auth's RateLimitPort.
+func NewRateLimitAdapter(authLockout *authlockout.Service, requests *requestlimit.Service) ports.RateLimitPort {
+	return &RateLimitAdapter{
+		authLockout: authLockout,
+		requests:    requests,
+	}
+}
+
+func (a *RateLimitAdapter) CheckAuthRateLimit(ctx context.Context, identifier, ip string) (*ports.AuthRateLimitResult, error) {
+	// Check auth lockout first (brute force protection)
+	authResult, err := a.authLockout.Check(ctx, identifier, ip)
 	if err != nil {
 		return nil, err
 	}
-	return &authAdapters.AuthCheckResult{
-		Allowed:    result.Allowed,
-		Remaining:  result.Remaining,
-		RetryAfter: result.RetryAfter,
-		ResetAt:    result.ResetAt,
-	}, nil
-}
+	if !authResult.Allowed {
+		return &ports.AuthRateLimitResult{
+			Allowed:    false,
+			Remaining:  authResult.Remaining,
+			RetryAfter: authResult.RetryAfter,
+			ResetAt:    authResult.ResetAt,
+		}, nil
+	}
 
-func (w *authLockoutWrapper) RecordFailure(ctx context.Context, identifier, ip string) (*authAdapters.AuthLockoutResult, error) {
-	result, err := w.svc.RecordFailure(ctx, identifier, ip)
+	// Secondary defense: IP rate limit for auth endpoints
+	ipResult, err := a.requests.CheckIP(ctx, ip, models.ClassAuth)
 	if err != nil {
 		return nil, err
 	}
-	return &authAdapters.AuthLockoutResult{
-		FailureCount:    result.FailureCount,
-		LockedUntil:     result.LockedUntil,
-		RequiresCaptcha: result.RequiresCaptcha,
+	if !ipResult.Allowed {
+		return &ports.AuthRateLimitResult{
+			Allowed:    false,
+			Remaining:  ipResult.Remaining,
+			RetryAfter: ipResult.RetryAfter,
+			ResetAt:    ipResult.ResetAt,
+		}, nil
+	}
+
+	// Both checks passed - return combined result with IP limit info
+	return &ports.AuthRateLimitResult{
+		Allowed:    true,
+		Remaining:  ipResult.Remaining,
+		RetryAfter: 0,
+		ResetAt:    ipResult.ResetAt,
 	}, nil
 }
 
-func (w *authLockoutWrapper) Clear(ctx context.Context, identifier, ip string) error {
-	return w.svc.Clear(ctx, identifier, ip)
-}
-
-// requestLimiterWrapper adapts requestlimit.Service to auth adapter's RequestLimiter interface.
-// This wrapper converts ratelimit types to auth adapter types at the composition root.
-type requestLimiterWrapper struct {
-	svc *requestlimit.Service
-}
-
-func (w *requestLimiterWrapper) CheckIP(ctx context.Context, ip string, class authAdapters.EndpointClass) (*authAdapters.IPCheckResult, error) {
-	result, err := w.svc.CheckIP(ctx, ip, models.EndpointClass(class))
+func (a *RateLimitAdapter) RecordAuthFailure(ctx context.Context, identifier, ip string) (*ports.AuthLockoutState, error) {
+	lockout, err := a.authLockout.RecordFailure(ctx, identifier, ip)
 	if err != nil {
 		return nil, err
 	}
-	return &authAdapters.IPCheckResult{
-		Allowed:    result.Allowed,
-		Remaining:  result.Remaining,
-		RetryAfter: result.RetryAfter,
-		ResetAt:    result.ResetAt,
+
+	return &ports.AuthLockoutState{
+		FailureCount:    lockout.FailureCount,
+		LockedUntil:     lockout.LockedUntil,
+		RequiresCaptcha: lockout.RequiresCaptcha,
 	}, nil
+}
+
+func (a *RateLimitAdapter) ClearAuthFailures(ctx context.Context, identifier, ip string) error {
+	return a.authLockout.Clear(ctx, identifier, ip)
 }

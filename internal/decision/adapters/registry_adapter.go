@@ -8,15 +8,6 @@ import (
 	id "credo/pkg/domain"
 )
 
-// registryContractProvider defines the interface for registry lookups using contract types.
-// Defined locally to avoid coupling to registry service package.
-// The registry service implements these methods to return contract types directly,
-// eliminating the need for this adapter to import internal registry models.
-type registryContractProvider interface {
-	CitizenContract(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrycontracts.CitizenRecord, error)
-	SanctionsContract(ctx context.Context, userID id.UserID, nationalID id.NationalID) (*registrycontracts.SanctionsRecord, error)
-}
-
 // RegistryAdapter is an in-process adapter that implements ports.RegistryPort
 // by directly calling the registry service. This maintains the hexagonal
 // architecture boundaries while keeping everything in a single process.
@@ -26,11 +17,11 @@ type registryContractProvider interface {
 // The adapter uses registry service contract methods, ensuring the decision
 // module depends only on stable contract types, not internal registry models.
 type RegistryAdapter struct {
-	registryService registryContractProvider
+	registryService registrycontracts.FullProvider
 }
 
 // NewRegistryAdapter creates a new in-process registry adapter.
-func NewRegistryAdapter(registryService registryContractProvider) ports.RegistryPort {
+func NewRegistryAdapter(registryService registrycontracts.FullProvider) ports.RegistryPort {
 	return &RegistryAdapter{
 		registryService: registryService,
 	}
