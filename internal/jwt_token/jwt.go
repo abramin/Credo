@@ -47,6 +47,9 @@ type JWTService struct {
 	env           string
 }
 
+// TokenTypeBearer is the OAuth2 token_type value for bearer access tokens.
+const TokenTypeBearer = "Bearer"
+
 func NewJWTService(signingKey string, issuerBaseURL string, audience string, tokenTTL time.Duration) *JWTService {
 	return &JWTService{
 		signingKey:    []byte(signingKey),
@@ -103,6 +106,11 @@ func (s *JWTService) GenerateAccessTokenWithJTI(
 		return "", "", dErrors.New(dErrors.CodeInvalidInput, "invalid token claims")
 	}
 	return newToken, claims.ID, nil
+}
+
+// TokenType returns the OAuth2 token_type value for tokens issued by this service.
+func (s *JWTService) TokenType() string {
+	return TokenTypeBearer
 }
 
 func (s *JWTService) GenerateAccessToken(

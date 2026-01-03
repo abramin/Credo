@@ -103,6 +103,7 @@ type TokenGenerator interface {
 	GenerateAccessTokenWithJTI(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID, scopes []string) (string, string, error)
 	GenerateIDToken(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID) (string, error)
 	CreateRefreshToken() (string, error)
+	TokenType() string
 	// ParseTokenSkipClaimsValidation parses a JWT with signature verification but skips claims validation (e.g., expiration)
 	// This is used for token revocation where we need to verify the signature but accept expired tokens
 	ParseTokenSkipClaimsValidation(token string) (*jwttoken.AccessTokenClaims, error)
@@ -196,6 +197,7 @@ type tokenArtifacts struct {
 	idToken        string
 	refreshToken   string
 	refreshRecord  *models.RefreshTokenRecord
+	tokenType      string
 }
 
 // Option configures Service during initialization.
@@ -416,6 +418,7 @@ func (s *Service) generateTokenArtifacts(ctx context.Context, session *models.Se
 		idToken:        idToken,
 		refreshToken:   refreshToken,
 		refreshRecord:  tokenRecord,
+		tokenType:      s.jwt.TokenType(),
 	}, nil
 }
 
@@ -425,8 +428,7 @@ func (s *Service) buildTokenResult(artifacts *tokenArtifacts, scope []string) *m
 		AccessToken:  artifacts.accessToken,
 		IDToken:      artifacts.idToken,
 		RefreshToken: artifacts.refreshToken,
-		// Todo: token type should be set by jwt package not service, reeturned in artifacts
-		TokenType: models.TokenTypeBearer,
+		TokenType:    artifacts.tokenType,
 		ExpiresIn: int(s.TokenTTL.Seconds()),
 		Scope:     strings.Join(scope, " "),
 	}

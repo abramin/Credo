@@ -543,6 +543,20 @@ func (mr *MockTokenGeneratorMockRecorder) CreateRefreshToken() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateRefreshToken", reflect.TypeOf((*MockTokenGenerator)(nil).CreateRefreshToken))
 }
 
+// TokenType mocks base method.
+func (m *MockTokenGenerator) TokenType() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TokenType")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// TokenType indicates an expected call of TokenType.
+func (mr *MockTokenGeneratorMockRecorder) TokenType() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TokenType", reflect.TypeOf((*MockTokenGenerator)(nil).TokenType))
+}
+
 // GenerateAccessToken mocks base method.
 func (m *MockTokenGenerator) GenerateAccessToken(ctx context.Context, userID domain.UserID, sessionID domain.SessionID, clientID domain.ClientID, tenantID domain.TenantID, scopes []string) (string, error) {
 	m.ctrl.T.Helper()

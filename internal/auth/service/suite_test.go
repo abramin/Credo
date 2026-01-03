@@ -126,6 +126,7 @@ func (s *ServiceSuite) expectTokenGeneration(userID id.UserID, sessionID id.Sess
 	).Return(accessToken, accessTokenJTI, nil)
 	s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), uuid.UUID(userID), uuid.UUID(sessionID), clientUUID.String(), tenantID.String()).Return(idToken, nil)
 	s.mockJWT.EXPECT().CreateRefreshToken().Return(refreshToken, nil)
+	s.mockJWT.EXPECT().TokenType().Return("Bearer")
 
 	return
 }
