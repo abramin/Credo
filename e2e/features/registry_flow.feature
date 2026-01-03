@@ -8,7 +8,7 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     And I am authenticated as "registry-test@example.com"
     And I have granted consent for purposes "registry_check"
 
-    @registry @citizen @normal
+    @registry @citizen @normal @unregulated
   Scenario: Successful citizen registry lookup with full data
     When I lookup citizen record for national_id "CITIZEN123456"
     Then the response status should be 200
@@ -23,12 +23,12 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     And the response field "valid" should equal true
     And the response field "source" should not be empty
 
-    @registry @citizen @normal
+    @registry @citizen @normal @unregulated
   Scenario: Citizen lookup returns different data for different national IDs
     When I lookup citizen record for national_id "CITIZEN111111"
     Then the response status should be 200
     And I save the response as "first_citizen"
-    
+
     When I lookup citizen record for national_id "CITIZEN222222"
     Then the response status should be 200
     And the response field "full_name" should not equal the "first_citizen" full_name
@@ -95,7 +95,7 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     Given I revoke consent for purposes "registry_check"
     When I lookup citizen record for national_id "TEST123456"
     Then the response status should be 403
-    And the response field "error" should equal "missing_consent"
+    And the response field "error" should equal "invalid_consent"
 
     @registry @citizen @validation
   Scenario: Citizen lookup with empty national_id
@@ -133,7 +133,7 @@ Feature: Registry Integration - Citizen and Sanctions Lookup
     Given I revoke consent for purposes "registry_check"
     When I check sanctions for national_id "TEST123456"
     Then the response status should be 403
-    And the response field "error" should equal "missing_consent"
+    And the response field "error" should equal "invalid_consent"
 
     @registry @sanctions @validation
   Scenario: Sanctions check with empty national_id

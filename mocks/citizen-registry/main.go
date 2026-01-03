@@ -243,6 +243,26 @@ var testCitizens = map[string]func() *CitizenResponse{
 			CheckedAt:   time.Now().UTC().Format(time.RFC3339),
 		}
 	},
+	"SANCTIONED99": func() *CitizenResponse {
+		return &CitizenResponse{
+			NationalID:  "SANCTIONED99",
+			FullName:    "Sanctions Listed User",
+			DateOfBirth: "1982-08-15",
+			Address:     "202 Watchlist Way, Flagged, NV 89001",
+			Valid:       true,
+			CheckedAt:   time.Now().UTC().Format(time.RFC3339),
+		}
+	},
+	"INVALID99999": func() *CitizenResponse {
+		return &CitizenResponse{
+			NationalID:  "INVALID99999",
+			FullName:    "Invalid Status User",
+			DateOfBirth: "1978-03-22",
+			Address:     "303 Inactive St, Expired, OR 97001",
+			Valid:       false, // Invalid citizen record
+			CheckedAt:   time.Now().UTC().Format(time.RFC3339),
+		}
+	},
 }
 
 // notFoundCitizens contains national IDs that should return 404
@@ -250,6 +270,7 @@ var notFoundCitizens = map[string]bool{
 	"UNKNOWN999":   true,
 	"NOCONSENT123": true, // Used for consent tests - no citizen data needed
 	"REVOKED123":   true, // Used for consent revocation tests
+	"NOTFOUND999":  true, // Used for registry not-found tests
 }
 
 func handleCitizenLookup(w http.ResponseWriter, r *http.Request) {
