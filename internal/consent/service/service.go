@@ -695,15 +695,26 @@ func (s *Service) logConsentCheck(ctx context.Context, level slog.Level, msg str
 // Invariant: passed=true requires decision=AuditDecisionGranted; passed=false requires decision=AuditDecisionDenied
 type consentCheckOutcome struct {
 	passed   bool
-	state    models.ConsentCheckState
-	decision string // models.AuditDecisionGranted or models.AuditDecisionDenied
+	status   *models.Status // nil means consent not found ("missing")
+	decision string         // models.AuditDecisionGranted or models.AuditDecisionDenied
+}
+
+// statusState returns the state string for logging. Returns "missing" if status is nil.
+func (o consentCheckOutcome) statusState() string {
+	if o.status == nil {
+		return "missing"
+	}
+	return string(*o.status)
 }
 
 var (
-	outcomeMissing = consentCheckOutcome{passed: false, state: models.ConsentCheckStateMissing, decision: models.AuditDecisionDenied}
-	outcomeRevoked = consentCheckOutcome{passed: false, state: models.ConsentCheckStateRevoked, decision: models.AuditDecisionDenied}
-	outcomeExpired = consentCheckOutcome{passed: false, state: models.ConsentCheckStateExpired, decision: models.AuditDecisionDenied}
-	outcomePassed  = consentCheckOutcome{passed: true, state: models.ConsentCheckStateActive, decision: models.AuditDecisionGranted}
+	statusRevoked  = models.StatusRevoked
+	statusExpired  = models.StatusExpired
+	statusActive   = models.StatusActive
+	outcomeMissing = consentCheckOutcome{passed: false, status: nil, decision: models.AuditDecisionDenied}
+	outcomeRevoked = consentCheckOutcome{passed: false, status: &statusRevoked, decision: models.AuditDecisionDenied}
+	outcomeExpired = consentCheckOutcome{passed: false, status: &statusExpired, decision: models.AuditDecisionDenied}
+	outcomePassed  = consentCheckOutcome{passed: true, status: &statusActive, decision: models.AuditDecisionGranted}
 )
 
 // recordConsentCheckOutcome emits audit event, logs, and updates metrics for a consent check.
@@ -725,7 +736,7 @@ func (s *Service) recordConsentCheckOutcome(ctx context.Context, userID id.UserI
 		Decision:  outcome.decision,
 		Timestamp: now,
 	})
-	s.logConsentCheck(ctx, logLevel, logMsg, userID, purpose, outcome.state.String())
+	s.logConsentCheck(ctx, logLevel, logMsg, userID, purpose, outcome.statusState())
 	if outcome.passed {
 		s.incrementConsentCheckPassed(purpose)
 	} else {
