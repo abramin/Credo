@@ -6,6 +6,7 @@ import (
 	"credo/internal/auth/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
+	"credo/pkg/platform/sentinel"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -37,7 +38,9 @@ func (s *ServiceSuite) TestSessionRevocation_ValidationAndAuthorization() {
 	s.Run("session not found returns not found", func() {
 		userID := id.UserID(uuid.New())
 		sessionID := id.SessionID(uuid.New())
-		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(nil, dErrors.New(dErrors.CodeNotFound, "nope"))
+		// Execute returns sentinel.ErrNotFound when session doesn't exist
+		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sessionID, gomock.Any(), gomock.Any()).
+			Return(nil, sentinel.ErrNotFound)
 
 		err := s.service.RevokeSession(ctx, userID, sessionID)
 		s.Require().Error(err)
@@ -53,7 +56,12 @@ func (s *ServiceSuite) TestSessionRevocation_ValidationAndAuthorization() {
 			UserID: otherUserID,
 			Status: models.SessionStatusActive,
 		}
-		s.mockSessionStore.EXPECT().FindByID(gomock.Any(), sessionID).Return(session, nil)
+		// Execute calls validate callback which checks ownership and returns forbidden
+		s.mockSessionStore.EXPECT().Execute(gomock.Any(), sessionID, gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, _ id.SessionID, validate func(*models.Session) error, _ func(*models.Session)) (*models.Session, error) {
+				err := validate(session)
+				return nil, err
+			})
 
 		err := s.service.RevokeSession(ctx, userID, sessionID)
 		s.Require().Error(err)

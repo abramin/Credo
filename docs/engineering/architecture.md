@@ -1529,6 +1529,74 @@ Key improvements to harden this design:
 
 ---
 
+## Transaction Patterns
+
+### Execute Callback Pattern (TOCTOU Prevention)
+
+All services use the **Execute callback pattern** for atomic validate-then-mutate operations on single entities. This pattern prevents Time-of-Check-Time-of-Use (TOCTOU) vulnerabilities.
+
+```go
+// Service calls store's Execute with validate and mutate callbacks
+client, err := s.clients.Execute(ctx, clientID,
+    func(c *models.Client) error {
+        // Validate under lock - return domain errors
+        if !c.IsConfidential() {
+            return dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
+        }
+        return nil
+    },
+    func(c *models.Client) {
+        // Mutate under lock - changes are persisted atomically
+        c.ClientSecretHash = hash
+        c.UpdatedAt = now
+    },
+)
+```
+
+**Key characteristics:**
+
+- **Store-owned atomicity**: Store's `Execute` method holds the lock (mutex for in-memory, `FOR UPDATE` for PostgreSQL) during both validation and mutation
+- **Domain errors pass through**: Validate callback returns domain errors directly; no sentinel-to-domain translation needed
+- **Pre-generate expensive operations**: Generate secrets, tokens, or hashes before calling `Execute` to minimize lock duration
+- **Audit emission after Execute**: Audit events are emitted after the atomic operation succeeds
+
+**Implementation by store type:**
+
+| Store Type | Lock Mechanism | Transaction Handling |
+|------------|---------------|---------------------|
+| In-memory | `sync.RWMutex` | Mutex held during validate+mutate |
+| PostgreSQL | `SELECT ... FOR UPDATE` | Store creates own `sql.Tx`, commits on success |
+
+**Anti-pattern (TOCTOU vulnerable):**
+```go
+// DON'T DO THIS - gap between FindByID and Update
+client, err := s.clients.FindByID(ctx, clientID)
+client.Deactivate(now)
+s.clients.Update(ctx, client)  // Another request could modify between Find and Update!
+```
+
+### Service-Level Transactions (Multi-Store Operations)
+
+For operations spanning multiple stores (e.g., `CreateClient` which must verify tenant exists), services use `RunInTx`:
+
+```go
+err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
+    tenant, err := s.tenants.FindByID(txCtx, cmd.TenantID)
+    if !tenant.IsActive() {
+        return dErrors.New(dErrors.CodeValidation, "cannot create client under inactive tenant")
+    }
+    // ... create client
+    return nil
+})
+```
+
+**Service-level tx provides:**
+- Timeout enforcement (5s default)
+- In-memory mode: Serialization across stores via mutex
+- PostgreSQL mode: Context-based transaction propagation to stores
+
+---
+
 ## Design Rationale
 
 ### Why a Modular Monolith?
@@ -1594,3 +1662,4 @@ The codebase currently has:
 | 2.6     | 2025-12-24 | Engineering Team | Phase 0 completion update: add PRD-026B tenant/client lifecycle management, update rate limiting to MVP complete status, add lifecycle API routes, update implementation status summary |
 | 2.7     | 2026-01-02 | Engineering Team | Add Redis integration for sessions and token revocation (PRD-016, PRD-020): Redis session store, Redis TRL, client package with health checks; update storage tiers and implementation status |
 | 2.8     | 2026-01-03 | Engineering Team | Update current-state architecture: PostgreSQL/Redis/Kafka baseline, tri-publisher audit system, outbox pipeline, and test-only in-memory stores |
+| 2.9     | 2026-01-04 | Engineering Team | Add Transaction Patterns section documenting Execute callback pattern for TOCTOU prevention and service-level transactions |

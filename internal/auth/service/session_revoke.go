@@ -2,16 +2,19 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"credo/internal/auth/models"
 	id "credo/pkg/domain"
 	dErrors "credo/pkg/domain-errors"
 	"credo/pkg/platform/audit"
+	"credo/pkg/platform/sentinel"
+	"credo/pkg/requestcontext"
 )
 
 // RevokeSession revokes a single session for the given user.
-// It validates ownership before performing the revocation.
+// Uses Execute callback pattern to validate ownership atomically under lock.
 func (s *Service) RevokeSession(ctx context.Context, userID id.UserID, sessionID id.SessionID) error {
 	if userID.IsNil() {
 		return dErrors.New(dErrors.CodeUnauthorized, "user ID required")
@@ -20,28 +23,59 @@ func (s *Service) RevokeSession(ctx context.Context, userID id.UserID, sessionID
 		return dErrors.New(dErrors.CodeBadRequest, "session ID required")
 	}
 
-	session, err := s.sessions.FindByID(ctx, sessionID)
+	now := requestcontext.Now(ctx)
+	var alreadyRevoked bool
+
+	session, err := s.sessions.Execute(ctx, sessionID,
+		// Validate callback: check ownership and revokability atomically under lock
+		func(sess *models.Session) error {
+			if sess.UserID != userID {
+				s.authFailure(ctx, "session_owner_mismatch", false,
+					"session_id", sess.ID.String(),
+					"user_id", userID.String(),
+				)
+				return dErrors.New(dErrors.CodeForbidden, "forbidden")
+			}
+			if err := sess.CanRevoke(); err != nil {
+				alreadyRevoked = true
+				return nil // Not an error - just skip mutation
+			}
+			return nil
+		},
+		// Mutate callback: apply revocation if not already revoked
+		func(sess *models.Session) {
+			if !alreadyRevoked {
+				sess.ApplyRevocation(now)
+			}
+		},
+	)
 	if err != nil {
-		if dErrors.HasCode(err, dErrors.CodeNotFound) {
+		if dErrors.HasCode(err, dErrors.CodeForbidden) {
+			return err // Pass through ownership error
+		}
+		if errors.Is(err, sentinel.ErrNotFound) {
 			return dErrors.New(dErrors.CodeNotFound, "session not found")
 		}
-		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to find session")
-	}
-
-	if session.UserID != userID {
-		s.authFailure(ctx, "session_owner_mismatch", false,
-			"session_id", session.ID.String(),
-			"user_id", userID.String(),
-		)
-		return dErrors.New(dErrors.CodeForbidden, "forbidden")
-	}
-
-	outcome, err := s.revokeSessionInternal(ctx, session, "", models.RevocationReasonUserInitiated)
-	if err != nil {
 		return dErrors.Wrap(err, dErrors.CodeInternal, "failed to revoke session")
 	}
-	if outcome == revokeSessionOutcomeAlreadyRevoked {
+
+	if alreadyRevoked {
 		return nil
+	}
+
+	// Post-revocation: revoke tokens and delete refresh tokens
+	if session.LastAccessTokenJTI != "" {
+		if err := s.trl.RevokeToken(ctx, session.LastAccessTokenJTI, s.TokenTTL); err != nil {
+			s.logger.Error("failed to add token to revocation list", "error", err, "jti", session.LastAccessTokenJTI)
+			if s.TRLFailureMode == TRLFailureModeFail {
+				return dErrors.Wrap(err, dErrors.CodeInternal, "failed to add token to revocation list")
+			}
+		}
+	}
+
+	if err := s.refreshTokens.DeleteBySessionID(ctx, session.ID); err != nil {
+		s.logger.Error("failed to delete refresh tokens", "error", err, "session_id", session.ID)
+		// Don't fail - session is already revoked
 	}
 
 	s.logAudit(ctx, string(audit.EventSessionRevoked),

@@ -189,6 +189,47 @@ internal/tenant/
 
 ## Key Patterns
 
+### Execute Callback Pattern (TOCTOU Prevention)
+
+All single-entity mutations use the **Execute callback pattern** for atomic validate-then-mutate operations. This prevents Time-of-Check-Time-of-Use (TOCTOU) vulnerabilities.
+
+```go
+// Service calls store's Execute with validate and mutate callbacks
+client, err := s.clients.Execute(ctx, clientID,
+    func(c *models.Client) error {
+        // Validate under lock - return domain errors
+        if !c.IsConfidential() {
+            return dErrors.New(dErrors.CodeValidation, "cannot rotate secret")
+        }
+        return nil
+    },
+    func(c *models.Client) {
+        // Mutate under lock - changes persisted atomically
+        c.ClientSecretHash = hash
+        c.UpdatedAt = now
+    },
+)
+```
+
+**Key characteristics:**
+- Store's `Execute` holds the lock (mutex for in-memory, `FOR UPDATE` for PostgreSQL) during both validation and mutation
+- Domain errors from validate callback pass through unchanged
+- Pre-generate expensive operations (secrets, hashes) before calling `Execute` to minimize lock duration
+- Audit events are emitted after the atomic operation succeeds
+
+**Store interfaces include `Execute` method:**
+```go
+type TenantStore interface {
+    // ... other methods ...
+    Execute(ctx, tenantID, validate func(*Tenant) error, mutate func(*Tenant)) (*Tenant, error)
+}
+
+type ClientStore interface {
+    // ... other methods ...
+    Execute(ctx, clientID, validate func(*Client) error, mutate func(*Client)) (*Client, error)
+}
+```
+
 ### Request Validation
 
 Commands follow the Normalize/Validate pattern:
