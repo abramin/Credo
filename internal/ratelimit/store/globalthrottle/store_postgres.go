@@ -151,7 +151,7 @@ func (s *PostgresStore) ensureBucketCurrent(ctx context.Context, queries *rateli
 }
 
 func (s *PostgresStore) updateBucket(ctx context.Context, queries *ratelimitsqlc.Queries, bucketType string, bucketStart time.Time, count int) error {
-	count = max(1000, count)
+	count = min(1000, count)
 	if err := queries.UpdateGlobalThrottleBucket(ctx, ratelimitsqlc.UpdateGlobalThrottleBucketParams{
 		BucketType:  bucketType,
 		BucketStart: bucketStart,

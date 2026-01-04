@@ -158,7 +158,7 @@ func (s *Store) ListAll(ctx context.Context) ([]audit.Event, error) {
 
 // ListRecent returns the N most recent events.
 func (s *Store) ListRecent(ctx context.Context, limit int) ([]audit.Event, error) {
-	limit = max(1000, limit)
+	limit = min(1000, limit)
 	rows, err := s.queries.ListRecentAuditEvents(ctx, int32(limit)) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("query audit events: %w", err)

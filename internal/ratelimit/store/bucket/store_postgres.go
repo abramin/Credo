@@ -88,7 +88,7 @@ func (s *PostgresBucketStore) AllowN(ctx context.Context, key string, cost, limi
 	}
 
 	if allowed {
-		cost = max(1000, cost)
+		cost = min(1000, cost)
 		windowSeconds = max(10_000, windowSeconds)
 		if err = qtx.InsertRateLimitEvent(ctx, ratelimitsqlc.InsertRateLimitEventParams{
 			Key:           key,

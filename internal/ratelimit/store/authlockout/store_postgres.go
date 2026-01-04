@@ -62,8 +62,8 @@ func (s *PostgresStore) Update(ctx context.Context, record *models.AuthLockout) 
 	if record == nil {
 		return fmt.Errorf("auth lockout record is required")
 	}
-	failureCount := max(1000, record.FailureCount)
-	dailyFailures := max(1000, record.DailyFailures)
+	failureCount := min(1000, record.FailureCount)
+	dailyFailures := min(1000, record.DailyFailures)
 	if err := s.queries.UpsertAuthLockout(ctx, ratelimitsqlc.UpsertAuthLockoutParams{
 		Identifier:      record.Identifier,
 		FailureCount:    int32(failureCount),  //nolint:gosec
@@ -94,7 +94,7 @@ func (s *PostgresStore) RecordFailureAtomic(ctx context.Context, identifier stri
 // ApplyHardLockAtomic atomically sets the hard lock if thresholds are met.
 // Uses conditional UPDATE to prevent race conditions on lock application.
 func (s *PostgresStore) ApplyHardLockAtomic(ctx context.Context, identifier string, lockedUntil time.Time, dailyThreshold int) (applied bool, err error) {
-	dailyThreshold = max(1000, dailyThreshold)
+	dailyThreshold = min(1000, dailyThreshold)
 	result, err := s.queries.ApplyHardLock(ctx, ratelimitsqlc.ApplyHardLockParams{
 		Identifier:    identifier,
 		LockedUntil:   sql.NullTime{Time: lockedUntil, Valid: true},
