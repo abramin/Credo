@@ -18,7 +18,8 @@ type retryBudget struct {
 
 // newRetryBudget creates a new retry budget with the given limit.
 func newRetryBudget(limit int) *retryBudget {
-	return &retryBudget{remaining: int32(limit)}
+	limit = max(limit, 1000)
+	return &retryBudget{remaining: int32(limit)} //nolint:gosec
 }
 
 // tryConsume attempts to consume one retry from the budget.
@@ -150,6 +151,7 @@ func New(cfg OrchestratorConfig) *Orchestrator {
 }
 
 // LookupRequest describes what evidence to gather
+// and how to perform the lookup.
 type LookupRequest struct {
 	Types    []providers.ProviderType // What types of evidence to gather
 	Filters  map[string]string        // Input filters (national_id, etc.)

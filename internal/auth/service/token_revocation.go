@@ -37,7 +37,8 @@ func (s *Service) RevokeToken(ctx context.Context, token string, tokenTypeHint s
 	resolution, err := s.resolveTokenToSession(ctx, token, tokenTypeHint)
 	if err != nil {
 		s.logAudit(ctx, "token_revocation_noop", "reason", "token_not_found")
-		return nil
+		// Per RFC 7009, revocation of an unknown token is not an error
+		return nil //nolint:nilerr // RFC 7009: revocation of unknown token is not an error
 	}
 
 	return s.revokeAndAudit(ctx, resolution)
@@ -137,12 +138,15 @@ const (
 	revokeSessionOutcomeAlreadyRevoked
 )
 
+// revokeSessionInternal revokes the session and associated tokens.
+// If jti is provided, only that token is revoked; otherwise, the last access token is revoked.
+// Returns whether the session was already revoked.
 func (s *Service) revokeSessionInternal(ctx context.Context, session *models.Session, jti string, reason models.RevocationReason) (revokeSessionOutcome, error) {
 	if err := s.sessions.RevokeSessionIfActive(ctx, session.ID, requestcontext.Now(ctx)); err != nil {
 		if errors.Is(err, sessionStore.ErrSessionRevoked) {
 			return revokeSessionOutcomeAlreadyRevoked, nil
 		}
-		s.logger.Error("failed to revoke session", "error", err, "session_id", session.ID)
+		s.logger.Error("failed to revoke session", "error", err, "session_id", session.ID, "reason", reason)
 		return revokeSessionOutcomeRevoked, fmt.Errorf("failed to revoke session: %w", err)
 	}
 
@@ -152,7 +156,7 @@ func (s *Service) revokeSessionInternal(ctx context.Context, session *models.Ses
 	}
 	if jtiToRevoke != "" {
 		if err := s.trl.RevokeToken(ctx, jtiToRevoke, s.TokenTTL); err != nil {
-			s.logger.Error("failed to add token to revocation list", "error", err, "jti", jtiToRevoke)
+			s.logger.Error("failed to add token to revocation list", "error", err, "jti", jtiToRevoke, "reason", reason)
 			if s.TRLFailureMode == TRLFailureModeFail {
 				return revokeSessionOutcomeRevoked, fmt.Errorf("failed to add token to revocation list: %w", err)
 			}
@@ -161,7 +165,7 @@ func (s *Service) revokeSessionInternal(ctx context.Context, session *models.Ses
 	}
 
 	if err := s.refreshTokens.DeleteBySessionID(ctx, session.ID); err != nil {
-		s.logger.Error("failed to delete refresh tokens", "error", err, "session_id", session.ID)
+		s.logger.Error("failed to delete refresh tokens", "error", err, "session_id", session.ID, "reason", reason)
 		// Don't fail - session is already revoked
 	}
 	return revokeSessionOutcomeRevoked, nil

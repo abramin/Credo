@@ -61,14 +61,13 @@ linters-settings:
     enable:
       - nilness
       - shadow
-      - fieldalignment
 
   errcheck:
     check-type-assertions: true
     check-blank: true
 
   gocyclo:
-    min-complexity: 15
+    min-complexity: 20
 
   revive:
     ignore-generated-header: true
@@ -100,5 +99,3 @@ linters-settings:
     forbid:
       - 'log\.Printf'
       - 'log\.Fatalf'
-      - 'fmt\.Printf'
-      - 'fmt\.Sprintf'

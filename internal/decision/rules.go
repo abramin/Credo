@@ -3,8 +3,6 @@ package decision
 import "time"
 
 // EvaluateDecision applies purpose-specific rules to produce an outcome.
-// This is pure domain logic - no I/O, no side effects.
-// The function receives all data it needs as arguments and returns a decision.
 func EvaluateDecision(purpose Purpose, input DecisionInput) DecisionOutcome {
 	switch purpose {
 	case PurposeAgeVerification:
@@ -55,7 +53,6 @@ func evaluateSanctionsScreening(input DecisionInput) DecisionOutcome {
 }
 
 // BuildResult constructs an EvaluateResult from the evaluation outcome.
-// This is pure domain logic - no I/O, no side effects.
 func BuildResult(purpose Purpose, outcome DecisionOutcome, evidence *GatheredEvidence, derived DerivedIdentity, evalTime time.Time) *EvaluateResult {
 	result := &EvaluateResult{
 		Status:      outcome,
@@ -70,7 +67,7 @@ func BuildResult(purpose Purpose, outcome DecisionOutcome, evidence *GatheredEvi
 	case PurposeAgeVerification:
 		return buildAgeVerificationResult(result, outcome, evidence, derived)
 	case PurposeSanctionsScreening:
-		return buildSanctionsResult(result, outcome, evidence)
+		return buildSanctionsResult(result, outcome)
 	}
 
 	return result
@@ -118,7 +115,7 @@ func reasonForAgeVerification(outcome DecisionOutcome, evidence *GatheredEvidenc
 	return "", nil
 }
 
-func buildSanctionsResult(result *EvaluateResult, outcome DecisionOutcome, evidence *GatheredEvidence) *EvaluateResult {
+func buildSanctionsResult(result *EvaluateResult, outcome DecisionOutcome) *EvaluateResult {
 	switch outcome {
 	case DecisionFail:
 		result.Reason = ReasonSanctioned
