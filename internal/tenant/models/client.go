@@ -84,27 +84,55 @@ func (c *Client) IsActive() bool {
 	return c.Status == ClientStatusActive
 }
 
-// Deactivate transitions the client to inactive status.
-// Updates the timestamp to track when the transition occurred.
-// Returns an error if the transition is not allowed.
-func (c *Client) Deactivate(now time.Time) error {
+// CanDeactivate checks if the client can transition to inactive status.
+// Returns nil if the transition is valid, or an error if not allowed.
+func (c *Client) CanDeactivate() error {
 	if !c.Status.CanTransitionTo(ClientStatusInactive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "client is already inactive")
 	}
-	c.Status = ClientStatusInactive
-	c.UpdatedAt = now
 	return nil
 }
 
-// Reactivate transitions the client to active status.
-// Updates the timestamp to track when the transition occurred.
-// Returns an error if the transition is not allowed.
-func (c *Client) Reactivate(now time.Time) error {
+// ApplyDeactivation transitions the client to inactive status.
+// Must only be called after CanDeactivate returns nil.
+func (c *Client) ApplyDeactivation(now time.Time) {
+	c.Status = ClientStatusInactive
+	c.UpdatedAt = now
+}
+
+// Deactivate validates and applies deactivation in one call.
+// Prefer CanDeactivate + ApplyDeactivation for Execute callback pattern.
+func (c *Client) Deactivate(now time.Time) error {
+	if err := c.CanDeactivate(); err != nil {
+		return err
+	}
+	c.ApplyDeactivation(now)
+	return nil
+}
+
+// CanReactivate checks if the client can transition to active status.
+// Returns nil if the transition is valid, or an error if not allowed.
+func (c *Client) CanReactivate() error {
 	if !c.Status.CanTransitionTo(ClientStatusActive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "client is already active")
 	}
+	return nil
+}
+
+// ApplyReactivation transitions the client to active status.
+// Must only be called after CanReactivate returns nil.
+func (c *Client) ApplyReactivation(now time.Time) {
 	c.Status = ClientStatusActive
 	c.UpdatedAt = now
+}
+
+// Reactivate validates and applies reactivation in one call.
+// Prefer CanReactivate + ApplyReactivation for Execute callback pattern.
+func (c *Client) Reactivate(now time.Time) error {
+	if err := c.CanReactivate(); err != nil {
+		return err
+	}
+	c.ApplyReactivation(now)
 	return nil
 }
 

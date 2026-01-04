@@ -96,36 +96,34 @@ func (s *TenantService) GetTenantByName(ctx context.Context, name string) (*mode
 
 // DeactivateTenant transitions a tenant to inactive status.
 // Returns the updated tenant or an error if tenant is not found or already inactive.
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// The store's Execute method holds the lock (mutex or FOR UPDATE) during both validation and mutation.
 func (s *TenantService) DeactivateTenant(ctx context.Context, tenantID id.TenantID) (*models.Tenant, error) {
 	if err := requireTenantID(tenantID); err != nil {
 		return nil, err
 	}
-	var tenant *models.Tenant
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		t, err := s.tenants.FindByID(txCtx, tenantID)
-		if err != nil {
-			return wrapTenantErr(err)
-		}
 
-		if err := t.Deactivate(requestcontext.Now(txCtx)); err != nil {
-			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-				return dErrors.New(dErrors.CodeConflict, "tenant is already inactive")
+	now := requestcontext.Now(ctx)
+	tenant, err := s.tenants.Execute(ctx, tenantID,
+		func(t *models.Tenant) error {
+			if err := t.CanDeactivate(); err != nil {
+				if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+					return dErrors.New(dErrors.CodeConflict, "tenant is already inactive")
+				}
+				return err
 			}
-			return err
-		}
-
-		if err := s.tenants.Update(txCtx, t); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
-		}
-
-		if err := s.auditEmitter.emitTenantDeactivated(txCtx, models.TenantDeactivated{TenantID: t.ID}); err != nil {
-			return err
-		}
-
-		tenant = t
-		return nil
-	})
+			return nil
+		},
+		func(t *models.Tenant) {
+			t.ApplyDeactivation(now)
+		},
+	)
 	if err != nil {
+		return nil, wrapTenantErr(err)
+	}
+
+	if err := s.auditEmitter.emitTenantDeactivated(ctx, models.TenantDeactivated{TenantID: tenant.ID}); err != nil {
 		return nil, err
 	}
 
@@ -134,36 +132,34 @@ func (s *TenantService) DeactivateTenant(ctx context.Context, tenantID id.Tenant
 
 // ReactivateTenant transitions a tenant to active status.
 // Returns the updated tenant or an error if tenant is not found or already active.
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// The store's Execute method holds the lock (mutex or FOR UPDATE) during both validation and mutation.
 func (s *TenantService) ReactivateTenant(ctx context.Context, tenantID id.TenantID) (*models.Tenant, error) {
 	if err := requireTenantID(tenantID); err != nil {
 		return nil, err
 	}
-	var tenant *models.Tenant
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		t, err := s.tenants.FindByID(txCtx, tenantID)
-		if err != nil {
-			return wrapTenantErr(err)
-		}
 
-		if err := t.Reactivate(requestcontext.Now(txCtx)); err != nil {
-			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-				return dErrors.New(dErrors.CodeConflict, "tenant is already active")
+	now := requestcontext.Now(ctx)
+	tenant, err := s.tenants.Execute(ctx, tenantID,
+		func(t *models.Tenant) error {
+			if err := t.CanReactivate(); err != nil {
+				if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+					return dErrors.New(dErrors.CodeConflict, "tenant is already active")
+				}
+				return err
 			}
-			return err
-		}
-
-		if err := s.tenants.Update(txCtx, t); err != nil {
-			return dErrors.Wrap(err, dErrors.CodeInternal, "failed to update tenant")
-		}
-
-		if err := s.auditEmitter.emitTenantReactivated(txCtx, models.TenantReactivated{TenantID: t.ID}); err != nil {
-			return err
-		}
-
-		tenant = t
-		return nil
-	})
+			return nil
+		},
+		func(t *models.Tenant) {
+			t.ApplyReactivation(now)
+		},
+	)
 	if err != nil {
+		return nil, wrapTenantErr(err)
+	}
+
+	if err := s.auditEmitter.emitTenantReactivated(ctx, models.TenantReactivated{TenantID: tenant.ID}); err != nil {
 		return nil, err
 	}
 

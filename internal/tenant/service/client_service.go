@@ -137,28 +137,69 @@ func (s *ClientService) GetClientForTenant(ctx context.Context, tenantID id.Tena
 
 // UpdateClient updates mutable fields and optionally rotates the secret.
 // Returns the updated client and the rotated secret (empty if not rotated).
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// Secret is pre-generated before acquiring the lock to minimize lock duration.
 func (s *ClientService) UpdateClient(ctx context.Context, clientID id.ClientID, cmd *UpdateClientCommand) (*models.Client, string, error) {
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	var updated *models.Client
-	var secret string
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		client, err := s.clients.FindByID(txCtx, clientID)
-		if err != nil {
-			return wrapClientErr(err, "failed to get client")
-		}
-		updated, secret, err = s.applyClientUpdate(txCtx, client, cmd)
-		return err
-	})
-	if err != nil {
-		return nil, "", err
+
+	// Validate command upfront before acquiring lock
+	if err := cmd.Validate(); err != nil {
+		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid update request")
 	}
-	return updated, secret, nil
+
+	// Pre-generate secret if rotation requested (minimize lock duration)
+	var secret, hash string
+	if cmd.RotateSecret {
+		var err error
+		secret, hash, err = generateSecret(false)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
+	now := requestcontext.Now(ctx)
+	client, err := s.clients.Execute(ctx, clientID,
+		func(c *models.Client) error {
+			// Validate rotation only allowed for confidential clients
+			if cmd.RotateSecret && !c.IsConfidential() {
+				return dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
+			}
+			// Validate grant changes AFTER considering rotation
+			// (rotation doesn't change confidentiality - only confidential clients can rotate)
+			return validateGrantChanges(c, cmd)
+		},
+		func(c *models.Client) {
+			if cmd.RotateSecret {
+				c.ClientSecretHash = hash
+			}
+			applyFieldUpdates(c, cmd)
+			c.UpdatedAt = now
+		},
+	)
+	if err != nil {
+		return nil, "", wrapClientErr(err, "failed to update client")
+	}
+
+	if cmd.RotateSecret {
+		if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
+			TenantID: client.TenantID,
+			ClientID: client.ID,
+		}); err != nil {
+			return nil, "", err
+		}
+	}
+
+	return client, secret, nil
 }
 
 // UpdateClientForTenant enforces tenant scoping when updating a client.
 // Returns the updated client and the rotated secret (empty if not rotated).
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// Tenant ownership is verified in the validate callback.
 func (s *ClientService) UpdateClientForTenant(ctx context.Context, tenantID id.TenantID, clientID id.ClientID, cmd *UpdateClientCommand) (*models.Client, string, error) {
 	if err := requireTenantID(tenantID); err != nil {
 		return nil, "", err
@@ -166,128 +207,186 @@ func (s *ClientService) UpdateClientForTenant(ctx context.Context, tenantID id.T
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	var updated *models.Client
-	var secret string
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		client, err := s.clients.FindByTenantAndID(txCtx, tenantID, clientID)
-		if err != nil {
-			return wrapClientErr(err, "failed to get client")
-		}
-		updated, secret, err = s.applyClientUpdate(txCtx, client, cmd)
-		return err
-	})
-	if err != nil {
-		return nil, "", err
+
+	// Validate command upfront before acquiring lock
+	if err := cmd.Validate(); err != nil {
+		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid update request")
 	}
-	return updated, secret, nil
+
+	// Pre-generate secret if rotation requested (minimize lock duration)
+	var secret, hash string
+	if cmd.RotateSecret {
+		var err error
+		secret, hash, err = generateSecret(false)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
+	now := requestcontext.Now(ctx)
+	client, err := s.clients.Execute(ctx, clientID,
+		func(c *models.Client) error {
+			// Verify tenant ownership
+			if c.TenantID != tenantID {
+				return sentinel.ErrNotFound
+			}
+			// Validate rotation only allowed for confidential clients
+			if cmd.RotateSecret && !c.IsConfidential() {
+				return dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
+			}
+			// Validate grant changes
+			return validateGrantChanges(c, cmd)
+		},
+		func(c *models.Client) {
+			if cmd.RotateSecret {
+				c.ClientSecretHash = hash
+			}
+			applyFieldUpdates(c, cmd)
+			c.UpdatedAt = now
+		},
+	)
+	if err != nil {
+		return nil, "", wrapClientErr(err, "failed to update client")
+	}
+
+	if cmd.RotateSecret {
+		if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
+			TenantID: client.TenantID,
+			ClientID: client.ID,
+		}); err != nil {
+			return nil, "", err
+		}
+	}
+
+	return client, secret, nil
 }
 
 // DeactivateClient transitions a client to inactive status.
 // Returns the updated client or an error if client is not found or already inactive.
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// The store's Execute method holds the lock (mutex or FOR UPDATE) during both validation and mutation.
 func (s *ClientService) DeactivateClient(ctx context.Context, clientID id.ClientID) (*models.Client, error) {
 	if err := requireClientID(clientID); err != nil {
 		return nil, err
 	}
-	var updated *models.Client
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		client, err := s.clients.FindByID(txCtx, clientID)
-		if err != nil {
-			return wrapClientErr(err, "failed to get client")
-		}
 
-		if err := client.Deactivate(requestcontext.Now(txCtx)); err != nil {
-			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-				return dErrors.New(dErrors.CodeConflict, "client is already inactive")
+	now := requestcontext.Now(ctx)
+	client, err := s.clients.Execute(ctx, clientID,
+		func(c *models.Client) error {
+			if err := c.CanDeactivate(); err != nil {
+				if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+					return dErrors.New(dErrors.CodeConflict, "client is already inactive")
+				}
+				return err
 			}
-			return err
-		}
-
-		if err := s.clients.Update(txCtx, client); err != nil {
-			return wrapClientErr(err, "failed to update client")
-		}
-
-		if err := s.auditEmitter.emitClientDeactivated(txCtx, models.ClientDeactivated{
-			TenantID: client.TenantID,
-			ClientID: client.ID,
-		}); err != nil {
-			return err
-		}
-
-		updated = client
-		return nil
-	})
+			return nil
+		},
+		func(c *models.Client) {
+			c.ApplyDeactivation(now)
+		},
+	)
 	if err != nil {
+		return nil, wrapClientErr(err, "failed to deactivate client")
+	}
+
+	if err := s.auditEmitter.emitClientDeactivated(ctx, models.ClientDeactivated{
+		TenantID: client.TenantID,
+		ClientID: client.ID,
+	}); err != nil {
 		return nil, err
 	}
 
-	return updated, nil
+	return client, nil
 }
 
 // ReactivateClient transitions a client to active status.
 // Returns the updated client or an error if client is not found or already active.
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// The store's Execute method holds the lock (mutex or FOR UPDATE) during both validation and mutation.
 func (s *ClientService) ReactivateClient(ctx context.Context, clientID id.ClientID) (*models.Client, error) {
 	if err := requireClientID(clientID); err != nil {
 		return nil, err
 	}
-	var updated *models.Client
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		client, err := s.clients.FindByID(txCtx, clientID)
-		if err != nil {
-			return wrapClientErr(err, "failed to get client")
-		}
 
-		if err := client.Reactivate(requestcontext.Now(txCtx)); err != nil {
-			if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
-				return dErrors.New(dErrors.CodeConflict, "client is already active")
+	now := requestcontext.Now(ctx)
+	client, err := s.clients.Execute(ctx, clientID,
+		func(c *models.Client) error {
+			if err := c.CanReactivate(); err != nil {
+				if dErrors.HasCode(err, dErrors.CodeInvariantViolation) {
+					return dErrors.New(dErrors.CodeConflict, "client is already active")
+				}
+				return err
 			}
-			return err
-		}
-
-		if err := s.clients.Update(txCtx, client); err != nil {
-			return wrapClientErr(err, "failed to update client")
-		}
-
-		if err := s.auditEmitter.emitClientReactivated(txCtx, models.ClientReactivated{
-			TenantID: client.TenantID,
-			ClientID: client.ID,
-		}); err != nil {
-			return err
-		}
-
-		updated = client
-		return nil
-	})
+			return nil
+		},
+		func(c *models.Client) {
+			c.ApplyReactivation(now)
+		},
+	)
 	if err != nil {
+		return nil, wrapClientErr(err, "failed to reactivate client")
+	}
+
+	if err := s.auditEmitter.emitClientReactivated(ctx, models.ClientReactivated{
+		TenantID: client.TenantID,
+		ClientID: client.ID,
+	}); err != nil {
 		return nil, err
 	}
 
-	return updated, nil
+	return client, nil
 }
 
 // RotateClientSecret generates a new secret for a confidential client.
 // Returns the updated client and the new cleartext secret.
 // Returns an error if the client is public (has no secret to rotate).
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// Secret is pre-generated before acquiring the lock to minimize lock duration.
 func (s *ClientService) RotateClientSecret(ctx context.Context, clientID id.ClientID) (*models.Client, string, error) {
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	var updated *models.Client
-	var secret string
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		client, err := s.clients.FindByID(txCtx, clientID)
-		if err != nil {
-			return wrapClientErr(err, "failed to get client")
-		}
-		updated, secret, err = s.rotateSecret(txCtx, client)
-		return err
-	})
+
+	// Pre-generate secret before acquiring lock to minimize lock duration
+	secret, hash, err := generateSecret(false)
 	if err != nil {
 		return nil, "", err
 	}
-	return updated, secret, nil
+
+	now := requestcontext.Now(ctx)
+	client, err := s.clients.Execute(ctx, clientID,
+		func(c *models.Client) error {
+			if !c.IsConfidential() {
+				return dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
+			}
+			return nil
+		},
+		func(c *models.Client) {
+			c.ClientSecretHash = hash
+			c.UpdatedAt = now
+		},
+	)
+	if err != nil {
+		return nil, "", wrapClientErr(err, "failed to rotate client secret")
+	}
+
+	if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
+		TenantID: client.TenantID,
+		ClientID: client.ID,
+	}); err != nil {
+		return nil, "", err
+	}
+
+	return client, secret, nil
 }
 
 // RotateClientSecretForTenant enforces tenant scoping when rotating a client secret.
+//
+// Uses the Execute callback pattern for atomic validate-then-mutate.
+// Tenant ownership is verified in the validate callback.
 func (s *ClientService) RotateClientSecretForTenant(ctx context.Context, tenantID id.TenantID, clientID id.ClientID) (*models.Client, string, error) {
 	if err := requireTenantID(tenantID); err != nil {
 		return nil, "", err
@@ -295,20 +394,42 @@ func (s *ClientService) RotateClientSecretForTenant(ctx context.Context, tenantI
 	if err := requireClientID(clientID); err != nil {
 		return nil, "", err
 	}
-	var updated *models.Client
-	var secret string
-	err := s.tx.RunInTx(ctx, func(txCtx context.Context) error {
-		client, err := s.clients.FindByTenantAndID(txCtx, tenantID, clientID)
-		if err != nil {
-			return wrapClientErr(err, "failed to get client")
-		}
-		updated, secret, err = s.rotateSecret(txCtx, client)
-		return err
-	})
+
+	// Pre-generate secret before acquiring lock to minimize lock duration
+	secret, hash, err := generateSecret(false)
 	if err != nil {
 		return nil, "", err
 	}
-	return updated, secret, nil
+
+	now := requestcontext.Now(ctx)
+	client, err := s.clients.Execute(ctx, clientID,
+		func(c *models.Client) error {
+			// Verify tenant ownership
+			if c.TenantID != tenantID {
+				return sentinel.ErrNotFound
+			}
+			if !c.IsConfidential() {
+				return dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
+			}
+			return nil
+		},
+		func(c *models.Client) {
+			c.ClientSecretHash = hash
+			c.UpdatedAt = now
+		},
+	)
+	if err != nil {
+		return nil, "", wrapClientErr(err, "failed to rotate client secret")
+	}
+
+	if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
+		TenantID: client.TenantID,
+		ClientID: client.ID,
+	}); err != nil {
+		return nil, "", err
+	}
+
+	return client, secret, nil
 }
 
 // VerifyClientSecret verifies a client's credentials for authentication.
@@ -404,89 +525,6 @@ func (s *ClientService) ResolveClient(ctx context.Context, clientID string) (*mo
 		return nil, nil, invalidClientCredentials()
 	}
 	return client, tenant, nil
-}
-
-// rotateSecret contains the shared secret rotation logic.
-func (s *ClientService) rotateSecret(ctx context.Context, client *models.Client) (*models.Client, string, error) {
-	if !client.IsConfidential() {
-		return nil, "", dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
-	}
-
-	secret, hash, err := generateSecret(false)
-	if err != nil {
-		return nil, "", err
-	}
-
-	client.ClientSecretHash = hash
-	client.UpdatedAt = requestcontext.Now(ctx)
-
-	if err := s.clients.Update(ctx, client); err != nil {
-		return nil, "", wrapClientErr(err, "failed to update client")
-	}
-
-	if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
-		TenantID: client.TenantID,
-		ClientID: client.ID,
-	}); err != nil {
-		return nil, "", err
-	}
-
-	return client, secret, nil
-}
-
-// applyClientUpdate contains the shared update logic for client modifications.
-func (s *ClientService) applyClientUpdate(ctx context.Context, client *models.Client, cmd *UpdateClientCommand) (*models.Client, string, error) {
-	if err := cmd.Validate(); err != nil {
-		return nil, "", dErrors.Wrap(err, dErrors.CodeValidation, "invalid update request")
-	}
-
-	// Apply secret rotation BEFORE grant validation so that confidentiality
-	// checks reflect the post-rotation state. This prevents a public client
-	// from gaining client_credentials by combining RotateSecret with grant update.
-	rotatedSecret, err := s.maybeRotateSecret(client, cmd.RotateSecret)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if err := validateGrantChanges(client, cmd); err != nil {
-		return nil, "", err
-	}
-
-	applyFieldUpdates(client, cmd)
-
-	client.UpdatedAt = requestcontext.Now(ctx)
-	if err := s.clients.Update(ctx, client); err != nil {
-		return nil, "", wrapClientErr(err, "failed to update client")
-	}
-
-	if cmd.RotateSecret {
-		if err := s.auditEmitter.emitClientSecretRotated(ctx, models.ClientSecretRotated{
-			TenantID: client.TenantID,
-			ClientID: client.ID,
-		}); err != nil {
-			return nil, "", err
-		}
-	}
-
-	return client, rotatedSecret, nil
-}
-
-// maybeRotateSecret generates and applies a new secret if requested.
-// Returns the cleartext secret (empty if not rotated).
-// Returns an error if rotation is requested on a public client.
-func (s *ClientService) maybeRotateSecret(client *models.Client, rotate bool) (string, error) {
-	if !rotate {
-		return "", nil
-	}
-	if !client.IsConfidential() {
-		return "", dErrors.New(dErrors.CodeValidation, "cannot rotate secret for public client")
-	}
-	secret, hash, err := generateSecret(false)
-	if err != nil {
-		return "", err
-	}
-	client.ClientSecretHash = hash
-	return secret, nil
 }
 
 // validateGrantChanges ensures requested grants are compatible with client confidentiality.

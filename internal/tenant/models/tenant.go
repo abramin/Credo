@@ -45,27 +45,59 @@ func (t *Tenant) IsActive() bool {
 	return t.Status == TenantStatusActive
 }
 
-// Deactivate transitions the tenant to inactive status.
-// Updates the timestamp to track when the transition occurred.
+// CanDeactivate checks if the tenant can transition to inactive status.
 // Returns an error if the transition is not allowed.
-func (t *Tenant) Deactivate(now time.Time) error {
+// Use with ApplyDeactivation in Execute callbacks for proper separation of concerns.
+func (t *Tenant) CanDeactivate() error {
 	if !t.Status.CanTransitionTo(TenantStatusInactive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "tenant is already inactive")
 	}
-	t.Status = TenantStatusInactive
-	t.UpdatedAt = now
 	return nil
 }
 
-// Reactivate transitions the tenant to active status.
+// ApplyDeactivation transitions the tenant to inactive status.
 // Updates the timestamp to track when the transition occurred.
+// Call CanDeactivate first to validate the transition.
+func (t *Tenant) ApplyDeactivation(now time.Time) {
+	t.Status = TenantStatusInactive
+	t.UpdatedAt = now
+}
+
+// Deactivate validates and applies deactivation in one call.
+// Prefer CanDeactivate + ApplyDeactivation for Execute callback pattern.
+func (t *Tenant) Deactivate(now time.Time) error {
+	if err := t.CanDeactivate(); err != nil {
+		return err
+	}
+	t.ApplyDeactivation(now)
+	return nil
+}
+
+// CanReactivate checks if the tenant can transition to active status.
 // Returns an error if the transition is not allowed.
-func (t *Tenant) Reactivate(now time.Time) error {
+// Use with ApplyReactivation in Execute callbacks for proper separation of concerns.
+func (t *Tenant) CanReactivate() error {
 	if !t.Status.CanTransitionTo(TenantStatusActive) {
 		return dErrors.New(dErrors.CodeInvariantViolation, "tenant is already active")
 	}
+	return nil
+}
+
+// ApplyReactivation transitions the tenant to active status.
+// Updates the timestamp to track when the transition occurred.
+// Call CanReactivate first to validate the transition.
+func (t *Tenant) ApplyReactivation(now time.Time) {
 	t.Status = TenantStatusActive
 	t.UpdatedAt = now
+}
+
+// Reactivate validates and applies reactivation in one call.
+// Prefer CanReactivate + ApplyReactivation for Execute callback pattern.
+func (t *Tenant) Reactivate(now time.Time) error {
+	if err := t.CanReactivate(); err != nil {
+		return err
+	}
+	t.ApplyReactivation(now)
 	return nil
 }
 
