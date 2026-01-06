@@ -6,10 +6,11 @@ import (
 
 func ToMiddlewareClaims(claims *AccessTokenClaims) *authmw.JWTClaims {
 	return &authmw.JWTClaims{
-		UserID:    claims.UserID,
-		SessionID: claims.SessionID,
-		ClientID:  claims.ClientID,
-		JTI:       claims.ID, // JWT ID for revocation tracking
+		UserID:     claims.UserID,
+		SessionID:  claims.SessionID,
+		ClientID:   claims.ClientID,
+		JTI:        claims.ID,                    // JWT ID for revocation tracking
+		APIVersion: claims.APIVersion().String(), // API version from token audience
 	}
 }
 

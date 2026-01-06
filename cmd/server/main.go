@@ -80,12 +80,14 @@ import (
 	auditpublishers "credo/pkg/platform/audit/publishers"
 	auditmemory "credo/pkg/platform/audit/store/memory"
 	auditpostgres "credo/pkg/platform/audit/store/postgres"
+	id "credo/pkg/domain"
 	adminmw "credo/pkg/platform/middleware/admin"
 	auth "credo/pkg/platform/middleware/auth"
 	devicemw "credo/pkg/platform/middleware/device"
 	metadata "credo/pkg/platform/middleware/metadata"
 	request "credo/pkg/platform/middleware/request"
 	requesttime "credo/pkg/platform/middleware/requesttime"
+	versionmw "credo/pkg/platform/middleware/version"
 	"credo/pkg/platform/validation"
 
 	"github.com/go-chi/chi/v5"
@@ -945,6 +947,7 @@ func setupRouter(infra *infraBundle) *chi.Mux {
 
 // registerRoutes wires HTTP handlers to the shared router
 func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consentMod *consentModule, tenantMod *tenantModule, registryMod *registryModule, vcMod *vcModule, decisionMod *decisionModule, rateLimitMiddleware *rateLimitMW.Middleware, clientRateLimitMiddleware *rateLimitMW.ClientMiddleware) {
+	// Demo endpoint (unversioned - not part of public API)
 	if infra.Cfg.DemoMode {
 		r.Get("/demo/info", func(w http.ResponseWriter, _ *http.Request) {
 			resp := map[string]any{
@@ -958,54 +961,62 @@ func registerRoutes(r *chi.Mux, infra *infraBundle, authMod *authModule, consent
 		})
 	}
 
-	// Auth public endpoints - ClassAuth (10 req/min)
-	r.Group(func(r chi.Router) {
-		r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassAuth))
-		if clientRateLimitMiddleware != nil {
-			r.Use(clientRateLimitMiddleware.RateLimitClient())
-		}
-		r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
-		r.Post("/auth/token", authMod.Handler.HandleToken)
-		r.Post("/auth/revoke", authMod.Handler.HandleRevoke)
-	})
+	// V1 API routes
+	r.Route("/v1", func(v1 chi.Router) {
+		// Version extraction middleware sets API version in context
+		v1.Use(versionmw.ExtractVersion(id.APIVersionV1))
 
-	// Protected read endpoints - ClassRead (100 req/min)
-	r.Group(func(r chi.Router) {
-		r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassRead))
-		r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
-		r.Get("/auth/userinfo", authMod.Handler.HandleUserInfo)
-		r.Get("/auth/sessions", authMod.Handler.HandleListSessions)
-		r.Get("/auth/consent", consentMod.Handler.HandleGetConsents)
-	})
-
-	// Protected sensitive endpoints - ClassSensitive (30 req/min)
-	r.Group(func(r chi.Router) {
-		r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassSensitive))
-		r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
-		r.Delete("/auth/sessions/{session_id}", authMod.Handler.HandleRevokeSession)
-		r.Post("/auth/logout-all", authMod.Handler.HandleLogoutAll)
-		r.Post("/auth/consent", consentMod.Handler.HandleGrantConsent)
-		r.Post("/auth/consent/revoke", consentMod.Handler.HandleRevokeConsent)
-		r.Post("/auth/consent/revoke-all", consentMod.Handler.HandleRevokeAllConsents)
-		r.Delete("/auth/consent", consentMod.Handler.HandleDeleteAllConsents)
-		// Registry endpoints
-		registryMod.Handler.Register(r)
-		// Verifiable credential endpoints
-		vcMod.Handler.Register(r)
-		// Decision endpoints
-		decisionMod.Handler.Register(r)
-	})
-
-	// Admin endpoints - ClassWrite (50 req/min)
-	if infra.Cfg.Security.AdminAPIToken != "" {
-		r.Group(func(r chi.Router) {
-			r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassWrite))
-			r.Use(adminmw.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
-			authMod.Handler.RegisterAdmin(r)
-			r.Post("/admin/consent/users/{user_id}/revoke-all", consentMod.Handler.HandleAdminRevokeAllConsents)
-			tenantMod.Handler.Register(r)
+		// Auth public endpoints - ClassAuth (10 req/min)
+		v1.Group(func(r chi.Router) {
+			r.Use(rateLimitMiddleware.RateLimit(rateLimitModels.ClassAuth))
+			if clientRateLimitMiddleware != nil {
+				r.Use(clientRateLimitMiddleware.RateLimitClient())
+			}
+			r.Post("/auth/authorize", authMod.Handler.HandleAuthorize)
+			r.Post("/auth/token", authMod.Handler.HandleToken)
+			r.Post("/auth/revoke", authMod.Handler.HandleRevoke)
 		})
-	}
+
+		// Protected read endpoints - ClassRead (100 req/min)
+		v1.Group(func(r chi.Router) {
+			r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassRead))
+			r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
+			r.Use(versionmw.ValidateTokenVersion(infra.Log))
+			r.Get("/auth/userinfo", authMod.Handler.HandleUserInfo)
+			r.Get("/auth/sessions", authMod.Handler.HandleListSessions)
+			r.Get("/auth/consent", consentMod.Handler.HandleGetConsents)
+		})
+
+		// Protected sensitive endpoints - ClassSensitive (30 req/min)
+		v1.Group(func(r chi.Router) {
+			r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassSensitive))
+			r.Use(auth.RequireAuth(infra.JWTValidator, authMod.Service, infra.Log))
+			r.Use(versionmw.ValidateTokenVersion(infra.Log))
+			r.Delete("/auth/sessions/{session_id}", authMod.Handler.HandleRevokeSession)
+			r.Post("/auth/logout-all", authMod.Handler.HandleLogoutAll)
+			r.Post("/auth/consent", consentMod.Handler.HandleGrantConsent)
+			r.Post("/auth/consent/revoke", consentMod.Handler.HandleRevokeConsent)
+			r.Post("/auth/consent/revoke-all", consentMod.Handler.HandleRevokeAllConsents)
+			r.Delete("/auth/consent", consentMod.Handler.HandleDeleteAllConsents)
+			// Registry endpoints
+			registryMod.Handler.Register(r)
+			// Verifiable credential endpoints
+			vcMod.Handler.Register(r)
+			// Decision endpoints
+			decisionMod.Handler.Register(r)
+		})
+
+		// Admin endpoints - ClassWrite (50 req/min)
+		if infra.Cfg.Security.AdminAPIToken != "" {
+			v1.Group(func(r chi.Router) {
+				r.Use(rateLimitMiddleware.RateLimitAuthenticated(rateLimitModels.ClassWrite))
+				r.Use(adminmw.RequireAdminToken(infra.Cfg.Security.AdminAPIToken, infra.Log))
+				authMod.Handler.RegisterAdmin(r)
+				r.Post("/admin/consent/users/{user_id}/revoke-all", consentMod.Handler.HandleAdminRevokeAllConsents)
+				tenantMod.Handler.Register(r)
+			})
+		}
+	})
 }
 
 // setupAdminRouter creates a router for the admin server

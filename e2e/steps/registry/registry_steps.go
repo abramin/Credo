@@ -27,12 +27,12 @@ func RegisterSteps(ctx *godog.ScenarioContext, tc TestContext) {
 	// Citizen lookup steps
 	ctx.Step(`^I lookup citizen record for national_id "([^"]*)"$`, steps.lookupCitizen)
 	ctx.Step(`^I lookup citizen record for national_id "([^"]*)" without authentication$`, steps.lookupCitizenWithoutAuth)
-	ctx.Step(`^I POST to "/registry/citizen" with empty national_id$`, steps.postCitizenWithEmptyID)
+	ctx.Step(`^I POST to "/v1/registry/citizen" with empty national_id$`, steps.postCitizenWithEmptyID)
 
 	// Sanctions check steps
 	ctx.Step(`^I check sanctions for national_id "([^"]*)"$`, steps.checkSanctions)
 	ctx.Step(`^I check sanctions for national_id "([^"]*)" without authentication$`, steps.checkSanctionsWithoutAuth)
-	ctx.Step(`^I POST to "/registry/sanctions" with empty national_id$`, steps.postSanctionsWithEmptyID)
+	ctx.Step(`^I POST to "/v1/registry/sanctions" with empty national_id$`, steps.postSanctionsWithEmptyID)
 
 	// Response caching and timing steps
 	ctx.Step(`^I note the "([^"]*)" timestamp$`, steps.noteTimestamp)
@@ -70,7 +70,7 @@ func (s *registrySteps) lookupCitizen(ctx context.Context, nationalID string) er
 	body := map[string]interface{}{
 		"national_id": nationalID,
 	}
-	return s.tc.POSTWithHeaders("/registry/citizen", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/registry/citizen", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -79,14 +79,14 @@ func (s *registrySteps) lookupCitizenWithoutAuth(ctx context.Context, nationalID
 	body := map[string]interface{}{
 		"national_id": nationalID,
 	}
-	return s.tc.POST("/registry/citizen", body)
+	return s.tc.POST("/v1/registry/citizen", body)
 }
 
 func (s *registrySteps) postCitizenWithEmptyID(ctx context.Context) error {
 	body := map[string]interface{}{
 		"national_id": "",
 	}
-	return s.tc.POSTWithHeaders("/registry/citizen", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/registry/citizen", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -95,7 +95,7 @@ func (s *registrySteps) checkSanctions(ctx context.Context, nationalID string) e
 	body := map[string]interface{}{
 		"national_id": nationalID,
 	}
-	return s.tc.POSTWithHeaders("/registry/sanctions", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/registry/sanctions", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -104,14 +104,14 @@ func (s *registrySteps) checkSanctionsWithoutAuth(ctx context.Context, nationalI
 	body := map[string]interface{}{
 		"national_id": nationalID,
 	}
-	return s.tc.POST("/registry/sanctions", body)
+	return s.tc.POST("/v1/registry/sanctions", body)
 }
 
 func (s *registrySteps) postSanctionsWithEmptyID(ctx context.Context) error {
 	body := map[string]interface{}{
 		"national_id": "",
 	}
-	return s.tc.POSTWithHeaders("/registry/sanctions", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/registry/sanctions", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }

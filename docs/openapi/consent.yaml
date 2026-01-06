@@ -16,7 +16,7 @@ servers:
   - url: http://localhost:8080
     description: Local development server
 paths:
-  /auth/consent:
+  /v1/auth/consent:
     post:
       summary: Grant consent for purposes
       description: |
@@ -160,7 +160,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
-  /auth/consent/revoke:
+  /v1/auth/consent/revoke:
     post:
       summary: Revoke consent for purposes
       description: |
@@ -206,7 +206,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
-  /auth/consent/revoke-all:
+  /v1/auth/consent/revoke-all:
     post:
       summary: Revoke all consents
       description: |
@@ -238,7 +238,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/consent/users/{user_id}/revoke-all:
+  /v1/admin/consent/users/{user_id}/revoke-all:
     post:
       summary: Revoke all consents for a user (admin)
       security:

@@ -123,7 +123,7 @@ func (s *adminSteps) createTenant(ctx context.Context, name string) error {
 	body := map[string]interface{}{
 		"name": finalName,
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -145,7 +145,7 @@ func (s *adminSteps) createTenantWithExactName(ctx context.Context, baseName str
 	body := map[string]interface{}{
 		"name": name,
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -160,7 +160,7 @@ func (s *adminSteps) createTenantWithToken(ctx context.Context, name, token stri
 	body := map[string]interface{}{
 		"name": finalName,
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants", body, map[string]string{
 		"X-Admin-Token": token,
 	})
 }
@@ -183,7 +183,7 @@ func (s *adminSteps) getTenantDetails(ctx context.Context) error {
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID not set")
 	}
-	return s.tc.GET("/admin/tenants/"+tenantID, map[string]string{
+	return s.tc.GET("/v1/admin/tenants/"+tenantID, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -207,7 +207,7 @@ func (s *adminSteps) createClientUnderSpecificTenant(ctx context.Context, client
 		"allowed_scopes": []string{"openid", "profile", "email"},
 		"public_client":  false,
 	}
-	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -225,7 +225,7 @@ func (s *adminSteps) createClientWithoutAdminToken(ctx context.Context, clientNa
 		"allowed_scopes": []string{"openid", "profile", "email"},
 		"public_client":  false,
 	}
-	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients", body, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
@@ -269,7 +269,7 @@ func (s *adminSteps) getClientDetails(ctx context.Context) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID not set")
 	}
-	return s.tc.GET("/admin/clients/"+clientID, map[string]string{
+	return s.tc.GET("/v1/admin/clients/"+clientID, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -282,7 +282,7 @@ func (s *adminSteps) updateClientName(ctx context.Context, newName string) error
 	body := map[string]interface{}{
 		"name": newName,
 	}
-	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+	return s.tc.PUTWithHeaders("/v1/admin/clients/"+clientID, body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -295,7 +295,7 @@ func (s *adminSteps) rotateClientSecret(ctx context.Context) error {
 	body := map[string]interface{}{
 		"rotate_secret": true,
 	}
-	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+	return s.tc.PUTWithHeaders("/v1/admin/clients/"+clientID, body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -329,7 +329,7 @@ func (s *adminSteps) deactivateTenant(ctx context.Context) error {
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants/"+tenantID+"/deactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants/"+tenantID+"/deactivate", nil, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -339,7 +339,7 @@ func (s *adminSteps) reactivateTenant(ctx context.Context) error {
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants/"+tenantID+"/reactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants/"+tenantID+"/reactivate", nil, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -351,7 +351,7 @@ func (s *adminSteps) deactivateClient(ctx context.Context) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/clients/"+clientID+"/deactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients/"+clientID+"/deactivate", nil, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -361,7 +361,7 @@ func (s *adminSteps) reactivateClient(ctx context.Context) error {
 	if clientID == "" {
 		return fmt.Errorf("client ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/clients/"+clientID+"/reactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients/"+clientID+"/reactivate", nil, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -392,7 +392,7 @@ func (s *adminSteps) initiateAuthorizationWithClient(ctx context.Context) error 
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "test-state-lifecycle",
 	}
-	return s.tc.POST("/auth/authorize", body)
+	return s.tc.POST("/v1/auth/authorize", body)
 }
 
 // Security test steps
@@ -402,13 +402,13 @@ func (s *adminSteps) deactivateTenantWithoutAdminToken(ctx context.Context) erro
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants/"+tenantID+"/deactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants/"+tenantID+"/deactivate", nil, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
 
 func (s *adminSteps) deactivateTenantByID(ctx context.Context, tenantID string) error {
-	return s.tc.POSTWithHeaders("/admin/tenants/"+tenantID+"/deactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants/"+tenantID+"/deactivate", nil, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -418,13 +418,13 @@ func (s *adminSteps) deactivateClientWithoutAdminToken(ctx context.Context) erro
 	if clientID == "" {
 		return fmt.Errorf("client ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/clients/"+clientID+"/deactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients/"+clientID+"/deactivate", nil, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
 
 func (s *adminSteps) deactivateClientByID(ctx context.Context, clientID string) error {
-	return s.tc.POSTWithHeaders("/admin/clients/"+clientID+"/deactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients/"+clientID+"/deactivate", nil, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -444,7 +444,7 @@ func (s *adminSteps) createPublicClientUnderTenant(ctx context.Context, clientNa
 		"allowed_scopes": []string{"openid", "profile", "email"},
 		"public_client":  true,
 	}
-	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -462,7 +462,7 @@ func (s *adminSteps) createPublicClientWithClientCredentialsGrant(ctx context.Co
 		"allowed_scopes": []string{"openid", "profile", "email"},
 		"public_client":  true,
 	}
-	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -480,7 +480,7 @@ func (s *adminSteps) createClientWithRedirectURI(ctx context.Context, redirectUR
 		"allowed_scopes": []string{"openid", "profile", "email"},
 		"public_client":  false,
 	}
-	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -492,7 +492,7 @@ func (s *adminSteps) reactivateTenantWithoutAdminToken(ctx context.Context) erro
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants/"+tenantID+"/reactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants/"+tenantID+"/reactivate", nil, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
@@ -502,7 +502,7 @@ func (s *adminSteps) reactivateClientWithoutAdminToken(ctx context.Context) erro
 	if clientID == "" {
 		return fmt.Errorf("client ID not set")
 	}
-	return s.tc.POSTWithHeaders("/admin/clients/"+clientID+"/reactivate", nil, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients/"+clientID+"/reactivate", nil, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
@@ -512,7 +512,7 @@ func (s *adminSteps) getTenantDetailsWithoutAdminToken(ctx context.Context) erro
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID not set")
 	}
-	return s.tc.GET("/admin/tenants/"+tenantID, map[string]string{
+	return s.tc.GET("/v1/admin/tenants/"+tenantID, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
@@ -522,7 +522,7 @@ func (s *adminSteps) getClientDetailsWithoutAdminToken(ctx context.Context) erro
 	if clientID == "" {
 		return fmt.Errorf("client ID not set")
 	}
-	return s.tc.GET("/admin/clients/"+clientID, map[string]string{
+	return s.tc.GET("/v1/admin/clients/"+clientID, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
@@ -535,7 +535,7 @@ func (s *adminSteps) updateClientNameWithoutAdminToken(ctx context.Context, newN
 	body := map[string]interface{}{
 		"name": newName,
 	}
-	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+	return s.tc.PUTWithHeaders("/v1/admin/clients/"+clientID, body, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
@@ -548,7 +548,7 @@ func (s *adminSteps) rotateClientSecretWithoutAdminToken(ctx context.Context) er
 	body := map[string]interface{}{
 		"rotate_secret": true,
 	}
-	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+	return s.tc.PUTWithHeaders("/v1/admin/clients/"+clientID, body, map[string]string{
 		"X-Admin-Token": "", // Empty token
 	})
 }
@@ -563,7 +563,7 @@ func (s *adminSteps) updateClientWithRedirectURI(ctx context.Context, redirectUR
 	body := map[string]interface{}{
 		"redirect_uris": []string{redirectURI},
 	}
-	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+	return s.tc.PUTWithHeaders("/v1/admin/clients/"+clientID, body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -576,7 +576,7 @@ func (s *adminSteps) updateClientWithClientCredentialsGrant(ctx context.Context)
 	body := map[string]interface{}{
 		"allowed_grants": []string{"authorization_code", "client_credentials"},
 	}
-	return s.tc.PUTWithHeaders("/admin/clients/"+clientID, body, map[string]string{
+	return s.tc.PUTWithHeaders("/v1/admin/clients/"+clientID, body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -620,7 +620,7 @@ func (s *adminSteps) createTenantWithExactLength(ctx context.Context, length int
 	body := map[string]interface{}{
 		"name": name,
 	}
-	return s.tc.POSTWithHeaders("/admin/tenants", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/tenants", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -641,7 +641,7 @@ func (s *adminSteps) createClientWithExactLength(ctx context.Context, length int
 		"allowed_scopes": []string{"openid", "profile", "email"},
 		"public_client":  false,
 	}
-	return s.tc.POSTWithHeaders("/admin/clients", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/admin/clients", body, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }

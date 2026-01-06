@@ -40,6 +40,8 @@ type (
 	userAgentKey         struct{}
 	requestIDKey         struct{}
 	requestTimeKey       struct{}
+	apiVersionKey        struct{}
+	tokenAPIVersionKey   struct{}
 )
 
 // Exported context keys for direct use in tests that need context.WithValue.
@@ -53,6 +55,8 @@ var (
 	ContextKeyUserAgent         = userAgentKey{}
 	ContextKeyRequestID         = requestIDKey{}
 	ContextKeyRequestTime       = requestTimeKey{}
+	ContextKeyAPIVersion        = apiVersionKey{}
+	ContextKeyTokenAPIVersion   = tokenAPIVersionKey{}
 )
 
 // -----------------------------------------------------------------------------
@@ -198,4 +202,40 @@ func Now(ctx context.Context) time.Time {
 //   - CLI commands
 func WithTime(ctx context.Context, t time.Time) context.Context {
 	return context.WithValue(ctx, ContextKeyRequestTime, t)
+}
+
+// -----------------------------------------------------------------------------
+// API Version context
+// -----------------------------------------------------------------------------
+
+// APIVersion retrieves the route's API version from context.
+// This is the version extracted from the URL path (e.g., /v1/auth/...).
+// Returns empty string if not set.
+func APIVersion(ctx context.Context) id.APIVersion {
+	if v, ok := ctx.Value(ContextKeyAPIVersion).(id.APIVersion); ok {
+		return v
+	}
+	return ""
+}
+
+// WithAPIVersion injects the route's API version into the context.
+// Set by the version extraction middleware based on URL path.
+func WithAPIVersion(ctx context.Context, version id.APIVersion) context.Context {
+	return context.WithValue(ctx, ContextKeyAPIVersion, version)
+}
+
+// TokenAPIVersion retrieves the token's API version from context.
+// This is the version extracted from the JWT token's audience claim.
+// Returns empty string if not set.
+func TokenAPIVersion(ctx context.Context) id.APIVersion {
+	if v, ok := ctx.Value(ContextKeyTokenAPIVersion).(id.APIVersion); ok {
+		return v
+	}
+	return ""
+}
+
+// WithTokenAPIVersion injects the token's API version into the context.
+// Set by the auth middleware after parsing JWT claims.
+func WithTokenAPIVersion(ctx context.Context, version id.APIVersion) context.Context {
+	return context.WithValue(ctx, ContextKeyTokenAPIVersion, version)
 }

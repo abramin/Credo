@@ -61,7 +61,7 @@ func (s *decisionSteps) evaluateDecision(ctx context.Context, purpose, nationalI
 			"national_id": nationalID,
 		},
 	}
-	return s.tc.POSTWithHeaders("/decision/evaluate", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/decision/evaluate", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -73,7 +73,7 @@ func (s *decisionSteps) evaluateDecisionWithoutAuth(ctx context.Context, purpose
 			"national_id": nationalID,
 		},
 	}
-	return s.tc.POST("/decision/evaluate", body)
+	return s.tc.POST("/v1/decision/evaluate", body)
 }
 
 func (s *decisionSteps) evaluateDecisionWithoutNationalID(ctx context.Context, purpose string) error {
@@ -81,7 +81,7 @@ func (s *decisionSteps) evaluateDecisionWithoutNationalID(ctx context.Context, p
 		"purpose": purpose,
 		"context": map[string]interface{}{},
 	}
-	return s.tc.POSTWithHeaders("/decision/evaluate", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/decision/evaluate", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }

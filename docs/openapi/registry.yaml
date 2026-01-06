@@ -26,7 +26,7 @@ servers:
     description: Local development server
 
 paths:
-  /registry/citizen:
+  /v1/registry/citizen:
     post:
       summary: Lookup citizen record from national registry
       description: |
@@ -124,7 +124,7 @@ paths:
         "504":
           $ref: "#/components/responses/RegistryTimeout"
 
-  /registry/sanctions:
+  /v1/registry/sanctions:
     post:
       summary: Check sanctions and PEP status
       description: |

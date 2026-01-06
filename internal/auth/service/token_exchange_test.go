@@ -135,7 +135,7 @@ func (s *ServiceSuite) TestTokenExchangeFlow_ValidationAndErrorMapping() {
 		sess := *validSession
 		setupPreTx(req, codeRec, sess)
 
-		s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return("", "", errors.New("jwt error"))
 
 		result, err := s.service.Token(context.Background(), &req)
@@ -151,9 +151,9 @@ func (s *ServiceSuite) TestTokenExchangeFlow_ValidationAndErrorMapping() {
 		sess := *validSession
 		setupPreTx(req, codeRec, sess)
 
-		s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return("access-token", "access-token-jti", nil)
-		s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return("", errors.New("jwt error"))
 
 		result, err := s.service.Token(context.Background(), &req)
@@ -169,9 +169,9 @@ func (s *ServiceSuite) TestTokenExchangeFlow_ValidationAndErrorMapping() {
 		sess := *validSession
 		setupPreTx(req, codeRec, sess)
 
-		s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return("access-token", "access-token-jti", nil)
-		s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return("mock-id", nil)
 		s.mockJWT.EXPECT().CreateRefreshToken().
 			Return("", errors.New("jwt error"))

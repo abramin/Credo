@@ -34,11 +34,11 @@ func RegisterSteps(ctx *godog.ScenarioContext, tc TestContext) {
 	ctx.Step(`^I request an AgeOver18 credential with national_id "([^"]*)"$`, steps.requestAgeOver18Credential)
 	ctx.Step(`^I request an AgeOver18 credential with national_id "([^"]*)" without authentication$`, steps.requestCredentialWithoutAuth)
 	ctx.Step(`^I request a credential with invalid type "([^"]*)" and national_id "([^"]*)"$`, steps.requestCredentialWithInvalidType)
-	ctx.Step(`^I POST to "/vc/issue" with empty national_id$`, steps.postWithEmptyNationalID)
-	ctx.Step(`^I POST to "/vc/issue" with missing type$`, steps.postWithMissingType)
+	ctx.Step(`^I POST to "/v1/vc/issue" with empty national_id$`, steps.postWithEmptyNationalID)
+	ctx.Step(`^I POST to "/v1/vc/issue" with missing type$`, steps.postWithMissingType)
 	ctx.Step(`^I verify a credential with id "([^"]*)"$`, steps.verifyCredential)
 	ctx.Step(`^I verify a credential with id "([^"]*)" without authentication$`, steps.verifyCredentialWithoutAuth)
-	ctx.Step(`^I POST to "/vc/verify" with empty credential_id$`, steps.postVerifyWithEmptyCredentialID)
+	ctx.Step(`^I POST to "/v1/vc/verify" with empty credential_id$`, steps.postVerifyWithEmptyCredentialID)
 	ctx.Step(`^I verify the saved credential_id "([^"]*)"$`, steps.verifySavedCredential)
 
 	// Response assertion steps
@@ -84,7 +84,7 @@ func (s *vcSteps) requestAgeOver18Credential(ctx context.Context, nationalID str
 		"type":        "AgeOver18",
 		"national_id": nationalID,
 	}
-	return s.tc.POSTWithHeaders("/vc/issue", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/vc/issue", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -94,7 +94,7 @@ func (s *vcSteps) requestCredentialWithoutAuth(ctx context.Context, nationalID s
 		"type":        "AgeOver18",
 		"national_id": nationalID,
 	}
-	return s.tc.POST("/vc/issue", body)
+	return s.tc.POST("/v1/vc/issue", body)
 }
 
 func (s *vcSteps) requestCredentialWithInvalidType(ctx context.Context, credType, nationalID string) error {
@@ -102,7 +102,7 @@ func (s *vcSteps) requestCredentialWithInvalidType(ctx context.Context, credType
 		"type":        credType,
 		"national_id": nationalID,
 	}
-	return s.tc.POSTWithHeaders("/vc/issue", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/vc/issue", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -112,7 +112,7 @@ func (s *vcSteps) postWithEmptyNationalID(ctx context.Context) error {
 		"type":        "AgeOver18",
 		"national_id": "",
 	}
-	return s.tc.POSTWithHeaders("/vc/issue", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/vc/issue", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -121,7 +121,7 @@ func (s *vcSteps) postWithMissingType(ctx context.Context) error {
 	body := map[string]interface{}{
 		"national_id": "TEST123456",
 	}
-	return s.tc.POSTWithHeaders("/vc/issue", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/vc/issue", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -130,7 +130,7 @@ func (s *vcSteps) verifyCredential(ctx context.Context, credentialID string) err
 	body := map[string]interface{}{
 		"credential_id": credentialID,
 	}
-	return s.tc.POSTWithHeaders("/vc/verify", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/vc/verify", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -139,14 +139,14 @@ func (s *vcSteps) verifyCredentialWithoutAuth(ctx context.Context, credentialID 
 	body := map[string]interface{}{
 		"credential_id": credentialID,
 	}
-	return s.tc.POST("/vc/verify", body)
+	return s.tc.POST("/v1/vc/verify", body)
 }
 
 func (s *vcSteps) postVerifyWithEmptyCredentialID(ctx context.Context) error {
 	body := map[string]interface{}{
 		"credential_id": "",
 	}
-	return s.tc.POSTWithHeaders("/vc/verify", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/vc/verify", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -306,7 +306,7 @@ func (s *vcSteps) haveRevokedConsent(ctx context.Context, purposes string) error
 	body := map[string]interface{}{
 		"purposes": purposeList,
 	}
-	return s.tc.POSTWithHeaders("/auth/consent/revoke", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/auth/consent/revoke", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
