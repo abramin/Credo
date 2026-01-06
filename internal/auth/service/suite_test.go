@@ -121,9 +121,9 @@ func (s *ServiceSuite) expectTokenGeneration(userID id.UserID, sessionID id.Sess
 	refreshToken = "ref_mock-refresh-token"
 
 	s.mockJWT.EXPECT().GenerateAccessTokenWithJTI(
-		gomock.Any(), userID, sessionID, clientID, tenantID, scopes,
+		gomock.Any(), userID, sessionID, clientID, tenantID, scopes, gomock.Any(),
 	).Return(accessToken, accessTokenJTI, nil)
-	s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), userID, sessionID, clientID, tenantID).Return(idToken, nil)
+	s.mockJWT.EXPECT().GenerateIDToken(gomock.Any(), userID, sessionID, clientID, tenantID, gomock.Any()).Return(idToken, nil)
 	s.mockJWT.EXPECT().CreateRefreshToken().Return(refreshToken, nil)
 	s.mockJWT.EXPECT().TokenType().Return("Bearer")
 

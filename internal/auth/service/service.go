@@ -99,9 +99,9 @@ type RefreshTokenStore interface {
 
 // TokenGenerator issues signed access/ID tokens and generates refresh tokens.
 type TokenGenerator interface {
-	GenerateAccessToken(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID, scopes []string) (string, error)
-	GenerateAccessTokenWithJTI(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID, scopes []string) (string, string, error)
-	GenerateIDToken(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID) (string, error)
+	GenerateAccessToken(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID, scopes []string, apiVersion id.APIVersion) (string, error)
+	GenerateAccessTokenWithJTI(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID, scopes []string, apiVersion id.APIVersion) (string, string, error)
+	GenerateIDToken(ctx context.Context, userID id.UserID, sessionID id.SessionID, clientID id.ClientID, tenantID id.TenantID, apiVersion id.APIVersion) (string, error)
 	CreateRefreshToken() (string, error)
 	TokenType() string
 	// ParseTokenSkipClaimsValidation parses a JWT with signature verification but skips claims validation (e.g., expiration)
@@ -376,6 +376,12 @@ func (s *Service) isRedirectSchemeAllowed(uri *url.URL) bool {
 // Used internally during token issuance flows.
 // Returns a tokenArtifacts struct bundling all generated tokens and records.
 func (s *Service) generateTokenArtifacts(ctx context.Context, session *models.Session) (*tokenArtifacts, error) {
+	// Get API version from context (set by version middleware), default to v1
+	apiVersion := requestcontext.APIVersion(ctx)
+	if apiVersion.IsNil() {
+		apiVersion = id.APIVersionV1
+	}
+
 	// Generate tokens before mutating persistence state so failures do not leave partial writes.
 	accessToken, accessTokenJTI, err := s.jwt.GenerateAccessTokenWithJTI(
 		ctx,
@@ -384,12 +390,13 @@ func (s *Service) generateTokenArtifacts(ctx context.Context, session *models.Se
 		session.ClientID,
 		session.TenantID,
 		session.RequestedScope,
+		apiVersion,
 	)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate access token")
 	}
 
-	idToken, err := s.jwt.GenerateIDToken(ctx, session.UserID, session.ID, session.ClientID, session.TenantID)
+	idToken, err := s.jwt.GenerateIDToken(ctx, session.UserID, session.ID, session.ClientID, session.TenantID, apiVersion)
 	if err != nil {
 		return nil, dErrors.Wrap(err, dErrors.CodeInternal, "failed to generate ID token")
 	}

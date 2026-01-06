@@ -28,7 +28,7 @@ servers:
     description: Local development server
 
 paths:
-  /vc/issue:
+  /v1/vc/issue:
     post:
       summary: Issue an AgeOver18 verifiable credential
       description: |
@@ -88,7 +88,7 @@ paths:
         "504":
           $ref: "#/components/responses/RegistryTimeout"
 
-  /vc/verify:
+  /v1/vc/verify:
     post:
       summary: Verify a previously issued credential
       description: |

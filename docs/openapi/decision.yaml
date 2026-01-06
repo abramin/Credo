@@ -18,7 +18,7 @@ servers:
     description: Local development server
 
 paths:
-  /decision/evaluate:
+  /v1/decision/evaluate:
     post:
       summary: Evaluate a decision for a given purpose
       description: |

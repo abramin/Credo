@@ -29,6 +29,23 @@ type AccessTokenClaims struct {
 	jwt.RegisteredClaims
 }
 
+// APIVersion extracts the API version from the token's audience claim.
+// The versioned audience format is "credo-client:v1" where the suffix after ":" is the version.
+// If no versioned audience is found, returns APIVersionV1 for backward compatibility.
+func (c *AccessTokenClaims) APIVersion() id.APIVersion {
+	for _, aud := range c.Audience {
+		// Look for versioned audience format: "base:version"
+		if idx := strings.LastIndex(aud, ":"); idx > 0 && idx < len(aud)-1 {
+			versionStr := aud[idx+1:]
+			if version, err := id.ParseAPIVersion(versionStr); err == nil {
+				return version
+			}
+		}
+	}
+	// Legacy tokens without version default to v1
+	return id.APIVersionV1
+}
+
 // IDTokenClaims represents OIDC-compliant ID token claims.
 // It keeps the standard subject while carrying session and client references.
 type IDTokenClaims struct {
@@ -89,8 +106,9 @@ func (s *JWTService) GenerateAccessTokenWithJTI(
 	clientID id.ClientID,
 	tenantID id.TenantID,
 	scopes []string,
+	apiVersion id.APIVersion,
 ) (string, string, error) {
-	newToken, err := s.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, scopes)
+	newToken, err := s.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, scopes, apiVersion)
 	if err != nil {
 		return "", "", err
 	}
@@ -120,9 +138,15 @@ func (s *JWTService) GenerateAccessToken(
 	clientID id.ClientID,
 	tenantID id.TenantID,
 	scopes []string,
+	apiVersion id.APIVersion,
 ) (string, error) {
 	if len(scopes) == 0 {
 		return "", dErrors.New(dErrors.CodeInvalidInput, "scopes cannot be empty")
+	}
+
+	// Default to v1 if no version specified
+	if apiVersion.IsNil() {
+		apiVersion = id.APIVersionV1
 	}
 
 	b := make([]byte, 16)
@@ -132,6 +156,13 @@ func (s *JWTService) GenerateAccessToken(
 	}
 	jti := hex.EncodeToString(b)
 	now := requestcontext.Now(ctx)
+
+	// Build versioned audience: includes both base audience (backward compat)
+	// and versioned audience (e.g., "credo-client:v1")
+	audience := []string{
+		s.audience,
+		fmt.Sprintf("%s:%s", s.audience, apiVersion),
+	}
 
 	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, AccessTokenClaims{
 		UserID:    userID.String(),
@@ -144,7 +175,7 @@ func (s *JWTService) GenerateAccessToken(
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.tokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    s.BuildIssuer(tenantID),
-			Audience:  []string{s.audience},
+			Audience:  audience,
 			ID:        jti,
 		},
 	})
@@ -204,8 +235,23 @@ func (s *JWTService) GenerateIDToken(
 	userID id.UserID,
 	sessionID id.SessionID,
 	clientID id.ClientID,
-	tenantID id.TenantID) (string, error) {
+	tenantID id.TenantID,
+	apiVersion id.APIVersion,
+) (string, error) {
+	// Default to v1 if no version specified
+	if apiVersion.IsNil() {
+		apiVersion = id.APIVersionV1
+	}
+
 	now := requestcontext.Now(ctx)
+
+	// Build versioned audience: includes both base audience (backward compat)
+	// and versioned audience (e.g., "credo-client:v1")
+	audience := []string{
+		s.audience,
+		fmt.Sprintf("%s:%s", s.audience, apiVersion),
+	}
+
 	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, IDTokenClaims{
 		SessionID: sessionID.String(),
 		ClientID:  clientID.String(),
@@ -215,7 +261,7 @@ func (s *JWTService) GenerateIDToken(
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.tokenTTL)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    s.BuildIssuer(tenantID),
-			Audience:  []string{s.audience},
+			Audience:  audience,
 			ID:        uuid.NewString(),
 		},
 	})

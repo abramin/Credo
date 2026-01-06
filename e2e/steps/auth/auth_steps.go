@@ -135,7 +135,7 @@ func (s *authSteps) initiateAuthorization(ctx context.Context, email, scopes str
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "test-state-123",
 	}
-	return s.tc.POST("/auth/authorize", body)
+	return s.tc.POST("/v1/auth/authorize", body)
 }
 
 func (s *authSteps) initiateAuthorizationWithRedirect(ctx context.Context, email, scopes, redirectURI string) error {
@@ -146,7 +146,7 @@ func (s *authSteps) initiateAuthorizationWithRedirect(ctx context.Context, email
 		"redirect_uri": redirectURI,
 		"state":        "test-state-123",
 	}
-	return s.tc.POST("/auth/authorize", body)
+	return s.tc.POST("/v1/auth/authorize", body)
 }
 
 func (s *authSteps) initiateAuthorizationWithoutScopes(ctx context.Context, email string) error {
@@ -156,7 +156,7 @@ func (s *authSteps) initiateAuthorizationWithoutScopes(ctx context.Context, emai
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "test-state-123",
 	}
-	return s.tc.POST("/auth/authorize", body)
+	return s.tc.POST("/v1/auth/authorize", body)
 }
 
 func (s *authSteps) saveAuthorizationCode(ctx context.Context) error {
@@ -175,7 +175,7 @@ func (s *authSteps) exchangeCodeForTokens(ctx context.Context) error {
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"client_id":    s.tc.GetClientID(),
 	}
-	return s.tc.POST("/auth/token", body)
+	return s.tc.POST("/v1/auth/token", body)
 }
 
 func (s *authSteps) exchangeInvalidCode(ctx context.Context, code string) error {
@@ -185,7 +185,7 @@ func (s *authSteps) exchangeInvalidCode(ctx context.Context, code string) error 
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"client_id":    s.tc.GetClientID(),
 	}
-	return s.tc.POST("/auth/token", body)
+	return s.tc.POST("/v1/auth/token", body)
 }
 
 func (s *authSteps) reuseAuthorizationCode(ctx context.Context) error {
@@ -226,7 +226,7 @@ func (s *authSteps) requestAuthWithUnknownClientID(ctx context.Context, clientID
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "test-state-123",
 	}
-	return s.tc.POST("/auth/authorize", body)
+	return s.tc.POST("/v1/auth/authorize", body)
 }
 
 func (s *authSteps) requestAuthWithEmptyClientID(ctx context.Context) error {
@@ -237,7 +237,7 @@ func (s *authSteps) requestAuthWithEmptyClientID(ctx context.Context) error {
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "test-state-123",
 	}
-	return s.tc.POST("/auth/authorize", body)
+	return s.tc.POST("/v1/auth/authorize", body)
 }
 
 func (s *authSteps) requestUserInfo(ctx context.Context) error {
@@ -247,7 +247,7 @@ func (s *authSteps) requestUserInfo(ctx context.Context) error {
 	}
 	s.tc.SetAccessToken(accessToken.(string))
 
-	return s.tc.GET("/auth/userinfo", map[string]string{
+	return s.tc.GET("/v1/auth/userinfo", map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -302,7 +302,7 @@ func (s *authSteps) refreshTokensWithSavedRefreshToken(ctx context.Context) erro
 		"refresh_token": refreshToken,
 		"client_id":     s.tc.GetClientID(),
 	}
-	if err := s.tc.POST("/auth/token", body); err != nil {
+	if err := s.tc.POST("/v1/auth/token", body); err != nil {
 		return err
 	}
 	if s.tc.GetLastResponseStatus() == http.StatusOK {
@@ -323,7 +323,7 @@ func (s *authSteps) attemptRefreshWithPreviousRefreshToken(ctx context.Context) 
 		"refresh_token": refreshToken,
 		"client_id":     s.tc.GetClientID(),
 	}
-	return s.tc.POST("/auth/token", body)
+	return s.tc.POST("/v1/auth/token", body)
 }
 
 func (s *authSteps) newRefreshTokenShouldDifferFromPrevious(ctx context.Context) error {
@@ -345,7 +345,7 @@ func (s *authSteps) revokeSavedRefreshToken(ctx context.Context) error {
 		"token":           refreshToken,
 		"token_type_hint": "refresh_token",
 	}
-	return s.tc.POST("/auth/revoke", body)
+	return s.tc.POST("/v1/auth/revoke", body)
 }
 
 func (s *authSteps) revokeSavedAccessToken(ctx context.Context) error {
@@ -357,7 +357,7 @@ func (s *authSteps) revokeSavedAccessToken(ctx context.Context) error {
 		"token":           accessToken,
 		"token_type_hint": "access_token",
 	}
-	return s.tc.POST("/auth/revoke", body)
+	return s.tc.POST("/v1/auth/revoke", body)
 }
 
 func (s *authSteps) saveUserIDFromUserInfo(ctx context.Context) error {
@@ -374,7 +374,7 @@ func (s *authSteps) deleteUserViaAdmin(ctx context.Context) error {
 	if userID == "" {
 		return fmt.Errorf("no user ID saved")
 	}
-	return s.tc.DELETE("/admin/auth/users/"+userID, map[string]string{
+	return s.tc.DELETE("/v1/admin/auth/users/"+userID, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
@@ -384,19 +384,19 @@ func (s *authSteps) deleteUserViaAdminWithToken(ctx context.Context, token strin
 	if userID == "" {
 		return fmt.Errorf("no user ID saved")
 	}
-	return s.tc.DELETE("/admin/auth/users/"+userID, map[string]string{
+	return s.tc.DELETE("/v1/admin/auth/users/"+userID, map[string]string{
 		"X-Admin-Token": token,
 	})
 }
 
 func (s *authSteps) deleteSpecificUserViaAdmin(ctx context.Context, userID string) error {
-	return s.tc.DELETE("/admin/auth/users/"+userID, map[string]string{
+	return s.tc.DELETE("/v1/admin/auth/users/"+userID, map[string]string{
 		"X-Admin-Token": s.tc.GetAdminToken(),
 	})
 }
 
 func (s *authSteps) attemptGetUserInfo(ctx context.Context) error {
-	return s.tc.GET("/auth/userinfo", map[string]string{
+	return s.tc.GET("/v1/auth/userinfo", map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -409,7 +409,7 @@ func (s *authSteps) listSessionsWithAccessToken(ctx context.Context, tokenName s
 	if token == "" {
 		return fmt.Errorf("no access token saved for %s", tokenName)
 	}
-	return s.tc.GET("/auth/sessions", map[string]string{
+	return s.tc.GET("/v1/auth/sessions", map[string]string{
 		"Authorization": "Bearer " + token,
 	})
 }
@@ -473,7 +473,7 @@ func (s *authSteps) revokeSessionUsingAccessToken(ctx context.Context, sessionNa
 		return fmt.Errorf("no access token saved for %s", tokenName)
 	}
 
-	return s.tc.DELETE("/auth/sessions/"+sessionID, map[string]string{
+	return s.tc.DELETE("/v1/auth/sessions/"+sessionID, map[string]string{
 		"Authorization": "Bearer " + token,
 	})
 }
@@ -486,7 +486,7 @@ func (s *authSteps) requestUserInfoWithNamedAccessToken(ctx context.Context, tok
 	if token == "" {
 		return fmt.Errorf("no access token saved for %s", tokenName)
 	}
-	return s.tc.GET("/auth/userinfo", map[string]string{
+	return s.tc.GET("/v1/auth/userinfo", map[string]string{
 		"Authorization": "Bearer " + token,
 	})
 }
@@ -538,7 +538,7 @@ func (s *authSteps) submitConcurrentRefreshRequests(ctx context.Context) error {
 			defer wg.Done()
 
 			req, err := http.NewRequestWithContext(ctx, "POST",
-				s.tc.GetBaseURL()+"/auth/token", bytes.NewReader(data))
+				s.tc.GetBaseURL()+"/v1/auth/token", bytes.NewReader(data))
 			if err != nil {
 				results[idx] = concurrentResult{err: err}
 				return
@@ -634,7 +634,7 @@ func (s *authSteps) revokeForgedToken(ctx context.Context) error {
 		"token":           stepsExt.forgedToken,
 		"token_type_hint": "access_token",
 	}
-	return s.tc.POST("/auth/revoke", body)
+	return s.tc.POST("/v1/auth/revoke", body)
 }
 
 // waitForAccessTokenToExpire is a simulation step - actual wait is not practical
@@ -712,7 +712,7 @@ func (s *authSteps) listSessionsWithSavedAccessToken(ctx context.Context) error 
 	if token == "" {
 		return fmt.Errorf("no access token saved")
 	}
-	return s.tc.GET("/auth/sessions", map[string]string{
+	return s.tc.GET("/v1/auth/sessions", map[string]string{
 		"Authorization": "Bearer " + token,
 	})
 }
@@ -758,7 +758,7 @@ func (s *authSteps) revokeCurrentSession(ctx context.Context) error {
 	if token == "" {
 		return fmt.Errorf("no access token saved")
 	}
-	return s.tc.DELETE("/auth/sessions/"+sessionID, map[string]string{
+	return s.tc.DELETE("/v1/auth/sessions/"+sessionID, map[string]string{
 		"Authorization": "Bearer " + token,
 	})
 }
@@ -799,7 +799,7 @@ func (s *authSteps) callLogoutAllWithSavedToken(ctx context.Context, exceptCurre
 
 // doLogoutAll performs the logout-all API call
 func (s *authSteps) doLogoutAll(token, exceptCurrent string) error {
-	path := "/auth/logout-all?except_current=" + exceptCurrent
+	path := "/v1/auth/logout-all?except_current=" + exceptCurrent
 	headers := map[string]string{
 		"Authorization": "Bearer " + token,
 	}

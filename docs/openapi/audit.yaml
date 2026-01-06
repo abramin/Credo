@@ -18,7 +18,7 @@ servers:
     description: Local development server
 
 paths:
-  /me/data-export:
+  /v1/me/data-export:
     get:
       summary: Export audit events for the authenticated user
       description: |
@@ -69,7 +69,7 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /audit/search:
+  /v1/audit/search:
     get:
       summary: Search audit events across users (admin-only)
       description: |

@@ -78,7 +78,7 @@ func (s *consentSteps) authenticateAs(ctx context.Context, email string) error {
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "consent-state",
 	}
-	if err := s.tc.POST("/auth/authorize", body); err != nil {
+	if err := s.tc.POST("/v1/auth/authorize", body); err != nil {
 		return err
 	}
 	code, err := s.tc.GetResponseField("code")
@@ -92,7 +92,7 @@ func (s *consentSteps) authenticateAs(ctx context.Context, email string) error {
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"client_id":    s.tc.GetClientID(),
 	}
-	if err := s.tc.POST("/auth/token", tokenReq); err != nil {
+	if err := s.tc.POST("/v1/auth/token", tokenReq); err != nil {
 		return err
 	}
 	accessToken, err := s.tc.GetResponseField("access_token")
@@ -112,7 +112,7 @@ func (s *consentSteps) grantConsentForPurposes(ctx context.Context, purposes str
 	body := map[string]interface{}{
 		"purposes": strings.Split(purposes, ","),
 	}
-	err := s.tc.POSTWithHeaders("/auth/consent", body, map[string]string{
+	err := s.tc.POSTWithHeaders("/v1/auth/consent", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 	if err != nil {
@@ -126,19 +126,19 @@ func (s *consentSteps) revokeConsentForPurposes(ctx context.Context, purposes st
 	body := map[string]interface{}{
 		"purposes": strings.Split(purposes, ","),
 	}
-	return s.tc.POSTWithHeaders("/auth/consent/revoke", body, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/auth/consent/revoke", body, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
 
 func (s *consentSteps) revokeAllConsents(ctx context.Context) error {
-	return s.tc.POSTWithHeaders("/auth/consent/revoke-all", map[string]interface{}{}, map[string]string{
+	return s.tc.POSTWithHeaders("/v1/auth/consent/revoke-all", map[string]interface{}{}, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
 
 func (s *consentSteps) deleteAllConsents(ctx context.Context) error {
-	return s.tc.DELETE("/auth/consent", map[string]string{
+	return s.tc.DELETE("/v1/auth/consent", map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -148,25 +148,25 @@ func (s *consentSteps) deleteWithoutAuth(ctx context.Context, path string) error
 }
 
 func (s *consentSteps) listMyConsents(ctx context.Context) error {
-	return s.tc.GET("/auth/consent", map[string]string{
+	return s.tc.GET("/v1/auth/consent", map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
 
 func (s *consentSteps) listConsentsFilteredByStatus(ctx context.Context, status string) error {
-	return s.tc.GET("/auth/consent?status="+status, map[string]string{
+	return s.tc.GET("/v1/auth/consent?status="+status, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
 
 func (s *consentSteps) listConsentsFilteredByPurpose(ctx context.Context, purpose string) error {
-	return s.tc.GET("/auth/consent?purpose="+purpose, map[string]string{
+	return s.tc.GET("/v1/auth/consent?purpose="+purpose, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
 
 func (s *consentSteps) listConsentsFilteredByStatusAndPurpose(ctx context.Context, status, purpose string) error {
-	return s.tc.GET("/auth/consent?status="+status+"&purpose="+purpose, map[string]string{
+	return s.tc.GET("/v1/auth/consent?status="+status+"&purpose="+purpose, map[string]string{
 		"Authorization": "Bearer " + s.tc.GetAccessToken(),
 	})
 }
@@ -176,7 +176,7 @@ func (s *consentSteps) grantConsentWithoutAuth(ctx context.Context, purposes str
 		"purposes": strings.Split(purposes, ","),
 	}
 	// Make request without Authorization header
-	return s.tc.POST("/auth/consent", body)
+	return s.tc.POST("/v1/auth/consent", body)
 }
 
 func (s *consentSteps) revokeConsentWithoutAuth(ctx context.Context, purposes string) error {
@@ -184,7 +184,7 @@ func (s *consentSteps) revokeConsentWithoutAuth(ctx context.Context, purposes st
 		"purposes": strings.Split(purposes, ","),
 	}
 	// Make request without Authorization header
-	return s.tc.POST("/auth/consent/revoke", body)
+	return s.tc.POST("/v1/auth/consent/revoke", body)
 }
 
 func (s *consentSteps) postWithEmptyPurposes(ctx context.Context, path string) error {

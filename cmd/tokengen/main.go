@@ -146,7 +146,7 @@ func generateAccessToken(userIDStr, sessionIDStr, clientIDStr, tenantIDStr, scop
 
 	svc := jwttoken.NewJWTService(signingKey, defaultIssuerBaseURL, defaultAudience, ttl)
 
-	token, jti, err := svc.GenerateAccessTokenWithJTI(context.Background(), userID, sessionID, clientID, tenantID, scopeList)
+	token, jti, err := svc.GenerateAccessTokenWithJTI(context.Background(), userID, sessionID, clientID, tenantID, scopeList, id.APIVersionV1)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating token: %v\n", err)
 		os.Exit(1)
@@ -209,7 +209,7 @@ func generateIDToken(userIDStr, sessionIDStr, clientIDStr, tenantIDStr string, t
 
 	svc := jwttoken.NewJWTService(signingKey, defaultIssuerBaseURL, defaultAudience, ttl)
 
-	token, err := svc.GenerateIDToken(context.Background(), userID, sessionID, clientID, tenantID)
+	token, err := svc.GenerateIDToken(context.Background(), userID, sessionID, clientID, tenantID, id.APIVersionV1)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating token: %v\n", err)
 		os.Exit(1)

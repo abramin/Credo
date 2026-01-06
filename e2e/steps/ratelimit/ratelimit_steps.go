@@ -227,7 +227,7 @@ func (s *ratelimitSteps) obtainAccessToken() error {
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "ratelimit-test-state",
 	}
-	if err := s.tc.POST("/auth/authorize", body); err != nil {
+	if err := s.tc.POST("/v1/auth/authorize", body); err != nil {
 		return fmt.Errorf("failed to initiate auth: %w", err)
 	}
 	code, err := s.tc.GetResponseField("code")
@@ -241,7 +241,7 @@ func (s *ratelimitSteps) obtainAccessToken() error {
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"client_id":    s.tc.GetClientID(),
 	}
-	if err := s.tc.POST("/auth/token", tokenBody); err != nil {
+	if err := s.tc.POST("/v1/auth/token", tokenBody); err != nil {
 		return fmt.Errorf("failed to exchange code: %w", err)
 	}
 	accessToken, err := s.tc.GetResponseField("access_token")
@@ -389,7 +389,7 @@ func (s *ratelimitSteps) authenticatedAsUser(ctx context.Context, userEmail stri
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"state":        "user-rate-limit-test",
 	}
-	if err := s.tc.POST("/auth/authorize", body); err != nil {
+	if err := s.tc.POST("/v1/auth/authorize", body); err != nil {
 		return err
 	}
 	code, err := s.tc.GetResponseField("code")
@@ -403,7 +403,7 @@ func (s *ratelimitSteps) authenticatedAsUser(ctx context.Context, userEmail stri
 		"redirect_uri": s.tc.GetRedirectURI(),
 		"client_id":    s.tc.GetClientID(),
 	}
-	if err := s.tc.POST("/auth/token", tokenBody); err != nil {
+	if err := s.tc.POST("/v1/auth/token", tokenBody); err != nil {
 		return err
 	}
 	accessToken, err := s.tc.GetResponseField("access_token")
@@ -461,7 +461,7 @@ func (s *ratelimitSteps) makeNVCIssuanceRequestsWithinHour(ctx context.Context, 
 		body := map[string]interface{}{
 			"credential_type": "identity",
 		}
-		if err := s.tc.POSTWithHeaders("/vc/issue", body, headers); err != nil {
+		if err := s.tc.POSTWithHeaders("/v1/vc/issue", body, headers); err != nil {
 			return err
 		}
 		s.requestResults = append(s.requestResults, s.tc.GetLastResponseStatus())
@@ -479,7 +479,7 @@ func (s *ratelimitSteps) makeNthVCIssuanceRequest(ctx context.Context, n int) er
 	body := map[string]interface{}{
 		"credential_type": "identity",
 	}
-	return s.tc.POSTWithHeaders("/vc/issue", body, headers)
+	return s.tc.POSTWithHeaders("/v1/vc/issue", body, headers)
 }
 
 func (s *ratelimitSteps) ipLimitNotExceeded(ctx context.Context) error {
@@ -528,7 +528,7 @@ func (s *ratelimitSteps) failAuthNTimesInMinutes(ctx context.Context, times, min
 			"redirect_uri": s.tc.GetRedirectURI(),
 		}
 		start := time.Now()
-		if err := s.tc.POSTWithHeaders("/auth/authorize", body, headers); err != nil {
+		if err := s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers); err != nil {
 			return err
 		}
 		s.lastResponseTime = time.Since(start)
@@ -559,7 +559,7 @@ func (s *ratelimitSteps) nthAttemptShouldReturn(ctx context.Context, n, expected
 		"client_id":    s.tc.GetClientID(),
 		"redirect_uri": s.tc.GetRedirectURI(),
 	}
-	if err := s.tc.POSTWithHeaders("/auth/authorize", body, headers); err != nil {
+	if err := s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers); err != nil {
 		return err
 	}
 	return s.responseStatusShouldBe(ctx, expectedStatus)
@@ -589,7 +589,7 @@ func (s *ratelimitSteps) accountHardLockedForMinutes(ctx context.Context, minute
 		"client_id":    s.tc.GetClientID(),
 		"redirect_uri": s.tc.GetRedirectURI(),
 	}
-	if err := s.tc.POSTWithHeaders("/auth/authorize", body, headers); err != nil {
+	if err := s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers); err != nil {
 		return err
 	}
 	if s.tc.GetLastResponseStatus() != 429 {
@@ -633,7 +633,7 @@ func (s *ratelimitSteps) failAuthOnce(ctx context.Context) error {
 		"redirect_uri": s.tc.GetRedirectURI(),
 	}
 	start := time.Now()
-	if err := s.tc.POSTWithHeaders("/auth/authorize", body, headers); err != nil {
+	if err := s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers); err != nil {
 		return err
 	}
 	s.lastResponseTime = time.Since(start)
@@ -657,7 +657,7 @@ func (s *ratelimitSteps) responseDelayedByAtLeastMs(ctx context.Context, ms int)
 		"redirect_uri": s.tc.GetRedirectURI(),
 	}
 	start := time.Now()
-	if err := s.tc.POSTWithHeaders("/auth/authorize", body, headers); err != nil {
+	if err := s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers); err != nil {
 		return err
 	}
 	elapsed := time.Since(start)
@@ -679,7 +679,7 @@ func (s *ratelimitSteps) attemptLoginInvalidUsername(ctx context.Context, userna
 		"client_id":    s.tc.GetClientID(),
 		"redirect_uri": s.tc.GetRedirectURI(),
 	}
-	if err := s.tc.POSTWithHeaders("/auth/authorize", body, headers); err != nil {
+	if err := s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers); err != nil {
 		return err
 	}
 	if errMsg, err := s.tc.GetResponseField("error_description"); err == nil {
@@ -709,7 +709,7 @@ func (s *ratelimitSteps) attemptLoginValidUserInvalidPassword(ctx context.Contex
 		"client_id":    s.tc.GetClientID(),
 		"redirect_uri": s.tc.GetRedirectURI(),
 	}
-	if err := s.tc.POSTWithHeaders("/auth/authorize", body, headers); err != nil {
+	if err := s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers); err != nil {
 		return err
 	}
 	if errMsg, err := s.tc.GetResponseField("error_description"); err == nil {
@@ -747,7 +747,7 @@ func (s *ratelimitSteps) attemptLoginAs(ctx context.Context, email string) error
 		"client_id":    s.tc.GetClientID(),
 		"redirect_uri": s.tc.GetRedirectURI(),
 	}
-	return s.tc.POSTWithHeaders("/auth/authorize", body, headers)
+	return s.tc.POSTWithHeaders("/v1/auth/authorize", body, headers)
 }
 
 func (s *ratelimitSteps) responseShouldIndicateCaptcha(ctx context.Context) error {
@@ -783,7 +783,7 @@ func (s *ratelimitSteps) makeNRequestsAtSecondOfMinute(ctx context.Context, coun
 	// For sliding window tests, we make requests and track results
 	results := make([]int, 0, count)
 	for i := 0; i < count; i++ {
-		if err := s.makeRequestWithValidToken(ctx, "/auth/authorize"); err != nil {
+		if err := s.makeRequestWithValidToken(ctx, "/v1/auth/authorize"); err != nil {
 			return err
 		}
 		results = append(results, s.tc.GetLastResponseStatus())
@@ -846,7 +846,7 @@ func (s *ratelimitSteps) addIPToAllowlistWithReason(ctx context.Context, ip, rea
 		"type":   "ip",
 		"reason": reason,
 	}
-	return s.adminPOST("/admin/rate-limit/allowlist", body)
+	return s.adminPOST("/v1/admin/rate-limit/allowlist", body)
 }
 
 func (s *ratelimitSteps) responseShouldConfirmAllowlisting(ctx context.Context) error {
@@ -867,7 +867,7 @@ func (s *ratelimitSteps) ipIsOnAllowlist(ctx context.Context, ip string) error {
 		"type":   "ip",
 		"reason": "E2E test setup",
 	}
-	if err := s.adminPOST("/admin/rate-limit/allowlist", body); err != nil {
+	if err := s.adminPOST("/v1/admin/rate-limit/allowlist", body); err != nil {
 		return err
 	}
 	if id, err := s.tc.GetResponseField("id"); err == nil {
@@ -897,7 +897,7 @@ func (s *ratelimitSteps) addIPToAllowlistWithExpiration(ctx context.Context, ip 
 		"reason":     "E2E test with expiration",
 		"expires_at": expiresAt.Format(time.RFC3339),
 	}
-	if err := s.adminPOST("/admin/rate-limit/allowlist", body); err != nil {
+	if err := s.adminPOST("/v1/admin/rate-limit/allowlist", body); err != nil {
 		return err
 	}
 	if id, err := s.tc.GetResponseField("id"); err == nil {
@@ -928,7 +928,7 @@ func (s *ratelimitSteps) requestsFromIPShouldBeRateLimited(ctx context.Context, 
 	s.currentIP = ip
 	// Make enough requests to trigger rate limit
 	for i := 0; i < 20; i++ {
-		if err := s.makeRequestWithValidToken(ctx, "/auth/authorize"); err != nil {
+		if err := s.makeRequestWithValidToken(ctx, "/v1/auth/authorize"); err != nil {
 			return err
 		}
 	}
@@ -943,7 +943,7 @@ func (s *ratelimitSteps) removeIPFromAllowlist(ctx context.Context, ip string) e
 		"ip":   ip,
 		"type": "ip",
 	}
-	return s.adminDELETE("/admin/rate-limit/allowlist", body)
+	return s.adminDELETE("/v1/admin/rate-limit/allowlist", body)
 }
 
 func (s *ratelimitSteps) ipShouldNoLongerBeAllowlisted(ctx context.Context) error {
@@ -956,7 +956,7 @@ func (s *ratelimitSteps) ipShouldNoLongerBeAllowlisted(ctx context.Context) erro
 func (s *ratelimitSteps) requestsFromThatIPShouldBeRateLimited(ctx context.Context) error {
 	// Make requests to trigger rate limit
 	for i := 0; i < 20; i++ {
-		if err := s.makeRequestWithValidToken(ctx, "/auth/authorize"); err != nil {
+		if err := s.makeRequestWithValidToken(ctx, "/v1/auth/authorize"); err != nil {
 			return err
 		}
 		if s.tc.GetLastResponseStatus() == 429 {
@@ -1022,7 +1022,7 @@ func (s *ratelimitSteps) globalRequestRateExceeds(ctx context.Context, reqPerSec
 }
 
 func (s *ratelimitSteps) makeARequest(ctx context.Context) error {
-	return s.tc.GET("/auth/userinfo", nil)
+	return s.tc.GET("/v1/auth/userinfo", nil)
 }
 
 // =============================================================================
@@ -1035,7 +1035,7 @@ func (s *ratelimitSteps) exceedRateLimitOn(ctx context.Context, path string) err
 
 func (s *ratelimitSteps) ipHasExceededRateLimit(ctx context.Context, ip string) error {
 	s.currentIP = ip
-	return s.haveExhaustedRateLimitOn(ctx, "/auth/authorize")
+	return s.haveExhaustedRateLimitOn(ctx, "/v1/auth/authorize")
 }
 
 func (s *ratelimitSteps) resetRateLimitForIP(ctx context.Context, ip string) error {
@@ -1043,11 +1043,11 @@ func (s *ratelimitSteps) resetRateLimitForIP(ctx context.Context, ip string) err
 		"ip":   ip,
 		"type": "ip",
 	}
-	return s.adminPOST("/admin/rate-limit/reset", body)
+	return s.adminPOST("/v1/admin/rate-limit/reset", body)
 }
 
 func (s *ratelimitSteps) nextRequestFromIPShouldSucceed(ctx context.Context) error {
-	if err := s.makeRequestWithValidToken(ctx, "/auth/authorize"); err != nil {
+	if err := s.makeRequestWithValidToken(ctx, "/v1/auth/authorize"); err != nil {
 		return err
 	}
 	return s.responseStatusShouldBe(ctx, 200)
@@ -1064,7 +1064,7 @@ func (s *ratelimitSteps) rateLimitsConfiguredViaEnv(ctx context.Context) error {
 
 func (s *ratelimitSteps) authLimitShouldMatchEnv(ctx context.Context) error {
 	// Make requests and check X-RateLimit-Limit header
-	if err := s.makeRequestWithValidToken(ctx, "/auth/authorize"); err != nil {
+	if err := s.makeRequestWithValidToken(ctx, "/v1/auth/authorize"); err != nil {
 		return err
 	}
 	// Limit should match env var - actual verification depends on env
@@ -1072,7 +1072,7 @@ func (s *ratelimitSteps) authLimitShouldMatchEnv(ctx context.Context) error {
 }
 
 func (s *ratelimitSteps) readLimitShouldMatchEnv(ctx context.Context) error {
-	if err := s.makeRequestWithValidToken(ctx, "/auth/userinfo"); err != nil {
+	if err := s.makeRequestWithValidToken(ctx, "/v1/auth/userinfo"); err != nil {
 		return err
 	}
 	return nil
@@ -1095,7 +1095,7 @@ func (s *ratelimitSteps) oauthClientRegisteredAsType(ctx context.Context, client
 		"allowed_scopes": []string{"openid"},
 		"public_client":  isPublic,
 	}
-	if err := s.adminPOST("/admin/clients", body); err != nil {
+	if err := s.adminPOST("/v1/admin/clients", body); err != nil {
 		return err
 	}
 	clientID, err := s.tc.GetResponseField("client_id")
@@ -1126,7 +1126,7 @@ func (s *ratelimitSteps) makeNRequestsAsClientWithinMinute(ctx context.Context, 
 
 func (s *ratelimitSteps) makeNthRequestGeneric(ctx context.Context, n int) error {
 	// Make the Nth request - uses last path
-	return s.makeRequestWithValidToken(ctx, "/auth/token")
+	return s.makeRequestWithValidToken(ctx, "/v1/auth/token")
 }
 
 // =============================================================================

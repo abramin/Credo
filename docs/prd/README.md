@@ -1,7 +1,7 @@
 # Product Requirements Documents (PRDs)
 
 **Credo Implementation Specifications**
-**Version:** 2.7
+**Version:** 2.8
 **Last Updated:** 2026-01-01
 
 This directory contains technical product requirements for implementing Credo system. Each PRD is written for developers and provides detailed specifications, API contracts, data models, and acceptance criteria.
@@ -56,12 +56,12 @@ Credo is a **regulated identity and authorization system** that:
 
 ### Phase 1: Core Identity Plane (MVP Core) - P0 Critical
 
-| PRD                                            | Feature                     | Status    | Est. Time | Dependencies |
-| ---------------------------------------------- | --------------------------- | --------- | --------- | ------------ |
-| [PRD-003](./PRD-003-Registry-Integration.md)   | Registry Integration        | 🟢 Done   | 11-18h    | PRD-001, 002 |
-| [PRD-004](./PRD-004-Verifiable-Credentials.md) | Verifiable Credentials      | 🟢 Done   | 9-16h     | PRD-001, 003 |
-| [PRD-005](./PRD-005-Decision-Engine.md)        | Decision Engine             | 🟢 Done   | 8-14h     | PRD-001-004  |
-| [PRD-006](./PRD-006-Audit-Compliance.md)       | Audit & Compliance Baseline (FR-1/FR-2; audit search in Phase 6 w/ Kafka/ES) | 🟢 Done   | 12-20h    | PRD-001-005  |
+| PRD                                            | Feature                                                                      | Status  | Est. Time | Dependencies |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- | ------- | --------- | ------------ |
+| [PRD-003](./PRD-003-Registry-Integration.md)   | Registry Integration                                                         | 🟢 Done | 11-18h    | PRD-001, 002 |
+| [PRD-004](./PRD-004-Verifiable-Credentials.md) | Verifiable Credentials                                                       | 🟢 Done | 9-16h     | PRD-001, 003 |
+| [PRD-005](./PRD-005-Decision-Engine.md)        | Decision Engine                                                              | 🟢 Done | 8-14h     | PRD-001-004  |
+| [PRD-006](./PRD-006-Audit-Compliance.md)       | Audit & Compliance Baseline (FR-1/FR-2; audit search in Phase 6 w/ Kafka/ES) | 🟢 Done | 12-20h    | PRD-001-005  |
 
 **Phase 1 Total:** ~40-68 hours effort (14-23 days calendar)
 
@@ -71,13 +71,11 @@ Credo is a **regulated identity and authorization system** that:
 
 ### Phase 2: Operational Baseline (Production Prerequisites) - P0 Critical
 
-| PRD                                                           | Feature                             | Status         | Est. Time | Dependencies |
-| ------------------------------------------------------------- | ----------------------------------- | -------------- | --------- | ------------ |
-| [PRD-019](./PRD-019-API-Versioning-Lifecycle.md) 🆕           | API Versioning & Lifecycle          | 🔵 Not Started | 5-8h      | None         |
-| [PRD-020](./PRD-020-Operational-Readiness-SRE.md) 🆕          | Operational Readiness & SRE         | 🔵 Not Started | 12-24h    | PRD-006      |
-| [PRD-028](./PRD-028-Performance-Optimization.md) 🆕           | Auth/Token Performance Enhancements | 🔵 Not Started | 6-12h     | PRD-001, 016 |
-| [PRD-017B](./PRD-017B-Distributed-Rate-Limiting-Quotas.md) 🆕 | Distributed Rate Limiting & Quotas  | 🔵 Not Started | 12-24h    | PRD-017, 020 |
-| [PRD-007](./PRD-007-User-Data-Rights.md)                      | User Data Rights (GDPR)             | 🔵 Not Started | 6-12h     | PRD-001-006  |
+| PRD                                                           | Feature                            | Status         | Est. Time | Dependencies |
+| ------------------------------------------------------------- | ---------------------------------- | -------------- | --------- | ------------ |
+| [PRD-019](./PRD-019-API-Versioning-Lifecycle.md) 🆕           | API Versioning & Lifecycle         | 🔵 Not Started | 5-8h      | None         |
+| [PRD-017B](./PRD-017B-Distributed-Rate-Limiting-Quotas.md) 🆕 | Distributed Rate Limiting & Quotas | 🔵 Not Started | 12-24h    | PRD-017, 020 |
+| [PRD-007](./PRD-007-User-Data-Rights.md)                      | User Data Rights (GDPR)            | 🔵 Not Started | 6-12h     | PRD-001-006  |
 
 **Phase 2 Total:** ~41-80 hours effort (14-27 days calendar)
 
@@ -85,7 +83,21 @@ Credo is a **regulated identity and authorization system** that:
 
 ---
 
-### Phase 3: Production Hardening (Beta Ready) - P0-P1
+### Phase 3: Decentralized Pack (Web3 & Privacy) - P2-P3
+
+| PRD                                                       | Feature                          | Status         | Est. Time | Dependencies |
+| --------------------------------------------------------- | -------------------------------- | -------------- | --------- | ------------ |
+| [PRD-004B](./PRD-004B-Enhanced-Verifiable-Credentials.md) | Enhanced VCs (BBS+, Status List) | 🔵 Not Started | 15-28h    | PRD-004      |
+| [PRD-009](./PRD-009-Decentralized-Identity-DIDs.md)       | Decentralized Identity (DIDs)    | 🔵 Not Started | 24-40h    | PRD-001, 004 |
+| [PRD-010](./PRD-010-Zero-Knowledge-Proofs.md)             | Zero-Knowledge Proofs            | 🔵 Not Started | 30-48h    | PRD-004, 005 |
+
+**Phase 3 Total:** ~69-116 hours (23-39 days calendar)
+
+**🔐 DECENTRALIZED COMPLETE: ~216-370 hours effort (72-124 days calendar at part-time pace)**
+
+---
+
+### Phase 4: Production Hardening (Beta Ready) - P0-P1
 
 | PRD                                                               | Feature                                   | Status         | Est. Time | Dependencies       |
 | ----------------------------------------------------------------- | ----------------------------------------- | -------------- | --------- | ------------------ |
@@ -100,14 +112,16 @@ Credo is a **regulated identity and authorization system** that:
 | [PRD-026C](./PRD-026C-Tenant-Client-Lifecycle-Enhancements.md) 🆕 | Tenant/Client Lifecycle Enhancements      | 🔵 Not Started | 9-16h     | PRD-026B, 016      |
 | [PRD-040](./PRD-040-OIDC-Metadata-Key-Management.md) 🆕           | OIDC Metadata & Key Management            | 🔵 Not Started | 15-28h    | PRD-001, 026A, 028 |
 | [PRD-041](./PRD-041-OAuth-Extension-Pack.md) 🆕                   | OAuth Extension Pack                      | 🔵 Not Started | 12-24h    | PRD-001, 016, 026A |
+| [PRD-028](./PRD-028-Performance-Optimization.md) 🆕               | Auth/Token Performance Enhancements       | 🔵 Not Started | 6-12h     | PRD-001, 016       |
+| [PRD-020](./PRD-020-Operational-Readiness-SRE.md) 🆕              | Operational Readiness & SRE               | 🔵 Not Started | 12-24h    | PRD-006            |
 
-**Phase 3 Total:** ~141-256 hours effort (47-86 days calendar)
+**Phase 4 Total:** ~159-280 hours effort (50-89 days calendar)
 
-**🚀 PRODUCTION BASELINE COMPLETE: ~288-510 hours effort (96-170 days calendar at part-time pace)**
+**🚀 PRODUCTION BASELINE COMPLETE: ~375-650 hours effort (125-217 days calendar at part-time pace)**
 
 ---
 
-### Phase 4: Assurance Pack (Regulated Industries) - P1
+### Phase 5: Assurance Pack (Regulated Industries) - P1
 
 | PRD                                                              | Feature                                 | Status         | Est. Time | Dependencies  |
 | ---------------------------------------------------------------- | --------------------------------------- | -------------- | --------- | ------------- |
@@ -118,21 +132,9 @@ Credo is a **regulated identity and authorization system** that:
 | [PRD-007B](./PRD-007B-ML-Risk-Scoring.md)                        | ML-Based Risk Scoring                   | 🔵 Not Started | 21-36h    | PRD-005, 006  |
 | [PRD-008](./PRD-008-GDPR-CCPA-Automation.md)                     | GDPR/CCPA Automation                    | 🔵 Not Started | 18-32h    | PRD-006, 007  |
 | [PRD-024](./PRD-024-Data-Residency-Sovereignty.md) 🆕            | Data Residency & Sovereignty            | 🔵 Not Started | 12-24h    | PRD-001, 006  |
-| [PRD-024](./PRD-027-Risk-Based-Adaptive-Authentication.md) 🆕    | Risk Based Adaptive Authentication      | 🔵 Not Started | 12-24h    | PRD-001, 006  |
+| [PRD-027](./PRD-027-Risk-Based-Adaptive-Authentication.md) 🆕    | Risk Based Adaptive Authentication      | 🔵 Not Started | 12-24h    | PRD-001, 006  |
 
-**Phase 4 Total:** ~117-220 hours (39-74 days)
-
----
-
-### Phase 5: Decentralized Pack (Web3 & Privacy) - P2-P3
-
-| PRD                                                       | Feature                          | Status         | Est. Time | Dependencies |
-| --------------------------------------------------------- | -------------------------------- | -------------- | --------- | ------------ |
-| [PRD-004B](./PRD-004B-Enhanced-Verifiable-Credentials.md) | Enhanced VCs (BBS+, Status List) | 🔵 Not Started | 15-28h    | PRD-004      |
-| [PRD-009](./PRD-009-Decentralized-Identity-DIDs.md)       | Decentralized Identity (DIDs)    | 🔵 Not Started | 24-40h    | PRD-001, 004 |
-| [PRD-010](./PRD-010-Zero-Knowledge-Proofs.md)             | Zero-Knowledge Proofs            | 🔵 Not Started | 30-48h    | PRD-004, 005 |
-
-**Phase 5 Total:** ~69-116 hours (23-39 days)
+**Phase 5 Total:** ~117-220 hours (39-74 days)
 
 ---
 
@@ -186,19 +188,19 @@ Credo is a **regulated identity and authorization system** that:
 
 ## Timeline Summary
 
-| Phase | Description      | PRDs                                         | Time     | Cumulative    | Milestone              |
-| ----- | ---------------- | -------------------------------------------- | -------- | ------------- | ---------------------- |
-| 0     | Foundation       | 1, 1B, 16, 26A, 26B, 17, 2                    | 66-106h  | 66-106h       | Auth + Security        |
-| 1     | Core Identity    | 3, 4, 5, 6                                   | 40-68h   | 106-174h      | Full Identity Flow     |
-| 2     | Operational      | 19, 20, 28, 17B, 7                           | 41-80h   | **147-254h**  | **MVP** ✅             |
-| 3     | Hardening        | 18, 21, 22, 16B, 2B, 15, 5B, 28, 26C, 40, 41 | 141-256h | **288-510h**  | **Production** 🚀      |
-| 4     | Assurance        | 13, 23, 17C, 6B, 7B, 8, 24, 27               | 117-220h | 405-730h      | Regulated Ready        |
-| 5     | Decentralized    | 4B, 9, 10                                    | 69-116h  | 474-846h      | Web3 Features          |
-| 6     | Integrations     | 11, 12, 14, 42, 25, 26                       | 87-160h  | 561-1006h     | Full Platform          |
-| 7     | Differentiation  | 29, 30, 31, 32, 33                           | 105-184h | 666-1190h     | Strategic Edge         |
-| 8     | Banking Identity | 35, 36, 37, 38, 39                           | 102-176h | **768-1366h** | **Banking Gateway** 🏦 |
+| Phase | Description      | PRDs                                         | Time     | Cumulative    | Milestone               |
+| ----- | ---------------- | -------------------------------------------- | -------- | ------------- | ----------------------- |
+| 0     | Foundation       | 1, 1B, 16, 26A, 26B, 17, 2                   | 66-106h  | 66-106h       | Auth + Security         |
+| 1     | Core Identity    | 3, 4, 5, 6                                   | 40-68h   | 106-174h      | Full Identity Flow      |
+| 2     | Operational      | 19, 20, 28, 17B, 7                           | 41-80h   | **147-254h**  | **MVP** ✅              |
+| 3     | Decentralized    | 4B, 9, 10                                    | 69-116h  | **216-370h**  | **Web3 Features** 🔐    |
+| 4     | Hardening        | 18, 21, 22, 16B, 2B, 15, 5B, 28, 26C, 40, 41 | 159-280h | **375-650h**  | **Production Ready** 🚀 |
+| 5     | Assurance        | 13, 23, 17C, 6B, 7B, 8, 24, 27               | 117-220h | 492-870h      | Regulated Ready         |
+| 6     | Integrations     | 11, 12, 14, 42, 25, 26                       | 87-160h  | 579-1030h     | Full Platform           |
+| 7     | Differentiation  | 29, 30, 31, 32, 33                           | 105-184h | 684-1214h     | Strategic Edge          |
+| 8     | Banking Identity | 35, 36, 37, 38, 39                           | 102-176h | **786-1390h** | **Banking Gateway** 🏦  |
 
-**Total System Time:** ~768-1366 hours (256-456 days)
+**Total System Time:** ~786-1390 hours (262-464 days)
 
 ---
 
@@ -242,7 +244,26 @@ Production operational requirements and performance hardening:
 
 ---
 
-### Phase 3: Production Hardening (47-86 days)
+### Phase 3: Decentralized Pack (23-39 days)
+
+**Goal:** Add Web3 and privacy-preserving identity features
+
+Enable decentralized identity capabilities immediately after MVP:
+
+- PRD-004B: Enhanced VCs (BBS+ signatures, status lists, selective disclosure)
+- PRD-009: DIDs (W3C standard, did:key, did:web methods)
+- PRD-010: Zero-knowledge proofs (age verification, credential proofs without disclosure)
+
+**Decentralized Deliverables:**
+
+- Selective disclosure of credential attributes (BBS+)
+- Self-sovereign identity with DIDs
+- Privacy-preserving proofs (prove age without revealing birthdate)
+- Foundation for Phase 7 differentiation features (Trust Score, Privacy Analytics)
+
+---
+
+### Phase 4: Production Hardening (50-89 days)
 
 **Goal:** Beta-ready system with security hardening and policy engine
 
@@ -251,8 +272,15 @@ Add production security and notifications:
 - PRD-018: Notification service (email/SMS via SendGrid/Twilio, webhooks with HMAC)
 - PRD-021: Multi-factor authentication (TOTP, SMS/Email OTP, backup codes)
 - PRD-022: Account recovery (password reset, account unlock, email verification)
+- PRD-016B: Session policy enhancements (idle timeout, concurrent sessions)
+- PRD-002B: Consent projections with CQRS read models
 - PRD-015: Credo Policy Engine (internal PDP with Rego evaluation)
 - PRD-005B: Cerbos Authorization (external PDP integration)
+- PRD-028: Security enhancements (completed core hardening)
+- PRD-026C: Tenant/client lifecycle enhancements
+- PRD-040: OIDC metadata & key management
+- PRD-041: OAuth extension pack
+- PRD-020: Operational readiness & SRE
 
 **Production Baseline Deliverables:**
 
@@ -263,24 +291,33 @@ Add production security and notifications:
 
 ---
 
-### Phases 4-7: Advanced Features (126-227 days)
+### Phase 5: Assurance Pack (39-74 days)
 
-**Phase 4: Assurance Pack (39-74 days)**
-Regulated industry requirements:
+**Goal:** Regulated industry compliance features
+
+Add enterprise-grade assurance capabilities:
 
 - PRD-013: Biometric verification (face matching, liveness detection)
 - PRD-023: Fraud detection (impossible travel, velocity checks, device fingerprinting)
+- PRD-017C: Advanced rate limiting & abuse controls
 - PRD-006B: Cryptographic audit (Merkle trees for tamper-proof logs)
 - PRD-007B: ML risk scoring (anomaly detection, adaptive scoring)
 - PRD-008: GDPR/CCPA automation (retention policies, breach detection)
 - PRD-024: Data residency (regional stores, cross-border transfer logging)
+- PRD-027: Risk-based adaptive authentication
 
-**Phase 5: Decentralized Pack (23-39 days)**
-Web3 and privacy-preserving features:
+**Assurance Deliverables:**
 
-- PRD-004B: Enhanced VCs (BBS+ signatures, status lists, selective disclosure)
-- PRD-009: DIDs (W3C standard, did:key, did:web methods)
-- PRD-010: Zero-knowledge proofs (age verification, credential proofs without disclosure)
+- Biometric identity verification
+- Real-time fraud detection and prevention
+- Tamper-proof audit trails with cryptographic verification
+- Machine learning risk assessment
+- Automated compliance reporting
+- Geographic data sovereignty
+
+---
+
+### Phases 6-8: Platform Completion (126-227 days)
 
 **Phase 6: Integrations Pack (29-54 days)**
 Ecosystem and developer experience:
@@ -288,6 +325,7 @@ Ecosystem and developer experience:
 - PRD-011: TCP event ingester (internal message bus for high-volume events)
 - PRD-012: Cloud connectors (AWS/Azure/GCP webhook export)
 - PRD-014: Client SDKs (TypeScript/React, Python, Go SDKs)
+- PRD-042: Enterprise SSO & Federation
 - PRD-025: Developer sandbox (test environment, mock data, API explorer)
 - PRD-026: Admin dashboard (operations UI for user/session/consent management)
 
@@ -300,29 +338,14 @@ Strategic differentiation features that set Credo apart from competitors:
 - PRD-032: Privacy-Preserving Analytics (differential privacy, aggregate insights without PII)
 - PRD-033: Federated Trust Network (peer vouching, web of trust with ZKP)
 
----
+**Phase 8: Banking Identity Pack (34-59 days)**
+Fintech/Banking-specific features:
 
-## Storage Evolution Philosophy
-
-### In-Memory First, Production Storage Later
-
-The codebase intentionally uses **in-memory stores** through Phases 0-1, introducing PostgreSQL and Redis only at Phase 2 (Operational Baseline). This design:
-
-- Keeps development fast (no external dependencies during initial development)
-- Makes tests deterministic and quick
-- Uses interfaces throughout, so swapping `inmemory.Store` to `postgres.Store` is DI wiring only
-- Defers infrastructure complexity until functionality is proven
-
-### Transition Triggers
-
-| When you need...          | Introduce...                                  | Phase   |
-| ------------------------- | --------------------------------------------- | ------- |
-| Multi-instance deployment | Redis (rate limiting, sessions)               | Phase 2 |
-| Data durability           | PostgreSQL (users, consents, audit)           | Phase 2 |
-| Backup/DR capabilities    | PostgreSQL                                    | Phase 2 |
-| GDPR compliance           | PostgreSQL (data export requires persistence) | Phase 2 |
-
-See [PRD-020: Storage Infrastructure Transition](./PRD-020-Operational-Readiness-SRE.md#1b-storage-infrastructure-transition) for detailed guidance and decision matrix.
+- PRD-039: SCA Orchestration (PSD2)
+- PRD-035: Identity Assurance Levels
+- PRD-036: Legal Entity Identity & Representation
+- PRD-037: Multi-Party Authorization
+- PRD-038: Delegated Authority (Power of Attorney)
 
 ---
 
@@ -336,41 +359,41 @@ See [PRD-020: Storage Infrastructure Transition](./PRD-020-Operational-Readiness
 - Registry → Credentials → Decision → Audit completes identity issuance
 - Operational readiness (health checks, versioning, GDPR) enables production deployment
 
-**Phase 3 (Production Hardening):** Add essential production security
+**Phase 3 (Decentralized Pack):** Add Web3 capabilities early
+
+- Enhanced VCs (PRD-004B) extends Phase 1's basic credential issuance
+- DIDs (PRD-009) and ZK Proofs (PRD-010) build on credential foundation
+- Early implementation enables Phase 7 differentiation features (Trust Score, Privacy Analytics)
+- Positions Credo as privacy-first alternative to traditional identity providers
+
+**Phase 4 (Production Hardening):** Add essential production security
 
 - Notifications (PRD-018) must come before MFA (PRD-021) which needs SMS/Email
 - Account recovery (PRD-022) requires notification service
+- Session enhancements (PRD-016B) and consent projections (PRD-002B) improve UX
 - Policy engines (PRD-015, 005B) build on Decision Engine (PRD-005) completed in Phase 1
+- Security and operational readiness complete production baseline
 
-**Phase 4-6 (Advanced):** Specialized capabilities with optional adoption
+**Phase 5 (Assurance Pack):** Specialized capabilities for regulated industries
 
 - Assurance Pack targets regulated industries (finance, healthcare)
-- Decentralized Pack targets Web3 and privacy-focused applications
+- Builds on production-hardened foundation from Phase 4
+- Can leverage ZK proofs from Phase 3 for privacy-preserving verification
+
+**Phase 6-8 (Platform Completion):** Ecosystem connectivity and specialization
+
 - Integrations Pack provides ecosystem connectivity and developer experience
-
-**Phase 7 (Differentiation):** Unique market positioning
-
-- Consent-as-a-Service and Compliance Templates can start after Phase 2 (no ZKP dependency)
-- Trust Score, Privacy Analytics, and Trust Network require Phase 5's ZKP foundation
-- These features differentiate Credo from Auth0/Okta/Keycloak
-
-**Phase 8 (Banking Identity):** Fintech/Banking-specific features (34-59 days)
-
-- SCA Orchestration (PRD-039) is the PSD2-compliant step-up auth foundation
-- Identity Assurance Levels (PRD-035) enables tiered KYC for transaction limits
-- Legal Entity Identity (PRD-036) models companies, directors, and signatories
-- Multi-Party Authorization (PRD-037) implements maker-checker and M-of-N approvals
-- Delegated Authority (PRD-038) enables vacation coverage and power-of-attorney patterns
-- These features position Credo as an identity gateway for business banking (Qonto-style)
+- Differentiation Pack leverages ZKP foundation from Phase 3
+- Banking Identity Pack targets fintech/banking vertical
 
 ### Module Bundle Alignment
 
 Module bundles organize PRDs by deployment scenario:
 
 - **Core Identity Plane:** Phases 0-2 (MVP)
-- **Infrastructure Layer:** Phases 0-3 (operational + security)
-- **Assurance Pack:** Phase 4 (regulated industries)
-- **Decentralized Pack:** Phase 5 (Web3)
+- **Decentralized Identity:** Phase 3 (Web3 & privacy)
+- **Infrastructure Layer:** Phases 0-4 (operational + security + hardening)
+- **Assurance Pack:** Phase 5 (regulated industries)
 - **Integrations Pack:** Phase 6 (ecosystem)
 - **Differentiation Pack:** Phase 7 (strategic positioning)
 - **Banking Identity Pack:** Phase 8 (fintech/banking)
@@ -390,27 +413,43 @@ Implement Phases 0-2:
 - Basic consent and audit for compliance
 - Operational health checks enable monitoring
 
-**Skip:** Advanced features (Phases 4-6) until product-market fit
+**Optional Add-on:** Phase 3 (23-39 days) for Web3 differentiation and privacy features
 
-### For Regulated Industries (135-244 days → Assurance Pack)
+### For Web3 Projects (72-124 days → Decentralized Identity)
 
-Implement Phases 0-3, then add Phase 4 Assurance Pack:
+Implement Phases 0-3:
 
-- Full production hardening with MFA, notifications, account recovery
+- Complete MVP foundation (Phases 0-2)
+- Enhanced VCs with selective disclosure (BBS+)
+- Decentralized identifiers (DIDs) for self-sovereign identity
+- Zero-knowledge proofs for privacy-preserving verification
+
+**Skip:** Traditional production hardening (Phase 4) until scaling needs emerge
+
+### For Regulated Industries (125-291 days → Production + Assurance)
+
+Implement Phases 0-2, then 4-5:
+
+- Complete MVP foundation
+- Skip or defer Phase 3 unless privacy features required
+- Full production hardening with MFA, notifications, account recovery (Phase 4)
 - Policy engines for complex authorization rules
-- Biometric verification, fraud detection, cryptographic audit
+- Biometric verification, fraud detection, cryptographic audit (Phase 5)
 - Data residency for EU compliance
 
-**Skip:** Decentralized features (Phase 5) unless required
+**Optional:** Add Phase 3 for privacy-preserving compliance features
 
-### For Identity-as-a-Service (187-336 days → Full Platform)
+### For Identity-as-a-Service (262-464 days → Full Platform)
 
 Implement all phases:
 
-- Complete production system (Phases 0-3)
-- Assurance Pack for enterprise customers (Phase 4)
-- Decentralized features for Web3 differentiation (Phase 5)
+- Complete MVP (Phases 0-2)
+- Decentralized features for Web3 differentiation (Phase 3)
+- Production hardening and security (Phase 4)
+- Assurance Pack for enterprise customers (Phase 5)
 - SDKs, sandbox, admin UI for developer experience (Phase 6)
+- Differentiation features for market positioning (Phase 7)
+- Banking Identity for fintech vertical (Phase 8)
 
 ---
 
@@ -457,7 +496,7 @@ Implement all phases:
 - **PRD-007:** GDPR data export (JSON), deletion with cascade, consent withdrawal
 - **PRD-008:** Automated data retention, breach detection (15min SLA), monthly compliance reports
 
-### Decentralized Identity (Phase 5)
+### Decentralized Identity (Phase 3)
 
 - **PRD-004B:** BBS+ signatures (selective disclosure), status lists (bitstring), revocation
 - **PRD-009:** W3C DIDs (did:key, did:web), DID documents, resolution
@@ -538,18 +577,19 @@ Run with: `make test-e2e`
 
 ## Revision History
 
-| Version | Date       | Changes                                                                                   |
-| ------- | ---------- | ----------------------------------------------------------------------------------------- |
-| 2.7     | 2026-01-01 | Phase 1 complete: PRD-003, PRD-004, PRD-005, PRD-006 all marked Done                      |
-| 2.6     | 2025-12-24 | PRD status review: PRD-016, PRD-026B marked Done; PRD-017 marked Done (MVP)               |
-| 2.5     | 2025-12-23 | Added PRD-026B (Tenant & Client Lifecycle) to Phase 0                                     |
-| 2.4     | 2025-12-21 | Added Storage Evolution Philosophy section (in-memory first, transition triggers)         |
-| 2.3     | 2025-12-17 | Added Phase 7: Differentiation Pack (PRD-029 through PRD-033)                             |
-| 2.2     | 2025-12-17 | Moved PRD-028 from Phase 0 to Phase 2 (performance after functionality)                   |
-| 2.1     | 2025-12-16 | Added PRD-028 (Auth/Token performance), updated Phase 0 timelines/index, refreshed totals |
-| 2.0     | 2025-12-12 | Added 11 new PRDs (16-26); restructured into 6 phases; updated timelines                  |
-| 1.1     | 2025-12-11 | Added PRD-015 (Policy Engine); updated advanced feature sequencing                        |
-| 1.0     | 2025-12-10 | Initial PRD suite (PRD-001 through PRD-014)                                               |
+| Version | Date       | Changes                                                                                                               |
+| ------- | ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| 2.8     | 2026-01-01 | Reorganized phases: moved Decentralized Pack from Phase 5 to Phase 3; renumbered subsequent phases; updated timelines |
+| 2.7     | 2026-01-01 | Phase 1 complete: PRD-003, PRD-004, PRD-005, PRD-006 all marked Done                                                  |
+| 2.6     | 2025-12-24 | PRD status review: PRD-016, PRD-026B marked Done; PRD-017 marked Done (MVP)                                           |
+| 2.5     | 2025-12-23 | Added PRD-026B (Tenant & Client Lifecycle) to Phase 0                                                                 |
+| 2.4     | 2025-12-21 | Added Storage Evolution Philosophy section (in-memory first, transition triggers)                                     |
+| 2.3     | 2025-12-17 | Added Phase 7: Differentiation Pack (PRD-029 through PRD-033)                                                         |
+| 2.2     | 2025-12-17 | Moved PRD-028 from Phase 0 to Phase 2 (performance after functionality)                                               |
+| 2.1     | 2025-12-16 | Added PRD-028 (Auth/Token performance), updated Phase 0 timelines/index, refreshed totals                             |
+| 2.0     | 2025-12-12 | Added 11 new PRDs (16-26); restructured into 6 phases; updated timelines                                              |
+| 1.1     | 2025-12-11 | Added PRD-015 (Policy Engine); updated advanced feature sequencing                                                    |
+| 1.0     | 2025-12-10 | Initial PRD suite (PRD-001 through PRD-014)                                                                           |
 
 ---
 

@@ -543,39 +543,25 @@ func (mr *MockTokenGeneratorMockRecorder) CreateRefreshToken() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateRefreshToken", reflect.TypeOf((*MockTokenGenerator)(nil).CreateRefreshToken))
 }
 
-// TokenType mocks base method.
-func (m *MockTokenGenerator) TokenType() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TokenType")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// TokenType indicates an expected call of TokenType.
-func (mr *MockTokenGeneratorMockRecorder) TokenType() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TokenType", reflect.TypeOf((*MockTokenGenerator)(nil).TokenType))
-}
-
 // GenerateAccessToken mocks base method.
-func (m *MockTokenGenerator) GenerateAccessToken(ctx context.Context, userID domain.UserID, sessionID domain.SessionID, clientID domain.ClientID, tenantID domain.TenantID, scopes []string) (string, error) {
+func (m *MockTokenGenerator) GenerateAccessToken(ctx context.Context, userID domain.UserID, sessionID domain.SessionID, clientID domain.ClientID, tenantID domain.TenantID, scopes []string, apiVersion domain.APIVersion) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GenerateAccessToken", ctx, userID, sessionID, clientID, tenantID, scopes)
+	ret := m.ctrl.Call(m, "GenerateAccessToken", ctx, userID, sessionID, clientID, tenantID, scopes, apiVersion)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GenerateAccessToken indicates an expected call of GenerateAccessToken.
-func (mr *MockTokenGeneratorMockRecorder) GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, scopes any) *gomock.Call {
+func (mr *MockTokenGeneratorMockRecorder) GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, scopes, apiVersion any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateAccessToken", reflect.TypeOf((*MockTokenGenerator)(nil).GenerateAccessToken), ctx, userID, sessionID, clientID, tenantID, scopes)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateAccessToken", reflect.TypeOf((*MockTokenGenerator)(nil).GenerateAccessToken), ctx, userID, sessionID, clientID, tenantID, scopes, apiVersion)
 }
 
 // GenerateAccessTokenWithJTI mocks base method.
-func (m *MockTokenGenerator) GenerateAccessTokenWithJTI(ctx context.Context, userID domain.UserID, sessionID domain.SessionID, clientID domain.ClientID, tenantID domain.TenantID, scopes []string) (string, string, error) {
+func (m *MockTokenGenerator) GenerateAccessTokenWithJTI(ctx context.Context, userID domain.UserID, sessionID domain.SessionID, clientID domain.ClientID, tenantID domain.TenantID, scopes []string, apiVersion domain.APIVersion) (string, string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GenerateAccessTokenWithJTI", ctx, userID, sessionID, clientID, tenantID, scopes)
+	ret := m.ctrl.Call(m, "GenerateAccessTokenWithJTI", ctx, userID, sessionID, clientID, tenantID, scopes, apiVersion)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(string)
 	ret2, _ := ret[2].(error)
@@ -583,24 +569,24 @@ func (m *MockTokenGenerator) GenerateAccessTokenWithJTI(ctx context.Context, use
 }
 
 // GenerateAccessTokenWithJTI indicates an expected call of GenerateAccessTokenWithJTI.
-func (mr *MockTokenGeneratorMockRecorder) GenerateAccessTokenWithJTI(ctx, userID, sessionID, clientID, tenantID, scopes any) *gomock.Call {
+func (mr *MockTokenGeneratorMockRecorder) GenerateAccessTokenWithJTI(ctx, userID, sessionID, clientID, tenantID, scopes, apiVersion any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateAccessTokenWithJTI", reflect.TypeOf((*MockTokenGenerator)(nil).GenerateAccessTokenWithJTI), ctx, userID, sessionID, clientID, tenantID, scopes)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateAccessTokenWithJTI", reflect.TypeOf((*MockTokenGenerator)(nil).GenerateAccessTokenWithJTI), ctx, userID, sessionID, clientID, tenantID, scopes, apiVersion)
 }
 
 // GenerateIDToken mocks base method.
-func (m *MockTokenGenerator) GenerateIDToken(ctx context.Context, userID domain.UserID, sessionID domain.SessionID, clientID domain.ClientID, tenantID domain.TenantID) (string, error) {
+func (m *MockTokenGenerator) GenerateIDToken(ctx context.Context, userID domain.UserID, sessionID domain.SessionID, clientID domain.ClientID, tenantID domain.TenantID, apiVersion domain.APIVersion) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GenerateIDToken", ctx, userID, sessionID, clientID, tenantID)
+	ret := m.ctrl.Call(m, "GenerateIDToken", ctx, userID, sessionID, clientID, tenantID, apiVersion)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GenerateIDToken indicates an expected call of GenerateIDToken.
-func (mr *MockTokenGeneratorMockRecorder) GenerateIDToken(ctx, userID, sessionID, clientID, tenantID any) *gomock.Call {
+func (mr *MockTokenGeneratorMockRecorder) GenerateIDToken(ctx, userID, sessionID, clientID, tenantID, apiVersion any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateIDToken", reflect.TypeOf((*MockTokenGenerator)(nil).GenerateIDToken), ctx, userID, sessionID, clientID, tenantID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateIDToken", reflect.TypeOf((*MockTokenGenerator)(nil).GenerateIDToken), ctx, userID, sessionID, clientID, tenantID, apiVersion)
 }
 
 // ParseTokenSkipClaimsValidation mocks base method.
@@ -616,6 +602,20 @@ func (m *MockTokenGenerator) ParseTokenSkipClaimsValidation(token string) (*jwtt
 func (mr *MockTokenGeneratorMockRecorder) ParseTokenSkipClaimsValidation(token any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ParseTokenSkipClaimsValidation", reflect.TypeOf((*MockTokenGenerator)(nil).ParseTokenSkipClaimsValidation), token)
+}
+
+// TokenType mocks base method.
+func (m *MockTokenGenerator) TokenType() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TokenType")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// TokenType indicates an expected call of TokenType.
+func (mr *MockTokenGeneratorMockRecorder) TokenType() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TokenType", reflect.TypeOf((*MockTokenGenerator)(nil).TokenType))
 }
 
 // MockClientResolver is a mock of ClientResolver interface.

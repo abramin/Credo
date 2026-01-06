@@ -23,10 +23,11 @@ type TokenRevocationChecker interface {
 
 // JWTClaims represents the claims we expect from the JWT validator
 type JWTClaims struct {
-	UserID    string
-	SessionID string
-	ClientID  string
-	JTI       string // JWT ID for revocation tracking
+	UserID     string
+	SessionID  string
+	ClientID   string
+	JTI        string // JWT ID for revocation tracking
+	APIVersion string // API version from token audience (e.g., "v1")
 }
 
 // writeJSONError writes a JSON error response with the given status code and error details.
@@ -174,6 +175,13 @@ func RequireAuth(validator JWTValidator, revocationChecker TokenRevocationChecke
 			ctx = requestcontext.WithUserID(ctx, parsed.UserID)
 			ctx = requestcontext.WithSessionID(ctx, parsed.SessionID)
 			ctx = requestcontext.WithClientID(ctx, parsed.ClientID)
+
+			// Store token API version in context for cross-version validation
+			if claims.APIVersion != "" {
+				if tokenVersion, err := id.ParseAPIVersion(claims.APIVersion); err == nil {
+					ctx = requestcontext.WithTokenAPIVersion(ctx, tokenVersion)
+				}
+			}
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

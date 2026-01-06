@@ -11,7 +11,7 @@ servers:
   - url: http://localhost:8080
     description: Local development server
 paths:
-  /admin/tenants:
+  /v1/admin/tenants:
     post:
       summary: Create a new tenant
       description: |
@@ -65,7 +65,7 @@ paths:
                     error_description: A tenant with this name already exists
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/tenants/{id}:
+  /v1/admin/tenants/{id}:
     get:
       summary: Get tenant details
       description: |
@@ -106,7 +106,7 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/tenants/{id}/deactivate:
+  /v1/admin/tenants/{id}/deactivate:
     post:
       summary: Deactivate a tenant
       description: |
@@ -160,7 +160,7 @@ paths:
                     error_description: tenant is already inactive
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/tenants/{id}/reactivate:
+  /v1/admin/tenants/{id}/reactivate:
     post:
       summary: Reactivate a tenant
       description: |
@@ -202,7 +202,7 @@ paths:
                     error_description: tenant is already active
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/clients:
+  /v1/admin/clients:
     post:
       summary: Register a new OAuth client
       description: |
@@ -288,7 +288,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/clients/{id}:
+  /v1/admin/clients/{id}:
     get:
       summary: Get client details
       description: |
@@ -395,7 +395,7 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/clients/{id}/deactivate:
+  /v1/admin/clients/{id}/deactivate:
     post:
       summary: Deactivate a client
       description: |
@@ -437,7 +437,7 @@ paths:
                     error_description: client is already inactive
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/clients/{id}/reactivate:
+  /v1/admin/clients/{id}/reactivate:
     post:
       summary: Reactivate a client
       description: |
@@ -479,7 +479,7 @@ paths:
                     error_description: client is already active
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/clients/{id}/rotate-secret:
+  /v1/admin/clients/{id}/rotate-secret:
     post:
       summary: Rotate client secret
       description: |

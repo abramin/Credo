@@ -24,7 +24,7 @@ servers:
   - url: http://localhost:8080
     description: Local development server
 paths:
-  /admin/rate-limit/allowlist:
+  /v1/admin/rate-limit/allowlist:
     post:
       summary: Add an allowlist entry
       description: |
@@ -125,7 +125,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/rate-limit/reset:
+  /v1/admin/rate-limit/reset:
     post:
       summary: Reset rate limit counters
       description: |
@@ -158,7 +158,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/rate-limit/quota/{api_key}:
+  /v1/admin/rate-limit/quota/{api_key}:
     get:
       summary: Get quota usage for an API key
       description: |
@@ -198,7 +198,7 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/rate-limit/quota/{api_key}/reset:
+  /v1/admin/rate-limit/quota/{api_key}/reset:
     post:
       summary: Reset quota for an API key
       description: |
@@ -247,7 +247,7 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/rate-limit/quotas:
+  /v1/admin/rate-limit/quotas:
     get:
       summary: List all API key quotas
       description: |
@@ -282,7 +282,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalError"
-  /admin/rate-limit/quota/{api_key}/tier:
+  /v1/admin/rate-limit/quota/{api_key}/tier:
     put:
       summary: Update quota tier for an API key
       description: |

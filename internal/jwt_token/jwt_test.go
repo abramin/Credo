@@ -29,7 +29,7 @@ var jwtService = NewJWTService(
 
 func Test_GenerateAccessToken(t *testing.T) {
 	ctx := context.Background()
-	token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"})
+	token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"}, id.APIVersionV1)
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 	claims, err := jwtService.ValidateToken(token)
@@ -48,7 +48,7 @@ func Test_ValidateToken_InvalidToken(t *testing.T) {
 
 func Test_ValidateToken_ExpiredToken(t *testing.T) {
 	ctx := context.Background()
-	token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"})
+	token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"}, id.APIVersionV1)
 	time.Sleep(expiresIn + time.Second)
 	require.NoError(t, err)
 
@@ -58,7 +58,7 @@ func Test_ValidateToken_ExpiredToken(t *testing.T) {
 
 func Test_ValidateToken_ValidTokent(t *testing.T) {
 	ctx := context.Background()
-	token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"})
+	token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"}, id.APIVersionV1)
 	require.NoError(t, err)
 
 	claims, err := jwtService.ValidateToken(token)
@@ -117,7 +117,7 @@ func Test_ValidateToken_RejectsAlgorithmConfusion(t *testing.T) {
 
 func Test_GenerateIDToken(t *testing.T) {
 	ctx := context.Background()
-	token, err := jwtService.GenerateIDToken(ctx, userID, sessionID, clientID, tenantID)
+	token, err := jwtService.GenerateIDToken(ctx, userID, sessionID, clientID, tenantID, id.APIVersionV1)
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
 	claims, err := jwtService.ValidateIDToken(token)
@@ -131,7 +131,7 @@ func Test_GenerateIDToken(t *testing.T) {
 func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
 	ctx := context.Background()
 	t.Run("valid token", func(t *testing.T) {
-		token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"})
+		token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"}, id.APIVersionV1)
 		require.NoError(t, err)
 
 		claims, err := jwtService.ParseTokenSkipClaimsValidation(token)
@@ -143,7 +143,7 @@ func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
 	})
 
 	t.Run("expired token still parses", func(t *testing.T) {
-		token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"})
+		token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read", "write"}, id.APIVersionV1)
 		require.NoError(t, err)
 		time.Sleep(expiresIn + time.Second)
 
@@ -176,7 +176,7 @@ func Test_ParseTokenSkipClaimsValidation(t *testing.T) {
 			{
 				name: "invalid signature",
 				tokenFunc: func() string {
-					token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read"})
+					token, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read"}, id.APIVersionV1)
 					require.NoError(t, err)
 					return token
 				},
@@ -250,7 +250,7 @@ func Test_ValidateToken_RejectsInvalidIssuer(t *testing.T) {
 	ctx := context.Background()
 	// Create service with different issuer
 	otherService := NewJWTService("test-signing-key", "https://other.issuer.com", "test-audience", time.Hour)
-	token, err := otherService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read"})
+	token, err := otherService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"read"}, id.APIVersionV1)
 	require.NoError(t, err)
 
 	// Validate with original service (different issuer base URL)
@@ -262,7 +262,7 @@ func Test_ValidateToken_RejectsInvalidIssuer(t *testing.T) {
 
 func Test_GenerateAccessToken_RejectsEmptyScopes(t *testing.T) {
 	ctx := context.Background()
-	_, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{})
+	_, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{}, id.APIVersionV1)
 	require.Error(t, err)
 	assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
 	assert.Contains(t, err.Error(), "scopes cannot be empty")
@@ -270,7 +270,7 @@ func Test_GenerateAccessToken_RejectsEmptyScopes(t *testing.T) {
 
 func Test_GenerateAccessToken_RejectsNilScopes(t *testing.T) {
 	ctx := context.Background()
-	_, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, nil)
+	_, err := jwtService.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, nil, id.APIVersionV1)
 	require.Error(t, err)
 	assert.True(t, dErrors.HasCode(err, dErrors.CodeInvalidInput))
 	assert.Contains(t, err.Error(), "scopes cannot be empty")
@@ -283,7 +283,7 @@ func Test_PerTenantIssuerInToken(t *testing.T) {
 	expectedIssuer := "https://auth.example.com/tenants/" + testTenantID.String()
 
 	t.Run("access token has per-tenant issuer", func(t *testing.T) {
-		token, err := service.GenerateAccessToken(ctx, userID, sessionID, clientID, testTenantID, []string{"openid"})
+		token, err := service.GenerateAccessToken(ctx, userID, sessionID, clientID, testTenantID, []string{"openid"}, id.APIVersionV1)
 		require.NoError(t, err)
 
 		claims, err := service.ValidateToken(token)
@@ -294,7 +294,7 @@ func Test_PerTenantIssuerInToken(t *testing.T) {
 	})
 
 	t.Run("ID token has per-tenant issuer", func(t *testing.T) {
-		token, err := service.GenerateIDToken(ctx, userID, sessionID, clientID, testTenantID)
+		token, err := service.GenerateIDToken(ctx, userID, sessionID, clientID, testTenantID, id.APIVersionV1)
 		require.NoError(t, err)
 
 		claims, err := service.ValidateIDToken(token)
@@ -302,4 +302,95 @@ func Test_PerTenantIssuerInToken(t *testing.T) {
 
 		assert.Equal(t, expectedIssuer, claims.Issuer)
 	})
+}
+
+// Unit tests for AccessTokenClaims.APIVersion() extraction.
+// Justification: Parse function with multiple audience formats and backward compatibility.
+
+func Test_AccessTokenClaims_APIVersion(t *testing.T) {
+	t.Run("extracts version from versioned audience", func(t *testing.T) {
+		claims := &AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Audience: []string{"credo-client", "credo-client:v1"},
+			},
+		}
+		assert.Equal(t, id.APIVersionV1, claims.APIVersion())
+	})
+
+	t.Run("extracts version when versioned audience is first", func(t *testing.T) {
+		claims := &AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Audience: []string{"credo-client:v1", "credo-client"},
+			},
+		}
+		assert.Equal(t, id.APIVersionV1, claims.APIVersion())
+	})
+
+	t.Run("defaults to v1 for legacy token without version", func(t *testing.T) {
+		claims := &AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Audience: []string{"credo-client"},
+			},
+		}
+		assert.Equal(t, id.APIVersionV1, claims.APIVersion())
+	})
+
+	t.Run("defaults to v1 for empty audience", func(t *testing.T) {
+		claims := &AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Audience: []string{},
+			},
+		}
+		assert.Equal(t, id.APIVersionV1, claims.APIVersion())
+	})
+
+	t.Run("ignores malformed version suffix", func(t *testing.T) {
+		claims := &AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Audience: []string{"credo-client:invalid"},
+			},
+		}
+		// Falls back to v1 when no valid version found
+		assert.Equal(t, id.APIVersionV1, claims.APIVersion())
+	})
+
+	t.Run("ignores colon at end of audience", func(t *testing.T) {
+		claims := &AccessTokenClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Audience: []string{"credo-client:"},
+			},
+		}
+		assert.Equal(t, id.APIVersionV1, claims.APIVersion())
+	})
+}
+
+func Test_GenerateAccessToken_IncludesVersionedAudience(t *testing.T) {
+	ctx := context.Background()
+	service := NewJWTService("key", "https://auth.example.com", "credo-client", time.Hour)
+
+	token, err := service.GenerateAccessToken(ctx, userID, sessionID, clientID, tenantID, []string{"openid"}, id.APIVersionV1)
+	require.NoError(t, err)
+
+	claims, err := service.ValidateToken(token)
+	require.NoError(t, err)
+
+	// Should have both base audience and versioned audience
+	assert.Contains(t, claims.Audience, "credo-client")
+	assert.Contains(t, claims.Audience, "credo-client:v1")
+	assert.Equal(t, id.APIVersionV1, claims.APIVersion())
+}
+
+func Test_GenerateIDToken_IncludesVersionedAudience(t *testing.T) {
+	ctx := context.Background()
+	service := NewJWTService("key", "https://auth.example.com", "credo-client", time.Hour)
+
+	token, err := service.GenerateIDToken(ctx, userID, sessionID, clientID, tenantID, id.APIVersionV1)
+	require.NoError(t, err)
+
+	claims, err := service.ValidateIDToken(token)
+	require.NoError(t, err)
+
+	// Should have both base audience and versioned audience
+	assert.Contains(t, claims.Audience, "credo-client")
+	assert.Contains(t, claims.Audience, "credo-client:v1")
 }

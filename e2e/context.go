@@ -414,7 +414,7 @@ func (tc *TestContext) EnsureTestClient() error {
 		return fmt.Errorf("failed to marshal tenant request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", tc.BaseURL+"/admin/tenants", bytes.NewReader(tenantData))
+	req, err := http.NewRequestWithContext(context.Background(), "POST", tc.BaseURL+"/v1/admin/tenants", bytes.NewReader(tenantData))
 	if err != nil {
 		return fmt.Errorf("failed to create tenant request: %w", err)
 	}
@@ -461,7 +461,7 @@ func (tc *TestContext) EnsureTestClient() error {
 		return fmt.Errorf("failed to marshal client request: %w", err)
 	}
 
-	req, err = http.NewRequestWithContext(context.Background(), "POST", tc.BaseURL+"/admin/clients", bytes.NewReader(clientData))
+	req, err = http.NewRequestWithContext(context.Background(), "POST", tc.BaseURL+"/v1/admin/clients", bytes.NewReader(clientData))
 	if err != nil {
 		return fmt.Errorf("failed to create client request: %w", err)
 	}
