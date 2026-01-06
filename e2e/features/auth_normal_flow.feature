@@ -53,13 +53,13 @@ Feature: OAuth2 Authorization Code Flow - Normal Path
 
     @normal @validation
   Scenario: Authorization request validation - missing required fields
-    When I POST to "/auth/authorize" with empty body
+    When I POST to "/v1/auth/authorize" with empty body
     Then the response status should be 400
     And the response field "error" should equal "validation_error"
 
     @normal @validation
   Scenario: Authorization request validation - invalid email
-    When I POST to "/auth/authorize" with invalid email "not-an-email"
+    When I POST to "/v1/auth/authorize" with invalid email "not-an-email"
     Then the response status should be 400
     And the response field "error" should equal "validation_error"
 
@@ -72,7 +72,7 @@ Feature: OAuth2 Authorization Code Flow - Normal Path
 
     @normal @validation
   Scenario: Token exchange validation - invalid grant type
-    When I POST to "/auth/token" with grant_type "password"
+    When I POST to "/v1/auth/token" with grant_type "password"
     Then the response status should be 400
     And the response field "error" should equal "bad_request"
 
@@ -92,12 +92,12 @@ Feature: OAuth2 Authorization Code Flow - Normal Path
 
     @normal @validation
   Scenario: UserInfo endpoint - missing authorization header
-    When I GET "/auth/userinfo" without authorization
+    When I GET "/v1/auth/userinfo" without authorization
     Then the response status should be 401
     And the response field "error" should equal "unauthorized"
 
     @normal @validation
   Scenario: UserInfo endpoint - invalid bearer token
-    When I GET "/auth/userinfo" with invalid token "invalid-token-xyz"
+    When I GET "/v1/auth/userinfo" with invalid token "invalid-token-xyz"
     Then the response status should be 401
     And the response field "error" should equal "unauthorized"

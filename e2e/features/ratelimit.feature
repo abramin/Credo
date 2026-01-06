@@ -13,7 +13,7 @@ Feature: Rate Limiting & Abuse Prevention
 
   @ratelimit @ip @simulation
   Scenario: IP rate limit headers present in response (simulation)
-    When I make a request to "/auth/userinfo" with valid token
+    When I make a request to "/v1/auth/userinfo" with valid token
     Then the response should contain header "X-RateLimit-Limit"
     And the response should contain header "X-RateLimit-Remaining"
     And the response should contain header "X-RateLimit-Reset"
@@ -21,9 +21,9 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @ip @simulation
   Scenario: IP rate limit enforced on auth endpoint (10 req/min)
     Given I am making requests from IP "192.168.1.50"
-    When I make 10 requests to "/auth/authorize" within 1 minute
+    When I make 10 requests to "/v1/auth/authorize" within 1 minute
     Then all 10 requests should succeed with status 200
-    When I make the 11th request to "/auth/authorize"
+    When I make the 11th request to "/v1/auth/authorize"
     Then the response status should be 429
     And the response field "error" should equal "rate_limit_exceeded"
     And the response should contain header "Retry-After"
@@ -39,9 +39,9 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @ip @simulation
   Scenario: IP rate limit enforced on read endpoints (100 req/min)
     Given I am making requests from IP "192.168.1.52"
-    When I make 100 requests to "/auth/userinfo" within 1 minute
+    When I make 100 requests to "/v1/auth/userinfo" within 1 minute
     Then all 100 requests should succeed
-    When I make the 101st request to "/auth/userinfo"
+    When I make the 101st request to "/v1/auth/userinfo"
     Then the response status should be 429
 
   @ratelimit @ip @admin @simulation
@@ -56,9 +56,9 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @ip @simulation
   Scenario: Rate limit resets after window expires
     Given I am making requests from IP "192.168.1.53"
-    And I have exhausted the rate limit on "/auth/authorize"
+    And I have exhausted the rate limit on "/v1/auth/authorize"
     When I wait for the rate limit window to expire
-    And I make a request to "/auth/authorize"
+    And I make a request to "/v1/auth/authorize"
     Then the response status should be 200
 
   # ============================================================
@@ -158,7 +158,7 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @allowlist @simulation
   Scenario: Allowlisted IP bypasses rate limits
     Given IP "10.0.0.100" is on the allowlist
-    When I make 200 requests from IP "10.0.0.100" to "/auth/authorize"
+    When I make 200 requests from IP "10.0.0.100" to "/v1/auth/authorize"
     Then all 200 requests should succeed
     And no rate limit headers should indicate limit exceeded
 
@@ -225,7 +225,7 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @audit @simulation
   Scenario: Rate limit violation emits audit event
     Given I am making requests from IP "192.168.1.90"
-    When I exceed the rate limit on "/auth/authorize"
+    When I exceed the rate limit on "/v1/auth/authorize"
     Then the audit event "rate_limit_exceeded" should be emitted
     And the audit event should contain the IP address
     And the audit event should contain the endpoint class
@@ -259,7 +259,7 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @client @oauth @simulation
   Scenario: Confidential client gets higher rate limit (100 req/min)
     Given OAuth client "confidential-client" is registered as type "confidential"
-    When I make 100 requests to "/auth/token" as client "confidential-client" within 1 minute
+    When I make 100 requests to "/v1/auth/token" as client "confidential-client" within 1 minute
     Then all 100 requests should succeed
     When I make the 101st request
     Then the response status should be 429
@@ -268,7 +268,7 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @client @oauth @simulation
   Scenario: Public client gets lower rate limit (30 req/min)
     Given OAuth client "public-spa" is registered as type "public"
-    When I make 30 requests to "/auth/token" as client "public-spa" within 1 minute
+    When I make 30 requests to "/v1/auth/token" as client "public-spa" within 1 minute
     Then all 30 requests should succeed
     When I make the 31st request
     Then the response status should be 429
@@ -281,7 +281,7 @@ Feature: Rate Limiting & Abuse Prevention
   @ratelimit @failover @simulation
   Scenario: In-memory fallback activates when Redis unavailable
     Given Redis rate limiter is unavailable
-    When I make a request to "/auth/authorize"
+    When I make a request to "/v1/auth/authorize"
     Then the request should proceed with fallback rate limiting
     And the response should contain header "X-RateLimit-Status" with value "degraded"
 

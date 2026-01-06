@@ -61,7 +61,7 @@ Feature: Consent Management
 
       @consent @validation
   Scenario: Grant consent with empty purposes array
-    When I POST to "/auth/consent" with empty purposes array
+    When I POST to "/v1/auth/consent" with empty purposes array
     Then the response status should be 400
     And the response field "error" should equal "validation_error"
 
@@ -85,7 +85,7 @@ Feature: Consent Management
 
       @consent @validation
   Scenario: List consents without authentication
-    When I GET "/auth/consent" without authorization
+    When I GET "/v1/auth/consent" without authorization
     Then the response status should be 401
     And the response field "error" should equal "unauthorized"
 
@@ -238,7 +238,7 @@ Feature: Consent Management
 
       @consent @gdpr @validation
   Scenario: Delete all consents without authentication
-    When I DELETE "/auth/consent" without authorization
+    When I DELETE "/v1/auth/consent" without authorization
     Then the response status should be 401
     And the response field "error" should equal "unauthorized"
 
